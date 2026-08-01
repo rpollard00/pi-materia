@@ -10,6 +10,7 @@ import {
   cloneParallelRunState,
   parallelRunKey,
   recordParallelFanInProvenance,
+  recordParallelFinalization,
   transitionParallelRun,
   type ParallelFanInProvenanceTransitionInput,
   type ParallelLaneTransitionInput,
@@ -88,4 +89,28 @@ export function applyParallelFanInProvenanceToCastState(
 }
 
 export const applyParallelFanInResultToCastState = applyParallelFanInProvenanceToCastState;
-export type { ParallelFanInProvenanceTransitionInput } from "../domain/parallelRun.js";
+
+/** Apply the post-integration finalization result to a persisted cast snapshot. */
+export function applyParallelFinalizationToCastState(
+  state: MateriaCastState,
+  input: import("../domain/parallelRun.js").ParallelFinalizationTransitionInput,
+): CastParallelTransitionResult {
+  const expectedCast = input.parentCastId ?? input.castId;
+  if (expectedCast !== undefined && expectedCast !== state.castId) return { state, applied: false, reason: "cast_mismatch" };
+  const run = state.parallelRuns?.[parallelRunKey(input.loopId)];
+  if (!run) return { state, applied: false, reason: "run_mismatch" };
+  const result = recordParallelFinalization(run, { ...input, parentCastId: state.castId });
+  if (!result.applied) return { state, applied: false, reason: result.reason };
+  return {
+    state: {
+      ...state,
+      parallelRuns: { ...(state.parallelRuns ?? {}), [parallelRunKey(input.loopId)]: result.state },
+      awaitingResponse: false,
+      updatedAt: Math.max(state.updatedAt, result.state.updatedAt),
+    },
+    applied: true,
+  };
+}
+
+export const applyParallelFinalizationProvenanceToCastState = applyParallelFinalizationToCastState;
+export type { ParallelFanInProvenanceTransitionInput, ParallelFinalizationTransitionInput } from "../domain/parallelRun.js";

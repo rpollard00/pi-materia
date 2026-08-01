@@ -114,6 +114,7 @@ function bundledUtilityScriptPaths(): string[] {
     path.join(configDir, "commit-sigil.mjs"),
     path.join(configDir, "normalize-parallel-streams.mjs"),
     path.join(configDir, "parallel-lane-checkpoint.mjs"),
+    path.join(configDir, "parallel-finalize.mjs"),
     path.join(configDir, "detect-vcs.mjs"),
     path.join(configDir, "ensure-ignored.mjs"),
   ];

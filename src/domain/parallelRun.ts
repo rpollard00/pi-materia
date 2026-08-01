@@ -4,6 +4,7 @@ import type {
   MateriaParallelDiagnostic,
   MateriaParallelFanInPhase,
   MateriaParallelFanInProvenance,
+  MateriaParallelFinalizationProvenance,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
@@ -97,6 +98,11 @@ export interface ParallelRunPhaseTransitionInput extends ParallelRunGuard {
 
 export interface ParallelFanInProvenanceTransitionInput extends ParallelRunGuard {
   provenance: MateriaParallelFanInProvenance;
+  timestamp?: number;
+}
+
+export interface ParallelFinalizationTransitionInput extends ParallelRunGuard {
+  provenance: MateriaParallelFinalizationProvenance;
   timestamp?: number;
 }
 
@@ -363,6 +369,40 @@ export function recordParallelFanInProvenance(
 }
 
 export const applyParallelFanInProvenance = recordParallelFanInProvenance;
+
+/**
+ * Record the final evaluation/VCS boundary exactly once. A rejected
+ * evaluation remains retryable and deliberately leaves the coordinator in its
+ * evaluating/resolving phase; an accepted result closes the run.
+ */
+export function recordParallelFinalization(
+  state: MateriaParallelRunState,
+  input: ParallelFinalizationTransitionInput,
+): ParallelRunTransitionResult {
+  const guardFailure = runGuardFailureFor(state, input);
+  if (guardFailure) return ignored(state, guardFailure);
+  if (input.provenance.status === "completed" && (!input.provenance.evaluationAccepted || !input.provenance.conflictFree)) {
+    return ignored(state, "invalid_status_transition");
+  }
+  if (state.finalizationProvenance !== undefined) {
+    if (state.finalizationProvenance.status === "completed") return ignored(state, "fan_in_provenance_conflict");
+    if (input.provenance.status === "preserved" && JSON.stringify(state.finalizationProvenance) === JSON.stringify(input.provenance)) {
+      return { state, applied: false, reason: "fan_in_provenance_conflict" };
+    }
+  }
+  const timestamp = finiteTimestamp(input.timestamp, state.updatedAt);
+  const next = clone(state);
+  next.finalizationProvenance = clone(input.provenance);
+  next.updatedAt = Math.max(state.updatedAt, timestamp);
+  if (input.provenance.status === "completed") {
+    next.phase = "completed";
+    next.fanInPhase = "accepted";
+    next.endedAt = timestamp;
+  }
+  return { state: next, applied: true };
+}
+
+export const applyParallelFinalizationProvenance = recordParallelFinalization;
 
 export interface RestartParallelLaneInput extends ParallelTransitionGuard {
   timestamp?: number;

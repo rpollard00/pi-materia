@@ -28,6 +28,7 @@ export type {
   MateriaParallelFanInBehavior,
   MateriaParallelFanInHead,
   MateriaParallelFanInProvenance,
+  MateriaParallelFinalizationProvenance,
   MateriaParallelUsageTotals,
   MateriaParallelRunRecord,
   MateriaParallelLaneRecord,

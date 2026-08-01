@@ -1,7 +1,11 @@
 import { lstat, mkdir, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { MateriaParallelFanInHead, MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
+import type {
+  MateriaParallelFanInHead,
+  MateriaParallelFanInProvenance,
+  MateriaParallelFinalizationProvenance,
+} from "../domain/parallelRunTypes.js";
 import {
   assertAbsentOrDirectory,
   assertNoSymlinkAncestors,
@@ -177,6 +181,27 @@ export interface JjFanInInput {
 
 export interface JjFanInResult extends MateriaParallelFanInProvenance {
   /** True for a clean integration and false for a materialized conflict. */
+  satisfied: boolean;
+}
+
+export interface JjParallelFinalizeInput {
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  cwd: string;
+  repositoryRoot?: string;
+  /** The durable fan-in record, including every owned lane workspace. */
+  fanIn: MateriaParallelFanInProvenance;
+  /** Acceptance from the post-integration evaluator/resolver route. */
+  evaluationAccepted: boolean;
+  /** Bootstrap-owned bookmark. Finalization never invents a replacement. */
+  bookmarkName: string;
+  /** Optional deterministic description override for the integration revision. */
+  description?: string;
+}
+
+export interface JjParallelFinalizeResult extends MateriaParallelFinalizationProvenance {
+  /** True only when the bookmark, fresh parent working commit, and cleanup all succeeded. */
   satisfied: boolean;
 }
 
@@ -382,6 +407,159 @@ export class JjWorkspaceBackend {
   /** Alias for callers that name the operation createIntegrationRevision. */
   async createIntegrationRevision(input: JjFanInInput): Promise<JjFanInResult> {
     return this.fanIn(input);
+  }
+
+  /**
+   * Finalize an accepted clean/resolved integration.
+   *
+   * This is intentionally a separate boundary from fan-in. Evaluation failure
+   * returns a preserved result without touching the bookmark, parent working
+   * copy, or lane workspaces. Once accepted, the method verifies that jj no
+   * longer reports conflicts, describes the integration revision, advances the
+   * bootstrap-owned bookmark, moves the parent WC to a fresh empty child of the
+   * integration, and only then removes owned lane workspaces.
+   */
+  async finalize(input: JjParallelFinalizeInput): Promise<JjParallelFinalizeResult> {
+    validateParallelFinalizeInput(input);
+    const fanIn = input.fanIn;
+    const integration = fanIn.integrationRevision;
+    const now = this.#now();
+    const baseResult = {
+      version: 1 as const,
+      parentCastId: input.parentCastId,
+      loopId: input.loopId,
+      runId: input.runId,
+      evaluationAccepted: input.evaluationAccepted,
+      conflictFree: false,
+      ...(integration ? { integrationRevision: { ...integration } } : {}),
+      cleanedLaneIds: [] as string[],
+      finalizedAt: now,
+    };
+
+    if (!input.evaluationAccepted) {
+      return {
+        ...baseResult,
+        status: "preserved",
+        reason: "post-integration evaluation was not accepted",
+        satisfied: false,
+      };
+    }
+
+    if (!integration) {
+      throw new JjWorkspaceError("finalize_integration_missing", "Cannot finalize parallel work without an integration revision.");
+    }
+    if (!Array.isArray(fanIn.orderedHeads) || fanIn.orderedHeads.length === 0) {
+      throw new JjWorkspaceError("finalize_lanes_missing", "Parallel finalization requires at least one ordered lane head.");
+    }
+
+    return this.#withMutation(async () => {
+      const capability = await this.verifyRepository(input.repositoryRoot ?? input.cwd);
+      const parentBefore = await this.#readRevision(capability.repositoryRoot, "@");
+      const parentAtBaseline = sameRevision(parentBefore, fanIn.parentRevisionBefore) && sameRevision(parentBefore, fanIn.parentRevisionAfter);
+      const parentAtResolvedIntegration = fanIn.outcome === "conflict" && sameRevision(parentBefore, integration);
+      if (!parentAtBaseline && !parentAtResolvedIntegration) {
+        throw new JjWorkspaceError("finalize_parent_drift", "Parent working-copy revision drifted after fan-in; integration state was preserved.");
+      }
+      const parentStatus = await this.#run(["status"], capability.repositoryRoot);
+      this.#requireSuccess(parentStatus, ["status"], capability.repositoryRoot);
+      if (!isCleanJjStatus(parentStatus.stdout)) {
+        throw new JjWorkspaceError("finalize_parent_dirty", "Parent working copy is dirty; finalization refuses to rewrite it.");
+      }
+
+      // Validate every manifest before the first shared-repository mutation so
+      // a missing or foreign lane cannot lead to partial cleanup.
+      const manifests = new Map<string, JjWorkspaceManifest>();
+      for (const head of fanIn.orderedHeads) {
+        if (!head || typeof head.laneId !== "string" || !head.workspace || typeof head.workspace.workspacePath !== "string") {
+          throw new JjWorkspaceError("finalize_workspace_missing", "Parallel finalization lane provenance is missing an owned workspace.");
+        }
+        const workspace = head.workspace;
+        const key = path.resolve(workspace.workspacePath);
+        if (manifests.has(key)) continue;
+        const manifest = await this.#loadOwnedReference(workspace);
+        this.#validateManifestOwnership(manifest, {
+          owner: { parentCastId: input.parentCastId, loopId: input.loopId, laneId: head.laneId },
+          repositoryRoot: capability.repositoryRoot,
+          workspaceRoot: manifest.workspaceRoot,
+          workspacePath: manifest.workspacePath,
+        });
+        if (!sameRevision(manifest.baseline, fanIn.baseline)) {
+          throw new JjWorkspaceError("finalize_baseline_mismatch", `Lane ${JSON.stringify(head.laneId)} workspace is pinned to a different baseline.`);
+        }
+        manifests.set(key, manifest);
+      }
+
+      const details = await this.#readRevisionDetails(capability.repositoryRoot, integration.commitId);
+      if (!sameRevision(details, integration)) {
+        throw new JjWorkspaceError("finalize_integration_drift", "Integration revision identity changed before finalization.");
+      }
+      if (details.conflict) {
+        throw new JjWorkspaceError("finalize_conflicts_remaining", "Post-integration evaluation was accepted, but jj still reports conflicts on the integration revision.");
+      }
+
+      const description = input.description?.trim() || `parallel: integrate ${input.loopId} (${input.runId})`;
+      const describeArgs = ["describe", "-r", integration.commitId, "-m", description];
+      const described = await this.#run(describeArgs, capability.repositoryRoot);
+      this.#requireSuccess(described, describeArgs, capability.repositoryRoot);
+      // A jj description rewrite keeps the change id but produces a new commit
+      // id. Resolve through the stable change id after `describe`; the old
+      // commit id remains addressable as an abandoned predecessor and would
+      // otherwise send the bookmark and fresh parent to stale integration.
+      const describedRevision = await this.#readRevision(capability.repositoryRoot, integration.changeId);
+      if (describedRevision.changeId !== integration.changeId) {
+        throw new JjWorkspaceError("finalize_integration_drift", "Described integration revision could not be re-verified through its stable change id.");
+      }
+
+      await this.#setBookmark(input.bookmarkName, describedRevision.commitId, capability.repositoryRoot);
+      const bookmarked = await this.#readRevision(capability.repositoryRoot, input.bookmarkName);
+      if (!sameRevision(bookmarked, describedRevision)) {
+        throw new JjWorkspaceError("finalize_bookmark_mismatch", `Bootstrap-owned bookmark ${JSON.stringify(input.bookmarkName)} does not point at the described integration revision.`);
+      }
+
+      const newArgs = ["new", describedRevision.commitId];
+      const created = await this.#run(newArgs, capability.repositoryRoot, false);
+      this.#requireSuccess(created, newArgs, capability.repositoryRoot, false);
+      const parentWorkingRevision = await this.#readRevision(capability.repositoryRoot, "@");
+      const empty = await this.#run(["log", "-r", "@", "--no-graph", "-T", "empty"], capability.repositoryRoot, false);
+      this.#requireSuccess(empty, ["log", "-r", "@", "--no-graph", "-T", "empty"], capability.repositoryRoot, false);
+      if (empty.stdout.trim().toLowerCase() !== "true") {
+        throw new JjWorkspaceError("finalize_parent_not_empty", "jj new did not produce a verifiably empty parent working commit.");
+      }
+      const parentOfWorking = await this.#readRevision(capability.repositoryRoot, "@-", false);
+      if (!sameRevision(parentOfWorking, describedRevision)) {
+        throw new JjWorkspaceError("finalize_parent_wrong", "Fresh parent working commit does not descend directly from the described integration revision.");
+      }
+
+      const cleanedLaneIds: string[] = [];
+      for (const head of fanIn.orderedHeads) {
+        const key = path.resolve(head.workspace.workspacePath);
+        if (!manifests.has(key)) continue;
+        await this.#cleanupOwnedWorkspace(manifests.get(key)!);
+        cleanedLaneIds.push(head.laneId);
+        manifests.delete(key);
+      }
+      return {
+        ...baseResult,
+        conflictFree: true,
+        integrationRevision: describedRevision,
+        bookmarkName: input.bookmarkName,
+        parentWorkingRevision,
+        cleanedLaneIds,
+        status: "completed",
+        description,
+        finalizedAt: this.#now(),
+        satisfied: true,
+      };
+    });
+  }
+
+  /** Naming aliases for callers that use integration/coordinator terminology. */
+  async finalizeParallelRun(input: JjParallelFinalizeInput): Promise<JjParallelFinalizeResult> {
+    return this.finalize(input);
+  }
+
+  async finalizeIntegration(input: JjParallelFinalizeInput): Promise<JjParallelFinalizeResult> {
+    return this.finalize(input);
   }
 
   /**
@@ -658,6 +836,31 @@ export class JjWorkspaceBackend {
     };
   }
 
+  /** Cleanup implementation used by finalize while its mutation lock is held. */
+  async #cleanupOwnedWorkspace(manifest: JjWorkspaceManifest): Promise<void> {
+    const manifestPath = manifestPathFor(manifest.workspaceRoot, manifest.workspaceName);
+    let current = manifest;
+    const inspection = current.state === "forgotten"
+      ? { tracked: false }
+      : await this.#inspectLoaded(current);
+    if (inspection.tracked) {
+      const forgetArgs = ["workspace", "forget", current.workspaceName];
+      const forgotten = await this.#run(forgetArgs, current.repositoryRoot);
+      this.#requireSuccess(forgotten, forgetArgs, current.repositoryRoot);
+      current = {
+        ...current,
+        state: "forgotten",
+        forgottenAt: current.forgottenAt ?? this.#now(),
+        forgetOperationId: forgotten.operationId ?? await this.#latestOperationId(current.repositoryRoot),
+        updatedAt: this.#now(),
+      };
+      await writeJsonAtomically(manifestPath, current);
+    }
+    await this.#assertSafeWorkspacePath(current.workspacePath, current.workspaceRoot);
+    await removeOwnedDirectory(current.workspacePath, current.workspaceRoot);
+    await removeOwnedManifest(manifestPath, current.workspaceRoot);
+  }
+
   async #prepareWorkspaceRoot(requestedRoot: string, repositoryRoot: string): Promise<string> {
     const root = path.resolve(requestedRoot);
     if (samePath(root, repositoryRoot) || isWithin(repositoryRoot, root) || isWithin(root, repositoryRoot)) {
@@ -791,9 +994,9 @@ export class JjWorkspaceBackend {
     return details;
   }
 
-  async #readRevision(cwd: string, revset: string): Promise<JjRevisionIdentity> {
+  async #readRevision(cwd: string, revset: string, ignoreWorkingCopy = true): Promise<JjRevisionIdentity> {
     const args = ["log", "-r", revset, "--no-graph", "-T", REVISION_TEMPLATE];
-    const result = await this.#run(args, cwd);
+    const result = await this.#run(args, cwd, ignoreWorkingCopy);
     this.#requireSuccess(result, args, cwd);
     const line = result.stdout.trim().split(/\r?\n/).map((value) => value.trim()).find(Boolean);
     const [commitId, changeId] = line?.split("\t") ?? [];
@@ -826,6 +1029,18 @@ export class JjWorkspaceBackend {
     if (result.exitCode !== 0) return;
   }
 
+  async #setBookmark(bookmarkName: string, revision: string, repositoryRoot: string): Promise<void> {
+    const setArgs = ["bookmark", "set", bookmarkName, "--revision", revision];
+    const set = await this.#run(setArgs, repositoryRoot);
+    if (set.exitCode === 0) return;
+    const createArgs = ["bookmark", "create", bookmarkName, "--revision", revision];
+    const created = await this.#run(createArgs, repositoryRoot);
+    if (created.exitCode === 0) return;
+    const moveArgs = ["bookmark", "move", bookmarkName, "--to", revision];
+    const moved = await this.#run(moveArgs, repositoryRoot);
+    this.#requireSuccess(moved, moveArgs, repositoryRoot);
+  }
+
   async #run(args: readonly string[], cwd: string, ignoreWorkingCopy = true): Promise<JjCommandResult> {
     return this.#command({ executable: this.#executable, args: [...(ignoreWorkingCopy ? ["--ignore-working-copy"] : []), ...args], cwd });
   }
@@ -851,6 +1066,29 @@ interface RevisionDetails {
   parents: string[];
   conflict: boolean;
   conflictedPaths: string[];
+}
+
+function validateParallelFinalizeInput(input: JjParallelFinalizeInput): void {
+  for (const [key, value] of Object.entries(input)) {
+    if (["fanIn", "evaluationAccepted", "description"].includes(key) || value === undefined) continue;
+    if (typeof value !== "string" || value.trim().length === 0) {
+      throw new JjWorkspaceError("finalize_input_invalid", `Parallel finalization ${key} must be a non-empty string.`);
+    }
+  }
+  if (!input.fanIn || typeof input.fanIn !== "object") throw new JjWorkspaceError("finalize_fan_in_invalid", "Parallel finalization requires durable fan-in provenance.");
+  if (typeof input.evaluationAccepted !== "boolean") throw new JjWorkspaceError("finalize_evaluation_invalid", "Parallel finalization evaluationAccepted must be boolean.");
+  if (!input.bookmarkName || input.bookmarkName.trim() !== input.bookmarkName || input.bookmarkName.includes("..") || input.bookmarkName.includes("@{") || [...input.bookmarkName].some((character) => character.trim().length === 0 || "~^:?*[]\\\\".includes(character))) {
+    throw new JjWorkspaceError("finalize_bookmark_invalid", "Parallel finalization bookmarkName is not a valid jj bookmark name.");
+  }
+  if (input.fanIn.parentCastId !== input.parentCastId || input.fanIn.loopId !== input.loopId || input.fanIn.runId !== input.runId) {
+    throw new JjWorkspaceError("finalize_identity_mismatch", "Parallel finalization identity does not match fan-in provenance.");
+  }
+  if (input.fanIn.version !== 1 || (input.fanIn.outcome !== "clean" && input.fanIn.outcome !== "conflict")) {
+    throw new JjWorkspaceError("finalize_fan_in_invalid", "Parallel finalization fan-in provenance has an unsupported version or outcome.");
+  }
+  if (!isRevision(input.fanIn.baseline) || !isRevision(input.fanIn.parentRevisionBefore) || !isRevision(input.fanIn.parentRevisionAfter) || (input.fanIn.integrationRevision !== undefined && !isRevision(input.fanIn.integrationRevision))) {
+    throw new JjWorkspaceError("finalize_fan_in_invalid", "Parallel finalization fan-in provenance has invalid parent or baseline revisions.");
+  }
 }
 
 function validateFanInInput(input: JjFanInInput): void {

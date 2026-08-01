@@ -941,6 +941,7 @@ describe("config loadouts", () => {
       ["Commit-Sigil", "json"],
       ["Normalize-Parallel-Streams", "json"],
       ["Parallel-Lane-Checkpoint", "json"],
+      ["Parallel-Finalize", "json"],
       ["Auto-Architect", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],

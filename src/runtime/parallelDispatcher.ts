@@ -19,12 +19,13 @@ import { addUsage } from "../telemetry/usage.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
 import {
   applyParallelFanInProvenanceToCastState,
+  applyParallelFinalizationToCastState,
   applyParallelRunPhaseTransition,
   applyParallelTransitionToCastState,
   attachParallelRunToCastState,
   createParallelRunState,
 } from "./parallelCoordinatorState.js";
-import type { MateriaCastState, MateriaLoopParallelConfig, MateriaParallelRunState, MateriaParallelUsageTotals, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaCastState, MateriaLoopParallelConfig, MateriaParallelFinalizationProvenance, MateriaParallelRunState, MateriaParallelUsageTotals, ResolvedMateriaSocket } from "../types.js";
 import {
   boundedParallelContext,
   childCastIdentity,
@@ -83,6 +84,15 @@ export interface ParallelLoopDispatchInput {
   onFanIn?: (input: ParallelFanInCompletionInput) => Promise<void>;
   /** Turn an all-terminal coordinator failure into a parent cast failure. */
   onFailure?: (input: ParallelRunFailureInput) => Promise<void>;
+}
+
+export interface ParallelLoopFinalizationInput {
+  pi: ExtensionAPI;
+  state: MateriaCastState;
+  loopId: string;
+  evaluationAccepted: boolean;
+  bookmarkName: string;
+  description?: string;
 }
 
 export interface ParallelLoopCancellationInput {
@@ -367,6 +377,58 @@ export class ParallelLoopDispatcher {
   /** Return the run currently owned by this dispatcher, if any. */
   get run(): MateriaParallelRunState | undefined {
     return this.#run;
+  }
+
+  /**
+   * Apply the explicit post-integration evaluation/VCS boundary.
+   *
+   * The workspace adapter owns jj mutation and cleanup; this method only
+   * supplies durable provenance and records the guarded result in cast state.
+   * A rejected evaluation is retained as a retryable preserved result.
+   */
+  async finalize(input: ParallelLoopFinalizationInput): Promise<boolean> {
+    const run = input.state.parallelRuns?.[input.loopId] ?? (this.#run?.loopId === input.loopId ? this.#run : undefined);
+    if (!run) throw new Error(`No parallel run exists for loop ${JSON.stringify(input.loopId)}.`);
+    if (!run.fanInProvenance) throw new Error(`Parallel run ${JSON.stringify(run.runId)} has no fan-in provenance to finalize.`);
+    const finalize = this.#deps.workspaces.finalize;
+    if (!finalize) throw new Error("No jj parallel finalization backend is configured.");
+    const result = await finalize({
+      parentCastId: input.state.castId,
+      loopId: input.loopId,
+      runId: run.runId,
+      cwd: input.state.cwd,
+      repositoryRoot: this.#repositoryRoot ?? input.state.cwd,
+      fanIn: run.fanInProvenance,
+      evaluationAccepted: input.evaluationAccepted,
+      bookmarkName: input.bookmarkName,
+      ...(input.description !== undefined ? { description: input.description } : {}),
+    });
+    const { satisfied: _satisfied, ...resultProvenance } = result;
+    const provenance: MateriaParallelFinalizationProvenance = resultProvenance;
+    const applied = applyParallelFinalizationToCastState(input.state, {
+      parentCastId: input.state.castId,
+      loopId: input.loopId,
+      runId: run.runId,
+      provenance,
+      timestamp: result.finalizedAt,
+    });
+    if (applied.applied) {
+      replaceState(input.state, applied.state);
+      this.#run = input.state.parallelRuns?.[input.loopId];
+      this.#deps.state.saveCastState(input.pi, input.state);
+    }
+    await this.#appendEvent(input.state, result.satisfied ? "parallel_finalized" : "parallel_finalization_preserved", {
+      parentCastId: input.state.castId,
+      loopId: input.loopId,
+      runId: run.runId,
+      satisfied: result.satisfied,
+      integrationRevision: result.integrationRevision,
+      bookmarkName: result.bookmarkName,
+      parentWorkingRevision: result.parentWorkingRevision,
+      cleanedLaneIds: result.cleanedLaneIds,
+      reason: result.reason,
+    });
+    return result.satisfied;
   }
 
   /**

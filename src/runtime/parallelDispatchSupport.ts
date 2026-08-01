@@ -3,6 +3,8 @@ import type { HandoffWorkItem } from "../domain/handoff.js";
 import type { ParallelFanInResult } from "../domain/parallelFanIn.js";
 import type {
   MateriaCastState,
+  MateriaParallelFanInProvenance,
+  MateriaParallelFinalizationProvenance,
   MateriaParallelRevisionIdentity,
   MateriaParallelRunState,
   MateriaParallelUsageTotals,
@@ -74,6 +76,18 @@ export interface ParallelWorkspacePort {
       workspace?: MateriaParallelWorkspaceOwnership;
     }[];
   }): Promise<ParallelFanInResult>;
+  /** Finalize an evaluator-approved integration and clean owned lane workspaces. */
+  finalize?(input: {
+    parentCastId: string;
+    loopId: string;
+    runId: string;
+    cwd: string;
+    repositoryRoot: string;
+    fanIn: MateriaParallelFanInProvenance;
+    evaluationAccepted: boolean;
+    bookmarkName: string;
+    description?: string;
+  }): Promise<MateriaParallelFinalizationProvenance & { satisfied: boolean }>;
 }
 
 export function readNormalizedParallelPlan(state: MateriaCastState, pathValue: string): NormalizedParallelPlan {

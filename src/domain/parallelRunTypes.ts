@@ -35,6 +35,24 @@ export interface MateriaParallelFanInProvenance {
   completedAt: number;
 }
 
+/** Durable provenance for the post-integration evaluation/finalization gate. */
+export interface MateriaParallelFinalizationProvenance {
+  version: 1;
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  evaluationAccepted: boolean;
+  conflictFree: boolean;
+  integrationRevision?: MateriaParallelRevisionIdentity;
+  bookmarkName?: string;
+  parentWorkingRevision?: MateriaParallelRevisionIdentity;
+  cleanedLaneIds: string[];
+  status: "completed" | "preserved";
+  reason?: string;
+  description?: string;
+  finalizedAt: number;
+}
+
 /** The normalized plan identity pinned for one parallel run. */
 export interface MateriaParallelPlanIdentity {
   version: number;
@@ -172,6 +190,8 @@ export interface MateriaParallelRunState {
   fanIn: MateriaParallelFanInBehavior;
   /** Durable provenance from the explicit successful-lanes fan-in boundary. */
   fanInProvenance?: MateriaParallelFanInProvenance;
+  /** Durable result of the post-integration evaluation/finalization gate. */
+  finalizationProvenance?: MateriaParallelFinalizationProvenance;
   phase: MateriaParallelRunPhase;
   fanInPhase: MateriaParallelFanInPhase;
   lanes: Record<string, MateriaParallelLaneState>;
