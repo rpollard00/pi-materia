@@ -676,6 +676,20 @@
         "runtime": "node"
       }
     },
+    "Parallel-Lane-Checkpoint": {
+      "type": "utility",
+      "label": "Parallel-Lane-Checkpoint",
+      "description": "Deterministically checkpoint meaningful work inside one jj lane workspace without moving parent or shared bookmarks, then open a fresh empty commit for the next stream item.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "parallelSafe": true,
+      "script": {
+        "kind": "shippedUtility",
+        "name": "parallel-lane-checkpoint.mjs",
+        "runtime": "node"
+      }
+    },
     "Chain-Context": {
       "type": "agent",
       "tools": "readOnly",
