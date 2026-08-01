@@ -4,4 +4,5 @@ export * from "./centralConnectedConfigRepository.js";
 export * from "./centralConnectedModelPolicyResolver.js";
 export * from "./centralConnectedTelemetrySink.js";
 export * from "./localControlPlane/index.js";
+export * from "./piChildCastRunner.js";
 export * from "./questBoardRepository.js";

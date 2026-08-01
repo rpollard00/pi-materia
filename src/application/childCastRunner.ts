@@ -129,6 +129,26 @@ export interface StartChildCastInput {
   attempt?: number;
 }
 
+/**
+ * File-backed handoff consumed by an isolated Pi process.
+ *
+ * Keeping the request and compiled graph in a file means a lane launch never
+ * places user-controlled prompt or graph data in argv. The file is an
+ * implementation-neutral DTO so the infrastructure adapter and the Pi
+ * extension can agree on the launch protocol without sharing runtime objects.
+ */
+export interface ChildCastLaunchSpec {
+  version: 1;
+  identity: ChildCastIdentity;
+  request: string;
+  cwd: string;
+  compiledLoadout: ChildCastCompiledLoadout;
+  paths: ChildCastPaths;
+  attempt: number;
+  /** Explicit config generated for the child, when one is required. */
+  configPath?: string;
+}
+
 export interface ChildCastStartResult {
   childCastId: string;
   snapshot: ChildCastSnapshot;

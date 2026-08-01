@@ -13,6 +13,7 @@ import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
+import { runChildCastLaunch } from "./runtime/childCastLaunch.js";
 import { handleAgentSettled, saveCastState } from "./castRuntime.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
 import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
@@ -182,6 +183,23 @@ export default function piMateria(pi: ExtensionAPI) {
       activeContext = ctx;
       const trimmedArgs = args.trimStart();
       const [subcommand, ...rest] = trimmedArgs.trim().split(/\s+/).filter(Boolean);
+
+      // Isolated lane processes use a fixed, file-backed command. Handle it
+      // before ordinary command waiting so the launch spec, rather than argv,
+      // carries the request and compiled child graph.
+      if (subcommand === "child") {
+        if (rest.length !== 1) {
+          ctx.ui.notify("Usage: /materia child <launch-spec.json>", "error");
+          return;
+        }
+        try {
+          await runChildCastLaunch(pi, ctx, adapters, rest[0]!);
+        } catch (error) {
+          ctx.ui.notify(`pi-materia child failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+          throw error;
+        }
+        return;
+      }
 
       if (subcommand === "quest") {
         const questArgs = trimmedArgs.replace(/^quest(?:\s+|$)/, "");
