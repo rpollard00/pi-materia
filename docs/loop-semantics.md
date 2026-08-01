@@ -59,3 +59,12 @@ If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and th
 ```
 
 A final satisfied item routes to `Socket-7`; otherwise the loop terminates at `end` unless another matching route is configured.
+
+## Workflow safety in loops
+
+Loop iteration is bounded by resource-scoped safety rules, not by cumulative visit or edge counters. See [Workflow safety and resource limits](workflow-safety.md) for the full model; the loop-relevant rules are:
+
+- **Retries are per item.** An explicit `edge.maxTraversals` is a retry budget scoped by edge and the current work-item identity (`from->to@<itemKey>`). Retries consumed by one work item never reduce another item's allowance on the same edge, so a 30-item loop where every item legitimately revisits a socket succeeds independently of how many times other items traversed the same edge. Edges without an explicit `maxTraversals` are unbounded.
+- **No-advance protection is progress-aware.** `limits.maxNoAdvanceCycles` (default 3) guards only unannotated stalled cycles for the **current** item and resets immediately when the cursor or item advances. Re-entry via an explicit retry edge uses that edge's per-item budget and does not advance the structural counter.
+- **Counters are diagnostic.** `state.visits` and aggregate `state.edgeTraversals` continue to record for artifact identity and telemetry but never fail execution; legacy `maxSocketVisits`, `maxVisits`, and `maxEdgeTraversals` fields are accepted but ignored.
+- **Token budget is operator-controlled.** The cast hard-stops at `budget.maxTokens`; the runtime never raises it automatically. Use `/materia budget <tokens>` to adjust a cast's limit.

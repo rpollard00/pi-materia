@@ -21,9 +21,12 @@ Schema handling is an edge concern: external JSON loadouts must use `sockets` an
 
 - `sockets` is canonical for core/domain/application code and loadout JSON.
 - `currentSocketId`, `currentSocketState`, `socketState`, `socketId`, `bySocket`, `socket_*` event/artifact kinds, and `sockets/` artifact paths are canonical runtime/persistence names.
-- `maxSocketVisits` is canonical for socket visit limits.
+- `visits` and aggregate `edgeTraversals` are canonical diagnostic counters: they are incremented for artifact identity, provenance, telemetry, and diagnostics but are never enforced.
+- `scopedEdgeRetries` and `edgeAllowances` (keyed by edge-and-work-item identity via `scopedEdgeRetryKey`) and `noAdvanceCycles` (progress-aware tracker reset on cursor/item advancement) are canonical runtime state for the enforced safety model: explicit per-item `edge.maxTraversals` retry budgets and `limits.maxNoAdvanceCycles` structural protection. Legacy `maxSocketVisits`, `maxVisits`, and `maxEdgeTraversals` fields are load-compatible but deprecated, ignored, and omitted from runtime summaries.
 - Generated units of work are `workItems`. Older task wording in prompts or adapter metadata must not become a runtime output alias.
 - Do not add public domain/application APIs with non-socket topology terminology.
+
+See [Workflow safety and resource limits](workflow-safety.md) for the enforced-versus-diagnostic distinction.
 
 ## Root surface and import policy
 

@@ -149,6 +149,8 @@ Graph edge conditions use canonical condition names, not JSONPath expressions:
 
 At runtime, `when: "satisfied"` matches only `{ "satisfied": true }`, `when: "not_satisfied"` matches only `{ "satisfied": false }`, and `when: "always"` is unconditional. `advance.when` uses the same canonical conditions.
 
+`maxTraversals` is an explicit per-item retry budget scoped by edge and the current work-item identity; edges without it are unbounded, and aggregate traversal counters are diagnostic-only. See [Workflow safety and resource limits](workflow-safety.md).
+
 ## Planner example
 
 ```json

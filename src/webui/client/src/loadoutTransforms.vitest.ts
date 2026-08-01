@@ -159,4 +159,16 @@ describe('immutable loadout transforms', () => {
     expect(analysis.loopConsumerSources.get('work')?.from).toBe('Socket-5');
     expect(previous.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-3' }]);
   });
+
+  it('preserves explicit maxTraversals on the always edge moved to the inserted socket', () => {
+    const withBudget = baseLoadout();
+    withBudget.sockets!['Socket-1'].edges = [{ when: 'always', to: 'Socket-2', maxTraversals: 3 }];
+    const previous = deepFreeze(withBudget);
+
+    const next = createConnectedEmptySocket(previous, 'Socket-1');
+
+    expect(next.sockets?.['Socket-5'].edges).toEqual([{ when: 'always', to: 'Socket-2', maxTraversals: 3 }]);
+    expect(next.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-5' }]);
+    expect(previous.sockets?.['Socket-1'].edges).toEqual([{ when: 'always', to: 'Socket-2', maxTraversals: 3 }]);
+  });
 });

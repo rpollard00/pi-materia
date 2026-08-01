@@ -166,7 +166,7 @@ The two commands serve different purposes and are not interchangeable.
 | Aspect | `/materia recast` | `/materia revive` |
 |---|---|---|
 | **Purpose** | Re-send the same prompt to the same socket. | Restore a failed/aborted cast to active state without necessarily re-sending a prompt. |
-| **When to use** | The cast failed with no exhaustion metadata (ordinary failure). | The cast has exhaustion metadata (same-socket recovery exhausted, edge traversal exhausted) or you want a passive restore. |
+| **When to use** | The cast failed with no exhaustion metadata (ordinary failure). | The cast has exhaustion metadata (same-socket recovery exhausted, explicit retry edge exhausted) or you want a passive restore. |
 | **Active prompt** | Reuses `state.activeTurnPrompt` when available to re-send the same prompt; otherwise re-starts the socket. | Passive path: does NOT dispatch inference; just normalizes state and waits for a nudge. Exhaustion paths: may advance to a blocked target or resume from exhausted socket. |
 | **Attempt increment** | Does not exist for recast (same prompt, same socket). | Does not increment attempts. |
 | **Event emitted** | `cast_recast` | `cast_revive` (with kind: "passive", "edge_traversal", or "same_socket_recovery") |
@@ -232,20 +232,30 @@ Any failed/aborted cast qualifies for passive revival as long as:
 
 ## 5. Exhaustion-Extending Revival
 
-### 5.1 Edge Traversal Exhaustion
+### 5.1 Explicit Retry Edge Exhaustion
 
-When a cast failed because it exhausted the edge-traversal allowance (too many
-loop iterations between two sockets), `reviveNativeCast` runs the
-**edge_traversal** path:
+When a cast failed because an **explicit per-item retry edge** (`edge.maxTraversals`)
+exhausted its scoped allowance, `reviveNativeCast` runs the **edge_traversal** path:
 
-1. Calls `extendEdgeTraversalAllowanceForRevive` to increment the allowance.
+1. Calls `extendEdgeTraversalAllowanceForRevive` to extend **only the exhausted
+   work item's** scoped allowance (`from->to@<itemKey>`) by its original
+   configured limit. Other work items' allowances on the same edge are
+   unaffected. Legacy persisted exhaustion metadata whose allowance was stored
+   under the aggregate `from->to` key remains readable as a fallback.
 2. Records `cast_revive` with exhaustion metadata.
 3. Clears failure markers and advances directly to the **blocked target**
    socket instead of resending the completed source socket prompt.
 4. Starts the blocked target socket, which may dispatch a prompt.
 
-This is useful for loops that legitimately need more iterations before
-reaching an exit condition.
+This is useful for loops that legitimately need more iterations of one work
+item before reaching an exit condition. Ordinary edges without an explicit
+`maxTraversals` are unbounded and never produce this exhaustion; aggregate
+`state.edgeTraversals` counts are diagnostic-only.
+
+No-advance cycle exhaustion (`limits.maxNoAdvanceCycles`, the structural
+fallback for unannotated stalled loops) is an ordinary cast failure without
+structured exhaustion metadata — correct the loop structure and use
+`/materia recast`, not revive. See [Workflow safety and resource limits](workflow-safety.md).
 
 ### 5.2 Same-Socket Recovery Exhaustion
 

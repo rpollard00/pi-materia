@@ -196,7 +196,7 @@ Run `/materia quest run` after reviving to consume the queued quest.
 | JSON parse / handoff validation error | Same-socket retry (up to allowance) | `/materia revive` if exhausted |
 | Tool timeout | Same-socket retry with timeout hint | `/materia revive` if exhausted |
 | Context window exceeded | Compaction + same-socket retry | `/materia revive` if exhausted |
-| Edge traversal exhausted | Cast failed with exhaustion metadata | `/materia revive` — extends allowance, advances to blocked target |
+| Edge traversal exhausted | Cast failed because an explicit retry edge (`edge.maxTraversals`) exhausted its per-item budget | `/materia revive` — extends only that work item's scoped allowance, advances to blocked target |
 | Ordinary failure (no exhaustion) | Cast failed with `failedReason` | `/materia recast` (re-send prompt) or `/materia revive` (passive, no prompt)
 
 ### Customize your pipelines
@@ -208,6 +208,7 @@ Loadout and materia configuration is layered JSON (defaults → user profile →
 - [Finalization configuration and migration](docs/finalization-configuration.md) — direct JSON, qualified tool-backed submission, fallback, and rollout guidance
 - [Graph semantics](docs/graph-semantics.md) — edge conditions, branching, loops, and structured iteration
 - [Loop semantics](docs/loop-semantics.md) — generator-driven loop configuration and exit routing
+- [Workflow safety and resource limits](docs/workflow-safety.md) — operator-controlled `maxTokens`, per-invocation utility timeouts, per-item explicit retry `maxTraversals`, progress-aware no-advance protection, and diagnostic-only counters
 - [Utility materia](docs/utility-materia.md) — deterministic pre/post-processing sockets (no LLM turn)
 - [Loadout ownership & locking](docs/loadout-ownership-locking.md) — how defaults, duplicates, and locking work
 
@@ -383,7 +384,7 @@ Configure the token warning threshold and hard limit with the top-level `budget`
 }
 ```
 
-`maxTokens` and `warnAtPercent` are evaluated from the cast's token usage only. A warning is emitted when `usage.tokens.total` reaches the configured percentage, and the cast always hard-stops when `usage.tokens.total` reaches or exceeds `maxTokens`. There are no monetary or soft-stop budget controls; cost values are retained as usage telemetry only.
+`maxTokens` and `warnAtPercent` are evaluated from the cast's token usage only. A warning is emitted when `usage.tokens.total` reaches the configured percentage, and the cast always hard-stops when `usage.tokens.total` reaches or exceeds `maxTokens`. `maxTokens` is an operator-controlled hard limit: the runtime never raises it automatically, so long workflows are supported by unbounded ordinary traversal rather than automatic budget scaling. There are no monetary or soft-stop budget controls; cost values are retained as usage telemetry only.
 
 `/materia budget` reads the active cast, or the latest resumable failed/aborted cast when there is no active cast. `/materia budget <tokens>` persists a cast-local limit without rewriting source configuration or automatically recasting. Values must be non-negative safe whole numbers and cannot be below the selected cast's consumed token count.
 

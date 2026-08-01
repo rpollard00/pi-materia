@@ -67,7 +67,7 @@ PI_MATERIA_PROFILE_DIR=$(mktemp -d) pi -e /path/to/pi-materia/src/index.ts
 1. Add a new socket and save; confirm existing sockets keep their previous layout.
 2. Insert a socket between two connected sockets and confirm the surrounding edge path is rewired through the inserted socket.
 3. Add or change `satisfied` and `not_satisfied` branches.
-4. Tweak retry/visit limits and save; confirm unrelated graph metadata such as `insertedBy`, `inserted`, and `layout` remains intact.
+4. Tweak a socket's `maxOutputBytes` limit (the socket property editor exposes only `maxOutputBytes` and layout coordinates — max-visit and edge-traversal controls are removed), then save; confirm unrelated graph metadata such as `insertedBy`, `inserted`, and `layout` remains intact. Editing `maxOutputBytes` rewrites the socket's `limits` object, so legacy `maxVisits`/`maxEdgeTraversals` keys on loaded sockets are dropped on such saves (they are deprecated and ignored); layout-only edits leave `limits` untouched and legacy keys intact. Edge `maxTraversals` has no WebUI editor and is preserved verbatim through transforms and saves.
 
 ## Graph layout regression checks
 

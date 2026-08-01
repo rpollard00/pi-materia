@@ -22,6 +22,16 @@ Edges are evaluated in order and the first matching edge wins. Put guarded edges
 
 `not_satisfied` is generic graph control meaning the current item needs follow-up at the selected target. It is not evaluator-only terminology. When a `satisfied:false` result selects a `not_satisfied` edge, runtime captures bounded source/reason provenance and renders it into the next matching prompt as follow-up/rework context; agents still emit only canonical handoff fields. See [Socket rework context semantics](socket-rework-context.md).
 
+## Edge traversal and retry budgets
+
+An edge may configure an explicit per-item retry budget with `maxTraversals`:
+
+```json
+{ "when": "not_satisfied", "to": "Build", "maxTraversals": 3 }
+```
+
+`maxTraversals` is the only enforced traversal budget. It is scoped by edge and the current work-item identity, so one work item's retries never reduce another item's allowance on the same edge; outside item loops the scope is the singleton edge identity. Edges without `maxTraversals` are unbounded — there is no implicit cumulative cap and no hardcoded fallback limit. Aggregate `from->to` counts (`state.edgeTraversals`) always record for diagnostics and telemetry but are never enforced. See [Workflow safety and resource limits](workflow-safety.md).
+
 ## Output parsing and control fields
 
 `parse` is the persisted output parsing field for loadout sockets. Use `parse: "json"` for sockets whose output feeds `assign`, `advance`, or guarded routing. Use `parse: "text"` or omit `parse` only for plain-text outputs.

@@ -41,9 +41,10 @@ Important TypeScript interfaces are in `src/types.ts`:
 - `MateriaPipelineConfig`: `{ entry, sockets }`.
 - `MateriaPipelineSocketConfig`: `materia`, plus graph placement/routing fields.
 - Socket behavior is determined by the referenced top-level materia definition. Socket-local `type`, `utility`, `command`, `script`, `params`, and `timeoutMs` are not canonical WebUI output.
-- Common routing/editable graph fields: `edges`, `foreach`, `advance`, and `limits`; generator normalization may materialize parse/assignment internally, but authored utility behavior belongs on top-level utility materia.
-- `MateriaEdgeConfig`: `when`, `to`, `maxTraversals`.
+- Common routing/editable graph fields: `edges`, `foreach`, `advance`, and socket `limits`; generator normalization may materialize parse/assignment internally, but authored utility behavior belongs on top-level utility materia.
+- `MateriaEdgeConfig`: `when`, `to`, `maxTraversals` (explicit per-item retry budget, preserved through transforms and saves).
 - `MateriaConfig`: discriminated agent or utility materia. Agent materia configure `tools`, `prompt`, optional `model`, optional `thinking`, and optional `multiTurn`; utility materia configure `script`/`command` behavior, params, parse/assign defaults, label/group/color, timeout, and optional generator metadata.
+- Socket `limits` keeps legacy `maxVisits` / `maxEdgeTraversals` keys only when the editor does not rewrite `limits`: layout-only edits leave them untouched. Editing `maxOutputBytes` replaces the socket's `limits` object (via `setSocketLimits`), so legacy keys are dropped on such saves; they are deprecated and ignored. The editor no longer exposes max-visit or edge-traversal controls. Only `maxOutputBytes` is editable in the editor, and top-level `limits.maxSocketVisits` / `limits.maxEdgeTraversals` are not edited by the WebUI at all. See [Workflow safety and resource limits](workflow-safety.md).
 
 `src/runtime/pipeline.ts` resolves the active loadout with `getEffectivePipelineConfig()` and validates target links. `renderGrid()` is the current textual visualization and should remain a regression oracle for the WebUI graph.
 
@@ -92,6 +93,6 @@ The existing tests already cover loadout resolution, config precedence among exp
 - Inserting a socket between `A -> B` preserves `A` and `B` socket objects and changes only the selected edge target plus the new socket.
 - Inserting into an edge preserves the original `when`/`maxTraversals` on the edge moved to the new socket or otherwise matches an explicitly documented rule.
 - Adding satisfied/not-satisfied branches emits standard `edges` entries using canonical condition syntax: `when: "satisfied"` and `when: "not_satisfied"`. The routed handoff payload uses `satisfied` as the canonical boolean control field; legacy aliases such as `passed` must not be emitted as routing fields.
-- Editing retry behavior changes only `maxTraversals` on the chosen edge or `limits.maxVisits`/`limits.maxEdgeTraversals` on the chosen socket.
+- Edge `maxTraversals` has no WebUI editor; it is preserved verbatim through transforms and saves as an explicit per-item retry budget. Socket max-visit and edge-traversal controls are removed: `maxVisits`/`maxEdgeTraversals` keys are preserved on legacy-loaded sockets for load compatibility (unless `maxOutputBytes` is edited, which rewrites `limits`) but are not editable and never enforced.
 - Layout metadata, when introduced, must be stored separately from runtime routing fields so existing configs without layout continue to resolve and render identically.
 - Loadout insert/remove/swap operations must not rewrite top-level materia definitions or unrelated loadouts and must keep current `saveActiveLoadout()` minimal-active-loadout behavior intact until explicit project/user persistence is implemented.

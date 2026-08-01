@@ -124,7 +124,7 @@ Cast/session persistence:
 - Canonical handoff runtime fields are captured into `state.data.envelope`, `state.data.workItems`, `state.data.guidance`, `state.data.summary`, `state.data.decisions`, and `state.data.risks` after sparse JSON payloads are merged.
 - Routing uses ordered canonical outgoing edges from `graphValidation.canonicalOutgoingEdges`; `always`, `satisfied`, and `not_satisfied` are evaluated against the canonical JSON `satisfied` field.
 - Loop advancement uses `advance` and `loops` metadata; `loopIteratorForSocket`, `resolveLoopExitRoute`, and current cursor state determine current work item and exit targets.
-- Visit and edge traversal limits are enforced at runtime from loadout/global limits.
+- Visit and aggregate edge traversal counters are recorded for diagnostics but never enforced; explicit per-item `edge.maxTraversals` retry budgets and `limits.maxNoAdvanceCycles` structural protection are the only traversal enforcement. See [Workflow safety and resource limits](workflow-safety.md).
 
 ## Materia/loadout concepts currently represented
 

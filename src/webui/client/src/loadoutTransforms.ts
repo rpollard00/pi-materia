@@ -129,8 +129,19 @@ export function createConnectedEmptySocket(loadout: PipelineConfig, afterSocketI
   const withLayout = (next: PipelineConfig) => sourceLayout ? setLoadoutSocketLayout(next, newId, { x: (sourceLayout.x ?? 0) + 1, y: sourceLayout.y ?? 0 }) : next;
   if (loopExitContext) return withLayout(upsertLoopExitRouteInLoadout({ ...loadout, sockets }, loopExitContext.loopId, afterSocketId, 'always', newId));
 
-  const priorAlways = source.edges?.find((edge) => edge.when === 'always')?.to;
-  const inserted = priorAlways ? { ...newSocket, edges: [{ when: 'always' as const, to: priorAlways }] } : newSocket;
+  const priorAlways = source.edges?.find((edge) => edge.when === 'always');
+  const inserted = priorAlways
+    ? {
+        ...newSocket,
+        edges: [
+          {
+            when: 'always' as const,
+            to: priorAlways.to,
+            ...(priorAlways.maxTraversals !== undefined ? { maxTraversals: priorAlways.maxTraversals } : {}),
+          },
+        ],
+      }
+    : newSocket;
   sockets[newId] = inserted;
   sockets[afterSocketId] = { ...source, edges: [...(source.edges ?? []).filter((edge) => edge.when !== 'always'), { when: 'always', to: newId }] };
   return withLayout(replaceSockets(loadout, sockets));
