@@ -38,6 +38,7 @@ export type {
   ParallelLaneRevisionArtifact,
   NormalizedParallelPlan,
   NormalizedParallelStream,
+  ParallelLoopCancellationInput,
   ParallelLoopDispatchInput,
   ParallelLoopDispatcherDependencies,
   ParallelWorkspaceInspection,

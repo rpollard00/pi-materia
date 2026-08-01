@@ -65,6 +65,16 @@ export interface ParallelLoopDispatchInput {
   config: MateriaLoopParallelConfig;
 }
 
+export interface ParallelLoopCancellationInput {
+  pi: ExtensionAPI;
+  /** Cancellation does not need a live Pi context; it is retained when supplied. */
+  ctx?: ExtensionContext;
+  state: MateriaCastState;
+  /** Optional when the dispatcher already owns exactly one active run. */
+  loopId?: string;
+  reason?: string;
+}
+
 export interface ParallelLoopDispatcherDependencies {
   children: ChildCastRunnerPort;
   workspaces: ParallelWorkspacePort;
@@ -110,13 +120,20 @@ interface ActiveLane {
   artifactPaths?: ParallelLaneArtifactPaths;
 }
 
+interface DispatchInitialization {
+  castId: string;
+  loopId: string;
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
 /**
  * Runtime coordinator for the fan-out half of a parallel loop.
  *
- * This module deliberately stops at child terminal state. Fan-in, conflict
- * resolution, cancellation, and final evaluation are later coordinator
- * phases; this scheduler only guarantees that the parent never enters the
- * member sockets and that child launches respect maxConcurrency.
+ * This module owns bounded fan-out, child telemetry, and safe cancellation.
+ * Fan-in, conflict resolution, and final evaluation remain later coordinator
+ * phases; the parent still never enters the member sockets and child launches
+ * respect maxConcurrency.
  */
 export class ParallelLoopDispatcher {
   readonly #deps: ParallelLoopDispatcherDependencies;
@@ -134,6 +151,10 @@ export class ParallelLoopDispatcher {
   #usageWriteTail: Promise<void> = Promise.resolve();
   #latestUsage = new Map<string, MateriaParallelUsageTotals>();
   #budgetFailure?: Error;
+  #cancelRequested = false;
+  #cancelPromise?: Promise<void>;
+  #cancelCastId?: string;
+  #initialization?: DispatchInitialization;
 
   constructor(deps: ParallelLoopDispatcherDependencies) {
     this.#deps = deps;
@@ -147,94 +168,135 @@ export class ParallelLoopDispatcher {
    */
   async dispatch(input: ParallelLoopDispatchInput): Promise<boolean> {
     validateDispatchConfig(input.config);
-    // Do not fan out work when the parent is already over its hard limit. The
-    // ordinary socket path performs the same check at its output boundary;
-    // parallel entry must preserve that invariant before creating workspaces.
-    await this.#deps.budget?.assertBudget?.(input.state, input.ctx);
+
+    // A dispatcher is shared by the native runtime. Once the prior cast has no
+    // live lanes, a fresh cast must not inherit its terminal cancellation
+    // promise or request.
+    const previousCastId = this.#input?.state.castId ?? this.#run?.parentCastId;
+    if (previousCastId !== undefined && previousCastId !== input.state.castId && !this.#initialization && this.#active.size === 0) {
+      this.#run = undefined;
+      this.#prepared = [];
+      this.#nextQueueIndex = 0;
+      this.#eventTails.clear();
+      this.#latestUsage.clear();
+      this.#budgetFailure = undefined;
+      this.#cancelRequested = false;
+      this.#cancelPromise = undefined;
+      this.#cancelCastId = undefined;
+    }
+
+    // Bind the input before the first await. Parent cancellation can therefore
+    // find this in-flight initialization even though no durable coordinator
+    // exists yet (budget checks, compilation, and baseline pinning all await or
+    // yield before lanes are launched).
+    this.#state = input.state;
+    this.#input = input;
     const existing = input.state.parallelRuns?.[input.loopId];
     if (existing) {
-      this.#state = input.state;
       this.#run = existing;
       return true;
     }
 
-    const plan = readNormalizedPlan(input.state, input.config.planInput);
-    const workItems = readWorkItems(input.state);
-    if (plan.workItemCount !== workItems.length) {
-      throw new Error(`Parallel loop ${JSON.stringify(input.loopId)} plan workItemCount ${plan.workItemCount} does not match state.workItems length ${workItems.length}.`);
+    const pending = this.#initialization;
+    if (pending && pending.castId === input.state.castId && pending.loopId === input.loopId) {
+      await pending.promise;
+      return true;
     }
+    const initialization = this.#beginInitialization(input);
+    let initializationInterrupted = false;
+    try {
+      // Do not fan out work when the parent is already over its hard limit. The
+      // ordinary socket path performs the same check at its output boundary;
+      // parallel entry must preserve that invariant before creating workspaces.
+      await this.#deps.budget?.assertBudget?.(input.state, input.ctx);
 
-    // Compile every child before pinning or creating a workspace. A malformed
-    // member graph therefore cannot leave a partially fanned-out run behind.
-    const prepared = plan.streams.map((stream) => {
-      const compiled = compileLoopRegionToChildLoadout({
-        pipeline: input.state.pipeline,
-        loopId: input.loopId,
-        workItems,
-        workItemIndexes: stream.workItemIndexes,
-        laneId: stream.laneId,
-      });
-      if (!compiled.ok) {
-        throw new Error(`Unable to compile parallel lane ${JSON.stringify(stream.laneId)}: ${compiled.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+      const plan = readNormalizedPlan(input.state, input.config.planInput);
+      const workItems = readWorkItems(input.state);
+      if (plan.workItemCount !== workItems.length) {
+        throw new Error(`Parallel loop ${JSON.stringify(input.loopId)} plan workItemCount ${plan.workItemCount} does not match state.workItems length ${workItems.length}.`);
       }
-      return { stream, compiledLoadout: compiled.value };
-    });
 
-    const baseline = await this.#deps.workspaces.pinBaseline(input.state.cwd);
-    const queue = plan.streams.map((stream) => ({
-      laneId: stream.laneId,
-      name: stream.name,
-      streamIndex: stream.streamIndex,
-      workItemIndexes: [...stream.workItemIndexes],
-    }));
-    const run = createParallelRunState({
-      parentCastId: input.state.castId,
-      loopId: input.loopId,
-      planIdentity: {
-        version: plan.version,
-        planId: plan.planId,
-        workItemCount: plan.workItemCount,
-      },
-      configIdentity: {
-        configHash: input.state.configHash,
+      // Compile every child before pinning or creating a workspace. A malformed
+      // member graph therefore cannot leave a partially fanned-out run behind.
+      const prepared = plan.streams.map((stream) => {
+        const compiled = compileLoopRegionToChildLoadout({
+          pipeline: input.state.pipeline,
+          loopId: input.loopId,
+          workItems,
+          workItemIndexes: stream.workItemIndexes,
+          laneId: stream.laneId,
+        });
+        if (!compiled.ok) {
+          throw new Error(`Unable to compile parallel lane ${JSON.stringify(stream.laneId)}: ${compiled.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+        }
+        return { stream, compiledLoadout: compiled.value };
+      });
+
+      const baseline = await this.#deps.workspaces.pinBaseline(input.state.cwd);
+      const queue = plan.streams.map((stream) => ({
+        laneId: stream.laneId,
+        name: stream.name,
+        streamIndex: stream.streamIndex,
+        workItemIndexes: [...stream.workItemIndexes],
+      }));
+      const run = createParallelRunState({
+        parentCastId: input.state.castId,
         loopId: input.loopId,
-        planInput: input.config.planInput,
-        maxConcurrency: input.config.maxConcurrency,
-        workspaceMode: input.config.workspaceMode,
-        failurePolicy: input.config.failurePolicy,
-        fanIn: input.config.fanIn,
-      },
-      baseline: baseline.baseline,
-      queue,
-      now: this.#now(),
-    });
+        planIdentity: {
+          version: plan.version,
+          planId: plan.planId,
+          workItemCount: plan.workItemCount,
+        },
+        configIdentity: {
+          configHash: input.state.configHash,
+          loopId: input.loopId,
+          planInput: input.config.planInput,
+          maxConcurrency: input.config.maxConcurrency,
+          workspaceMode: input.config.workspaceMode,
+          failurePolicy: input.config.failurePolicy,
+          fanIn: input.config.fanIn,
+        },
+        baseline: baseline.baseline,
+        queue,
+        now: this.#now(),
+      });
 
-    this.#state = input.state;
-    this.#input = input;
-    this.#run = run;
-    this.#repositoryRoot = baseline.repositoryRoot;
-    this.#prepared = prepared;
-    this.#nextQueueIndex = 0;
-    this.#active.clear();
-    this.#eventTails.clear();
-    this.#usageWriteTail = Promise.resolve();
-    this.#latestUsage.clear();
-    this.#budgetFailure = undefined;
-    replaceState(input.state, attachParallelRunToCastState(input.state, run));
-    this.#deps.state.saveCastState(input.pi, input.state);
-    await this.#appendEvent(input.state, "parallel_dispatch_started", {
-      parentCastId: input.state.castId,
-      loopId: input.loopId,
-      runId: run.runId,
-      planId: plan.planId,
-      baseline: baseline.baseline,
-      queueOrder: run.queueOrder,
-      maxConcurrency: run.maxConcurrency,
-    });
+      this.#run = run;
+      this.#repositoryRoot = baseline.repositoryRoot;
+      this.#prepared = prepared;
+      this.#nextQueueIndex = 0;
+      this.#active.clear();
+      this.#eventTails.clear();
+      this.#usageWriteTail = Promise.resolve();
+      this.#latestUsage.clear();
+      this.#budgetFailure = undefined;
+      // Do not reset #cancelRequested here. A cancellation may have arrived
+      // while initialization was in flight; clearing it would resurrect the
+      // dispatch after cancel() had already returned.
+      replaceState(input.state, attachParallelRunToCastState(input.state, run));
+      this.#deps.state.saveCastState(input.pi, input.state);
+      await this.#appendEvent(input.state, "parallel_dispatch_started", {
+        parentCastId: input.state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        planId: plan.planId,
+        baseline: baseline.baseline,
+        queueOrder: run.queueOrder,
+        maxConcurrency: run.maxConcurrency,
+      });
+    } catch (error) {
+      // Once cancellation owns the initialization handshake, let the parent
+      // cancellation win over an initialization failure. Otherwise preserve
+      // the normal dispatch error and let socket execution fail the cast.
+      if (!this.#cancelRequested) throw error;
+      initializationInterrupted = true;
+    } finally {
+      this.#finishInitialization(initialization);
+    }
 
     // Empty plans are already represented as a completed run. There is no
     // child to launch and, importantly, no workspace side effect.
-    if (prepared.length === 0) return true;
+    if (initializationInterrupted || this.#cancelRequested || this.#prepared.length === 0) return true;
 
     await this.#pump();
     return true;
@@ -243,6 +305,84 @@ export class ParallelLoopDispatcher {
   /** Return the run currently owned by this dispatcher, if any. */
   get run(): MateriaParallelRunState | undefined {
     return this.#run;
+  }
+
+  /**
+   * Stop this coordinator without deleting any lane workspace or revision.
+   *
+   * Cancellation is intentionally a durable coordinator transition rather than
+   * a process-only operation: queued lanes become interrupted, active child
+   * sessions are aborted through the application port, and late callbacks are
+   * ignored after the final telemetry observation. The promise is memoized so
+   * parent abort, session shutdown, and repeated callers share one operation.
+   */
+  async cancel(input: ParallelLoopCancellationInput): Promise<void> {
+    // The native termination path calls this hook for ordinary casts too. Do
+    // not poison this singleton dispatcher unless the request addresses a
+    // persisted run or an initialization currently owned by this cast.
+    if (!this.#hasCancellationTarget(input)) return;
+    if (this.#cancelPromise && this.#cancelCastId === input.state.castId) return this.#cancelPromise;
+    const initialization = this.#initialization?.promise;
+    this.#bindCancellationInput(input);
+    this.#cancelRequested = true;
+    this.#cancelCastId = input.state.castId;
+    this.#cancelPromise = (async () => {
+      // A run is created only after compilation and baseline pinning. Waiting
+      // here closes the pre-run race: cancel cannot return before dispatch has
+      // either published that run or completed initialization without one.
+      if (initialization) await initialization;
+      await this.#cancelInternal(input);
+    })().catch(async (error) => {
+      const state = this.#state;
+      if (state) {
+        await this.#appendEvent(state, "parallel_cancellation_failure", {
+          parentCastId: state.castId,
+          error: boundedFailureReason(errorMessage(error)),
+        });
+        this.#deps.state.saveCastState(input.pi, state);
+      }
+    });
+    return this.#cancelPromise;
+  }
+
+  /** Alias used by shutdown adapters that call the operation an abort. */
+  async abort(input: ParallelLoopCancellationInput): Promise<void> {
+    return this.cancel(input);
+  }
+
+  /** Alias for session lifecycle adapters. */
+  async shutdown(input: ParallelLoopCancellationInput): Promise<void> {
+    return this.cancel(input);
+  }
+
+  #beginInitialization(input: ParallelLoopDispatchInput): DispatchInitialization {
+    let resolve!: () => void;
+    const promise = new Promise<void>((complete) => { resolve = complete; });
+    const initialization = { castId: input.state.castId, loopId: input.loopId, promise, resolve };
+    this.#initialization = initialization;
+    return initialization;
+  }
+
+  #finishInitialization(initialization: DispatchInitialization): void {
+    if (this.#initialization !== initialization) return;
+    this.#initialization = undefined;
+    initialization.resolve();
+  }
+
+  #hasCancellationTarget(input: ParallelLoopCancellationInput): boolean {
+    const initialization = this.#initialization;
+    if (initialization && initialization.castId === input.state.castId && (!input.loopId || initialization.loopId === input.loopId)) return true;
+
+    const persistedRuns = input.state.parallelRuns ?? {};
+    if (Object.entries(persistedRuns).some(([loopId, run]) =>
+      run.parentCastId === input.state.castId && (input.loopId === undefined || loopId === input.loopId),
+    )) return true;
+
+    return Boolean(
+      this.#run &&
+      this.#run.parentCastId === input.state.castId &&
+      (input.loopId === undefined || this.#run.loopId === input.loopId),
+    );
   }
 
   async #pump(): Promise<void> {
@@ -257,7 +397,7 @@ export class ParallelLoopDispatcher {
       const input = this.#input;
       const state = this.#state;
       if (!input || !state || !this.#run) return;
-      while (!this.#budgetFailure && this.#active.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
+      while (!this.#cancelRequested && !this.#budgetFailure && this.#active.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
         const prepared = this.#prepared[this.#nextQueueIndex++];
         if (!prepared) break;
         await this.#launchLane(input, state, prepared);
@@ -265,6 +405,234 @@ export class ParallelLoopDispatcher {
     } finally {
       this.#dispatching = false;
     }
+  }
+
+  #bindCancellationInput(input: ParallelLoopCancellationInput): void {
+    this.#state = input.state;
+    const availableRuns = input.state.parallelRuns ?? {};
+    const sameCastInput = this.#input?.state.castId === input.state.castId ? this.#input : undefined;
+    const sameCastRun = this.#run?.parentCastId === input.state.castId ? this.#run : undefined;
+    const loopId = input.loopId
+      ?? Object.keys(availableRuns)[0]
+      ?? sameCastInput?.loopId
+      ?? sameCastRun?.loopId;
+    if (!loopId) return;
+
+    const persistedRun = availableRuns[loopId];
+    if (persistedRun && (!this.#run || this.#run.runId !== persistedRun.runId || this.#run.parentCastId !== input.state.castId)) {
+      this.#run = persistedRun;
+    }
+    if (!this.#input || this.#input.state.castId !== input.state.castId || this.#input.loopId !== loopId) {
+      const run = this.#run;
+      const config: MateriaLoopParallelConfig = run
+        ? {
+            planInput: run.configIdentity.planInput,
+            maxConcurrency: run.configIdentity.maxConcurrency,
+            workspaceMode: run.configIdentity.workspaceMode,
+            failurePolicy: run.configIdentity.failurePolicy,
+            fanIn: run.configIdentity.fanIn,
+          }
+        : {
+            planInput: "state.parallelPlan",
+            maxConcurrency: 1,
+            workspaceMode: "jj",
+            failurePolicy: "all_terminal",
+            fanIn: "ordered",
+          };
+      this.#input = {
+        pi: input.pi,
+        ctx: input.ctx ?? this.#input?.ctx ?? {} as ExtensionContext,
+        state: input.state,
+        socket: {} as ResolvedMateriaSocket,
+        loopId,
+        config,
+      };
+    } else {
+      this.#input = { ...this.#input, pi: input.pi, ...(input.ctx ? { ctx: input.ctx } : {}), state: input.state };
+    }
+  }
+
+  async #cancelInternal(input: ParallelLoopCancellationInput): Promise<void> {
+    const state = this.#state;
+    const coordinator = this.#run;
+    const dispatchInput = this.#input;
+    if (!state || !coordinator || !dispatchInput) return;
+
+    const reason = boundedFailureReason(input.reason?.trim() || "parallel execution cancelled");
+    const occurredAt = this.#now();
+    await this.#appendEvent(state, "parallel_cancellation_requested", {
+      parentCastId: state.castId,
+      loopId: coordinator.loopId,
+      runId: coordinator.runId,
+      reason,
+      activeLaneIds: [...this.#active.keys()],
+      queuedLaneIds: coordinator.queueOrder.filter((laneId) => coordinator.lanes[laneId]?.status === "queued"),
+    });
+
+    // Prevent the current pump from taking another queue entry. The lane that
+    // is already preparing a workspace is allowed to finish so its ownership
+    // can be retained in the cancellation record.
+    this.#nextQueueIndex = this.#prepared.length;
+    const initiallyActive = [...this.#active.values()];
+    await Promise.all(initiallyActive.map((active) => this.#abortChild(active.childCastId, reason)));
+    await this.#pumpTail.catch(() => undefined);
+
+    // A child may be registered while a start() call was in flight when the
+    // first abort pass ran. Repeat the pass after the pump quiesces.
+    const remainingActive = [...this.#active.values()];
+    await Promise.all(remainingActive.map((active) => this.#abortChild(active.childCastId, reason)));
+
+    const snapshots = new Map<string, ChildCastSnapshot | undefined>();
+    for (const active of [...this.#active.values()]) {
+      snapshots.set(active.childCastId, await this.#flushChildTelemetry(dispatchInput, state, active));
+    }
+
+    const diagnostic: ParallelLaneDiagnosticArtifact = {
+      code: "parallel_cancelled",
+      message: reason,
+      severity: "warning",
+      occurredAt,
+    };
+    for (const laneId of coordinator.queueOrder) {
+      const lane = this.#run?.lanes[laneId];
+      if (!lane || isTerminalLaneStatus(lane.status)) continue;
+      const active = this.#active.get(laneId);
+      const prepared = this.#prepared.find((candidate) => candidate.stream.laneId === laneId);
+      const stream = prepared?.stream ?? streamFromLane(lane);
+      if (!stream) continue;
+      let workspace = lane.workspace
+        ?? (active?.artifactIdentity.workspace as MateriaParallelRunState["lanes"][string]["workspace"] | undefined)
+        ?? (prepared?.workspace ? workspaceOwnership(state, dispatchInput.loopId, laneId, prepared.workspace) : undefined);
+      if (workspace && this.#deps.workspaces.inspect) {
+        const inspected = await this.#deps.workspaces.inspect({
+          workspacePath: workspace.workspacePath,
+          workspaceRoot: workspace.workspaceRoot,
+          workspaceName: workspace.workspaceName,
+        }).catch(() => undefined);
+        if (inspected?.currentRevision) workspace = { ...workspace, revision: inspected.currentRevision };
+      }
+      const childCastId = lane.childCastId ?? active?.childCastId ?? childCastIdentity(state.castId, dispatchInput.loopId, laneId, lane.attempt);
+      this.#applyLaneTransition(dispatchInput, state, {
+        laneId,
+        attempt: lane.attempt,
+        childCastId,
+        ...(workspace ? { workspace } : {}),
+        status: "interrupted",
+        failureReason: reason,
+        diagnostic,
+        timestamp: occurredAt,
+      });
+
+      const latestLane = this.#run?.lanes[laneId];
+      const childSnapshot = active ? snapshots.get(active.childCastId) : undefined;
+      const usage = active ? this.#latestUsage.get(active.childCastId) : undefined;
+      const identity = active?.artifactIdentity ?? this.#cancellationArtifactIdentity(state, dispatchInput, stream, childCastId, lane.attempt, workspace);
+      await this.#initializeLaneArtifacts(identity, state);
+      const result: ChildCastTerminalResult = {
+        status: "interrupted",
+        accepted: false,
+        endedAt: occurredAt,
+        error: reason,
+        abortReason: reason,
+        ...(childSnapshot?.terminalResult?.message ? { message: childSnapshot.terminalResult.message } : {}),
+        ...(usage ? { usage } : {}),
+      };
+      const diagnostics = latestLane?.diagnostics ?? [diagnostic];
+      await this.#writeLaneFailureArtifacts(identity, {
+        status: result.status,
+        accepted: false,
+        endedAt: result.endedAt,
+        error: result.error,
+        abortReason: result.abortReason,
+      }, {
+        baseline: latestLane?.workspace?.baseline ?? this.#run!.baseline,
+        ...(latestLane?.workspace?.revision ? { workspace: latestLane.workspace.revision } : {}),
+      }, diagnostics, usage);
+      await this.#appendEvent(state, "parallel_lane_interrupted", {
+        parentCastId: state.castId,
+        loopId: dispatchInput.loopId,
+        runId: this.#run?.runId,
+        laneId,
+        childCastId,
+        reason,
+      });
+    }
+
+    const run = this.#run;
+    if (run) {
+      const phase = applyParallelRunPhaseTransition(run, {
+        parentCastId: state.castId,
+        loopId: dispatchInput.loopId,
+        runId: run.runId,
+        phase: "failed",
+        fanInPhase: "skipped",
+        timestamp: this.#now(),
+      });
+      if (phase.applied) {
+        replaceState(state, {
+          ...state,
+          parallelRuns: { ...(state.parallelRuns ?? {}), [dispatchInput.loopId]: phase.state },
+        });
+        this.#run = state.parallelRuns?.[dispatchInput.loopId];
+      }
+    }
+    this.#active.clear();
+    this.#deps.state.saveCastState(input.pi, state);
+    await this.#appendEvent(state, "parallel_cancelled", {
+      parentCastId: state.castId,
+      loopId: dispatchInput.loopId,
+      runId: this.#run?.runId,
+      reason,
+      laneStatuses: Object.fromEntries(Object.entries(this.#run?.lanes ?? {}).map(([laneId, lane]) => [laneId, lane.status])),
+      workspacesPreserved: true,
+    });
+  }
+
+  async #abortChild(childCastId: string, reason: string): Promise<void> {
+    await this.#deps.children.abort({ childCastId, reason }).catch(() => undefined);
+  }
+
+  async #flushChildTelemetry(
+    input: ParallelLoopDispatchInput,
+    state: MateriaCastState,
+    active: ActiveLane,
+  ): Promise<ChildCastSnapshot | undefined> {
+    await this.#eventTails.get(active.childCastId)?.catch(() => undefined);
+    const observation = await this.#deps.children.observe({ childCastId: active.childCastId }).catch(() => undefined);
+    if (!observation) return undefined;
+    const lastSequence = this.#run?.lanes[active.artifactIdentity.laneId]?.lastEvent?.sequence ?? 0;
+    for (const event of observation.events) {
+      if (event.sequence <= lastSequence) continue;
+      await this.#processChildEvent(input, state, streamForActive(this.#run, active), active, event);
+    }
+    const usage = isUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined;
+    if (usage) await this.#aggregateUsage(state, input, streamForActive(this.#run, active), active, usage);
+    for (const childDiagnostic of observation.snapshot.diagnostics) {
+      await this.#appendLaneDiagnostic(input, state, streamForActive(this.#run, active), active, toParallelDiagnostic(childDiagnostic));
+    }
+    return observation.snapshot;
+  }
+
+  #cancellationArtifactIdentity(
+    state: MateriaCastState,
+    input: ParallelLoopDispatchInput,
+    stream: NormalizedParallelStream,
+    childCastId: string,
+    attempt: number,
+    workspace: MateriaParallelRunState["lanes"][string]["workspace"] | undefined,
+  ): ParallelLaneArtifactIdentity {
+    return {
+      parentCastId: state.castId,
+      runId: this.#run?.runId ?? state.runState.runId,
+      loopId: input.loopId,
+      laneId: stream.laneId,
+      childCastId,
+      attempt,
+      streamIndex: stream.streamIndex,
+      workItemIndexes: [...stream.workItemIndexes],
+      paths: lanePaths(state, input.loopId, stream.laneId, attempt),
+      ...(workspace ? { workspace } : {}),
+    };
   }
 
   async #launchLane(input: ParallelLoopDispatchInput, state: MateriaCastState, prepared: PreparedLane): Promise<void> {
@@ -300,6 +668,7 @@ export class ParallelLoopDispatcher {
         baseline: this.#run!.baseline,
       });
       prepared.workspace = workspace;
+      if (this.#cancelRequested) return;
     } catch (error) {
       const reason = `workspace creation failed: ${errorMessage(error)}`;
       const diagnostic = await this.#markLaneFailure(input, state, prepared.stream.laneId, reason, childCastId);
@@ -361,6 +730,12 @@ export class ParallelLoopDispatcher {
 
     try {
       await this.#deps.children.start(startInput);
+      if (this.#cancelRequested) {
+        // Cancellation may have raced with start(). Keep the active record so
+        // the coordinator can observe telemetry and persist its workspace.
+        await this.#abortChild(childCastId, "parallel execution cancelled");
+        return;
+      }
       this.#deps.children.subscribe({ childCastId }, {
         onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
         onTerminal: (result) => this.#handleChildTerminal(input, state, prepared.stream, active, result),
@@ -379,6 +754,7 @@ export class ParallelLoopDispatcher {
     } catch (error) {
       this.#active.delete(prepared.stream.laneId);
       await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${errorMessage(error)}` }).catch(() => undefined);
+      if (this.#cancelRequested) return;
       const reason = `child launch failed: ${errorMessage(error)}`;
       const diagnostic = await this.#markLaneFailure(input, state, prepared.stream.laneId, reason, childCastId);
       await this.#writeLaneFailureArtifacts(artifactIdentity, {
@@ -400,6 +776,7 @@ export class ParallelLoopDispatcher {
     active: ActiveLane,
     event: ChildCastStreamEvent,
   ): Promise<void> {
+    if (this.#cancelRequested) return;
     const previous = this.#eventTails.get(active.childCastId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(() => this.#processChildEvent(input, state, stream, active, event));
     this.#eventTails.set(active.childCastId, next);
@@ -444,9 +821,11 @@ export class ParallelLoopDispatcher {
     active: ActiveLane,
     result: ChildCastTerminalResult,
   ): Promise<void> {
+    if (this.#cancelRequested) return;
     // Drain child events first so the lane event stream remains ordered before
     // the normalized terminal record is written.
     await this.#eventTails.get(active.childCastId)?.catch(() => undefined);
+    if (this.#cancelRequested) return;
     // The terminal callback can be delivered more than once by an adapter. The
     // active-map deletion makes releasing the scheduler slot idempotent. A
     // budget stop may have already removed and finalized this lane.
@@ -576,6 +955,7 @@ export class ParallelLoopDispatcher {
     this.#deps.state.saveCastState(input.pi, state);
     await this.#writeParentUsage(state);
     await this.#appendLaneUsage(active, usage);
+    if (this.#cancelRequested) return;
     try {
       await this.#deps.budget?.assertBudget?.(state, input.ctx);
     } catch (error) {
@@ -659,12 +1039,14 @@ export class ParallelLoopDispatcher {
     result: ChildCastTerminalResult,
     revision: { baseline?: unknown; workspace?: unknown },
     diagnostics: readonly ParallelLaneDiagnosticArtifact[],
+    usage?: MateriaParallelUsageTotals,
   ): Promise<void> {
     const lane = this.#deps.artifacts?.lane;
     if (!lane) return;
-    await this.#safeLaneWrite(() => lane.writeTerminalResult({ ...identity, result }));
+    await this.#safeLaneWrite(() => lane.writeTerminalResult({ ...identity, result, ...(usage ? { usage } : {}) }));
     await this.#safeLaneWrite(() => lane.writeRevision({ ...identity, revision }));
     await this.#safeLaneWrite(() => lane.writeDiagnostics({ ...identity, diagnostics: diagnostics.slice(-24) }));
+    if (usage) await this.#safeLaneWrite(() => lane.writeUsage({ ...identity, usage }));
   }
 
   async #enforceBudget(
@@ -1001,6 +1383,32 @@ function boundedFailureReason(value: string, max = 1_000): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+type ParallelLaneState = MateriaParallelRunState["lanes"][string];
+
+function streamFromLane(lane: ParallelLaneState): NormalizedParallelStream {
+  return {
+    laneId: lane.laneId,
+    name: lane.name,
+    streamIndex: lane.streamIndex,
+    workItemIndexes: [...lane.workItemIndexes],
+  };
+}
+
+function streamForActive(run: MateriaParallelRunState | undefined, active: ActiveLane): NormalizedParallelStream {
+  const lane = run?.lanes[active.artifactIdentity.laneId];
+  if (lane) return streamFromLane(lane);
+  return {
+    laneId: active.artifactIdentity.laneId,
+    name: active.artifactIdentity.laneId,
+    streamIndex: active.artifactIdentity.streamIndex,
+    workItemIndexes: [...active.artifactIdentity.workItemIndexes],
+  };
+}
+
+function isTerminalLaneStatus(status: ParallelLaneState["status"]): boolean {
+  return status === "accepted" || status === "failed" || status === "interrupted";
 }
 
 function validateDispatchConfig(config: MateriaLoopParallelConfig): void {

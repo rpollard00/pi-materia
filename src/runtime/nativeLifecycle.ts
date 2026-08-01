@@ -64,8 +64,12 @@ const initializeCastEventBus = nativeEventing.initializeCastEventBus.bind(native
 const removeEventBus = nativeEventing.removeEventBus.bind(nativeEventing);
 const startHeartbeat = nativeEventing.startHeartbeat.bind(nativeEventing);
 const stopHeartbeat = nativeEventing.stopHeartbeat.bind(nativeEventing);
+let parallelLoopDispatcher: ReturnType<typeof createParallelLoopDispatcher>;
 
 const castTermination = createCastTermination({
+  parallel: {
+    cancel: (pi, state, reason) => parallelLoopDispatcher.cancel({ pi, state, reason }),
+  },
   eventing: {
     stopHeartbeat,
     emitLifecycleEvent,
@@ -201,7 +205,7 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
 });
 
-const parallelLoopDispatcher = createParallelLoopDispatcher({
+parallelLoopDispatcher = createParallelLoopDispatcher({
   children: createPiChildCastRunner(),
   workspaces: createJjWorkspaceBackend(),
   state: { saveCastState },

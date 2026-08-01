@@ -316,4 +316,79 @@ describe("parallel loop dispatcher", () => {
     expect(saved.at(-1)?.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("accepted");
     expect(saved.at(-1)?.parallelRuns?.build?.lanes["lane-a"]?.acceptedHead).toEqual({ commitId: "head-a", changeId: "change-a" });
   });
+
+  test("waits for pre-run initialization cancellation before launching lanes", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    let resolveBaseline!: (value: { repositoryRoot: string; baseline: { commitId: string; changeId: string } }) => void;
+    const baseline = new Promise<{ repositoryRoot: string; baseline: { commitId: string; changeId: string } }>((resolve) => {
+      resolveBaseline = resolve;
+    });
+    let workspaceCreates = 0;
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces: {
+        pinBaseline: async () => baseline,
+        async create() {
+          workspaceCreates += 1;
+          throw new Error("workspace creation should not run after cancellation");
+        },
+      },
+      state: { saveCastState: () => undefined },
+    });
+    const input = { pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! };
+
+    const dispatch = dispatcher.dispatch(input);
+    await Promise.resolve();
+    const cancellation = dispatcher.cancel({ pi: input.pi, ctx: input.ctx, state, reason: "cancel during baseline pin" });
+    resolveBaseline({ repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } });
+
+    await Promise.all([dispatch, cancellation]);
+
+    expect(workspaceCreates).toBe(0);
+    expect(childRunner.listSnapshots()).toHaveLength(0);
+    expect(state.parallelRuns?.build?.phase).toBe("failed");
+    expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
+  });
+
+  test("cancels active and queued lanes, preserves workspace ownership, and ignores late callbacks", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces: {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } }; },
+        async create(input: { laneId: string }) {
+          return {
+            repositoryRoot: "/repo",
+            workspaceRoot: "/tmp/materia",
+            workspacePath: `/tmp/materia/${input.laneId}`,
+            workspaceName: input.laneId,
+            baseline: { commitId: "base", changeId: "base-change" },
+            revision: { commitId: "head-${input.laneId}", changeId: "change-${input.laneId}" },
+          };
+        },
+      },
+      state: { saveCastState: () => undefined },
+    });
+    const input = { pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! };
+
+    await dispatcher.dispatch(input);
+    await dispatcher.cancel({ pi: input.pi, ctx: input.ctx, state, loopId: "build", reason: "parent abort" });
+    await childRunner.drain();
+
+    expect(childRunner.listSnapshots().every((snapshot) => snapshot.status === "interrupted")).toBe(true);
+    expect(state.parallelRuns?.build?.phase).toBe("failed");
+    expect(state.parallelRuns?.build?.fanInPhase).toBe("skipped");
+    expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.workspace?.workspacePath).toBe("/tmp/materia/lane-a");
+    expect(state.parallelRuns?.build?.lanes["lane-b"]?.workspace?.workspacePath).toBe("/tmp/materia/lane-b");
+    expect(state.parallelRuns?.build?.lanes["lane-c"]?.workspace).toBeUndefined();
+
+    const beforeLateEvent = JSON.stringify(state.parallelRuns?.build);
+    childRunner.emit(childRunner.listSnapshots()[0]!.identity.childCastId, { type: "late_diagnostic", payload: { message: "too late" } });
+    await childRunner.drain();
+    await dispatcher.cancel({ pi: input.pi, ctx: input.ctx, state, loopId: "build", reason: "repeated abort" });
+    expect(JSON.stringify(state.parallelRuns?.build)).toBe(beforeLateEvent);
+  });
 });

@@ -14,7 +14,7 @@ import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./web
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { runChildCastLaunch } from "./runtime/childCastLaunch.js";
-import { handleAgentSettled, saveCastState } from "./castRuntime.js";
+import { cancelNativeCast, handleAgentSettled, saveCastState } from "./castRuntime.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
 import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
 import { FileQuestBoardRepository, QuestBoardPersistenceError, loadRuntimeConfig } from "./infrastructure/index.js";
@@ -171,7 +171,19 @@ export default function piMateria(pi: ExtensionAPI) {
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
 
-  pi.on("session_shutdown", (_event, ctx) => {
+  pi.on("session_shutdown", async (_event, ctx) => {
+    // A Pi session can disappear while the parent is waiting on parallel
+    // children. Cancel through the normal terminal path so subprocesses are
+    // stopped and lane workspaces remain available for revival/diagnosis.
+    const state = adapters.states.loadActive(ctx);
+    if (state?.active) {
+      try {
+        await cancelNativeCast(pi, state, "session shutdown");
+      } catch {
+        // Session teardown must still release UI resources; the coordinator
+        // records its best-effort cancellation state before this point.
+      }
+    }
     clearWidgetTicker(ctx);
     closeMateriaWebUiForSession(ctx);
   });

@@ -20,6 +20,15 @@ interface ResultAccumulatorView {
 }
 
 export interface CastTerminationDependencies {
+  /** Optional coordinator hook used to stop isolated parallel children before
+   * the parent cast is cleared. */
+  parallel?: {
+    cancel(
+      pi: ExtensionAPI,
+      state: MateriaCastState,
+      reason: string,
+    ): Promise<void>;
+  };
   eventing: {
     stopHeartbeat(castId: string): void;
     emitLifecycleEvent(
@@ -101,6 +110,24 @@ export function createCastTermination(deps: CastTerminationDependencies) {
     reason = "aborted by user",
   ): Promise<MateriaCastState> {
     deps.finalization?.deactivate(pi);
+    // Stop isolated children before the parent terminal event and state clear.
+    // The coordinator is idempotent and preserves its jj workspaces for
+    // diagnosis/revival even when this operation is repeated.
+    if (deps.parallel) {
+      try {
+        // The dispatcher also owns the pre-run initialization handshake, so it
+        // must receive cancellation even before parallelRuns is persisted.
+        // Ordinary casts are a no-op in the dispatcher.
+        await deps.parallel.cancel(pi, state, reason);
+      } catch (error) {
+        // Parent cancellation remains terminal even if a coordinator adapter
+        // fails; its own durable diagnostics are the recovery source.
+        await deps.artifacts.appendEvent(state.runState, "parallel_cancellation_failure", {
+          parentCastId: state.castId,
+          error: error instanceof Error ? error.message : String(error),
+        }).catch(() => undefined);
+      }
+    }
     // Stop heartbeat before emitting the terminal event so no heartbeat fires
     // after cancellation (docs/runtime-eventing.md §7.4).
     deps.eventing.stopHeartbeat(state.castId);
