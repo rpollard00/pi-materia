@@ -247,6 +247,9 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
   ): Promise<void> {
     if (!state.active) throw new Error("No active pi-materia cast to continue.");
     if (state.awaitingResponse) throw new Error("Materia is already awaiting a Pi agent response.");
+    if (currentSocketState(state) === "running_parallel") {
+      throw new Error("A parallel loop coordinator is active; wait for lane completion before continuing the parent cast.");
+    }
 
     if (currentSocketState(state) === "awaiting_user_refinement") {
       await deps.agent.startMultiTurnFinalizationTurn(pi, ctx, state);

@@ -7,6 +7,8 @@ import { renderTemplate } from "../application/promptAssembly.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { appendEvent, appendManifest, initializeRun, recordSocketParsedJson, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel } from "../infrastructure/castArtifacts.js";
+import { createJjWorkspaceBackend } from "../infrastructure/jjWorkspaceBackend.js";
+import { createPiChildCastRunner } from "../infrastructure/piChildCastRunner.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
@@ -36,6 +38,7 @@ import { nativeEventing } from "./nativeEventing.js";
 import { createSocketEventProcessing } from "./socketEventProcessing.js";
 import { createSocketExecution } from "./socketExecution.js";
 import { createSocketOutputCommit } from "./socketOutputCommit.js";
+import { createParallelLoopDispatcher } from "./parallelDispatcher.js";
 import { currentMateria, currentSocketId, currentSocketOrThrow, currentSocketVisit, setCurrentSocketState } from "./sessionState.js";
 import { createTurnRecovery } from "./turnRecovery.js";
 
@@ -197,6 +200,13 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
 });
 
+const parallelLoopDispatcher = createParallelLoopDispatcher({
+  children: createPiChildCastRunner(),
+  workspaces: createJjWorkspaceBackend(),
+  state: { saveCastState },
+  artifacts: { appendEvent },
+});
+
 const { completeSocket, startSocket } = createSocketExecution({
   artifacts: {
     appendEvent,
@@ -237,6 +247,7 @@ const { completeSocket, startSocket } = createSocketExecution({
   ui: {
     updateWidget,
   },
+  parallel: parallelLoopDispatcher,
 });
 
 const agentLifecycle = createAgentLifecycle({

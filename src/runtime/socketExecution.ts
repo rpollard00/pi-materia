@@ -18,6 +18,7 @@ import type {
 } from "../config/modelSettings.js";
 import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
 import { getResolvedPipelineSocket, loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
+import { parallelLoopForSocket, type ParallelLoopDispatcher } from "./parallelDispatcher.js";
 import type { UtilityInputArtifactInput } from "../infrastructure/castArtifacts.js";
 import type {
   MateriaCastState,
@@ -149,6 +150,8 @@ export interface SocketExecutionDependencies {
   ui: {
     updateWidget(ctx: ExtensionContext, state: MateriaCastState): unknown;
   };
+  /** Optional experimental fan-out coordinator. Omitted preserves sequential loops. */
+  parallel?: Pick<ParallelLoopDispatcher, "dispatch">;
 }
 
 /**
@@ -243,6 +246,40 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
     );
     const hasItem = setCurrentItem(state, socket);
     const loop = loopIteratorForSocket(state.pipeline, socket.id);
+
+    // An opted-in loop is entered once by the parent coordinator. The
+    // dispatcher owns all member sockets after this boundary; returning here
+    // is what prevents the parent from starting the first lane socket as a
+    // normal sequential socket.
+    const parallelRegion = parallelLoopForSocket(state, socket.id);
+    if (parallelRegion) {
+      if (!deps.parallel) {
+        await deps.lifecycle.failCast(pi, ctx, state, new Error("Parallel loop execution is unavailable in this runtime."), `parallel:${parallelRegion.loopId}`);
+        return;
+      }
+      try {
+        if (await deps.parallel.dispatch({ pi, ctx, state, socket, loopId: parallelRegion.loopId, config: parallelRegion.config })) {
+          // An empty normalized plan is a coordinator no-op, but it still
+          // follows the ordinary loop exhaustion route without entering a
+          // member socket.
+          if (!hasItem && loop && state.parallelRuns?.[parallelRegion.loopId]?.phase === "completed") {
+            return await advanceToSocket(
+              pi,
+              ctx,
+              state,
+              resolveEmptyLoopExhaustionTarget(state, socket, loop.done),
+              "foreach-empty",
+              nextDiagnostics,
+            );
+          }
+          return;
+        }
+      } catch (error) {
+        await deps.lifecycle.failCast(pi, ctx, state, error, `parallel:${parallelRegion.loopId}`);
+        return;
+      }
+    }
+
     if (loop && !hasItem) {
       return await advanceToSocket(
         pi,
@@ -253,6 +290,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         nextDiagnostics,
       );
     }
+
     try {
       recordNoAdvanceSocketStart(
         state,

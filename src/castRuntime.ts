@@ -22,6 +22,23 @@ export {
 } from "./runtime/nativeLifecycle.js";
 
 export type { AgentControllerValidationResult, PipelineSocketDetail } from "./runtime/nativeLifecycle.js";
+export {
+  createParallelLaneScheduler,
+  createParallelLoopDispatcher,
+  parallelLoopForSocket,
+  ParallelLaneScheduler,
+  ParallelLoopDispatcher,
+} from "./runtime/parallelDispatcher.js";
+export type {
+  NormalizedParallelPlan,
+  NormalizedParallelStream,
+  ParallelLoopDispatchInput,
+  ParallelLoopDispatcherDependencies,
+  ParallelWorkspaceInspection,
+  ParallelWorkspacePort,
+  ParallelWorkspaceRecord,
+  ParallelWorkspaceRevision,
+} from "./runtime/parallelDispatcher.js";
 
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext, projectMateriaContext } from "./application/promptAssembly.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "./application/recoveryPolicy.js";
