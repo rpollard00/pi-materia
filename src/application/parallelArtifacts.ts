@@ -1,3 +1,4 @@
+import type { MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
 import type {
   ChildCastPaths,
   ChildCastStreamEvent,
@@ -57,6 +58,14 @@ export interface ParallelLaneDiagnosticArtifact {
  * files, object storage, or a test journal; runtime scheduling only exchanges
  * DTOs and never depends on a filesystem.
  */
+export interface ParallelFanInArtifactPort {
+  write(input: {
+    artifactRoot: string;
+    provenance: MateriaParallelFanInProvenance;
+    satisfied: boolean;
+  }): Promise<void>;
+}
+
 export interface ParallelLaneArtifactPort {
   initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths>;
   appendEvent(input: ParallelLaneArtifactIdentity & { event: ParallelLaneEventArtifact }): Promise<void>;

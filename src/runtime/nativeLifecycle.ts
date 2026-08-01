@@ -205,14 +205,17 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
 });
 
+const parallelWorkspaceBackend = createJjWorkspaceBackend();
+const parallelLaneArtifacts = createParallelLaneArtifactStore();
 parallelLoopDispatcher = createParallelLoopDispatcher({
   children: createPiChildCastRunner(),
-  workspaces: createJjWorkspaceBackend(),
+  workspaces: parallelWorkspaceBackend,
   state: { saveCastState },
   artifacts: {
     appendEvent,
     writeUsage,
-    lane: createParallelLaneArtifactStore(),
+    lane: parallelLaneArtifacts,
+    fanIn: parallelLaneArtifacts,
   },
   budget: {
     assertBudget: async (state, ctx) => assertBudget(await loadConfigFromState(state), state.runState, ctx),

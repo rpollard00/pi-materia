@@ -4,6 +4,37 @@ export interface MateriaParallelRevisionIdentity {
   changeId: string;
 }
 
+/** One ordered lane head and its immutable workspace verification snapshot. */
+export interface MateriaParallelFanInHead {
+  laneId: string;
+  streamIndex: number;
+  queueIndex: number;
+  workItemIndexes: number[];
+  head: MateriaParallelRevisionIdentity;
+  workspace: MateriaParallelWorkspaceOwnership;
+  /** Revision observed at the lane workspace after its final snapshot. */
+  workspaceRevision?: MateriaParallelRevisionIdentity;
+}
+
+/** Durable provenance for the explicit jj fan-in boundary. */
+export interface MateriaParallelFanInProvenance {
+  version: 1;
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  baseline: MateriaParallelRevisionIdentity;
+  parentRevisionBefore: MateriaParallelRevisionIdentity;
+  parentRevisionAfter: MateriaParallelRevisionIdentity;
+  orderedHeads: MateriaParallelFanInHead[];
+  integrationRevision?: MateriaParallelRevisionIdentity;
+  outcome: "clean" | "conflict";
+  conflictedPaths: string[];
+  conflictDetails: Array<{ path: string; message: string }>;
+  operationId: string;
+  startedAt: number;
+  completedAt: number;
+}
+
 /** The normalized plan identity pinned for one parallel run. */
 export interface MateriaParallelPlanIdentity {
   version: number;
@@ -139,6 +170,8 @@ export interface MateriaParallelRunState {
   workspaceMode: MateriaParallelWorkspaceMode;
   failurePolicy: MateriaParallelFailurePolicy;
   fanIn: MateriaParallelFanInBehavior;
+  /** Durable provenance from the explicit successful-lanes fan-in boundary. */
+  fanInProvenance?: MateriaParallelFanInProvenance;
   phase: MateriaParallelRunPhase;
   fanInPhase: MateriaParallelFanInPhase;
   lanes: Record<string, MateriaParallelLaneState>;

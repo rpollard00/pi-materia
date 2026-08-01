@@ -7,6 +7,7 @@ import type {
   StartChildCastInput,
 } from "../application/childCastRunner.js";
 import type {
+  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
@@ -16,6 +17,7 @@ import type {
 import { addUsage } from "../telemetry/usage.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
 import {
+  applyParallelFanInProvenanceToCastState,
   applyParallelRunPhaseTransition,
   applyParallelTransitionToCastState,
   attachParallelRunToCastState,
@@ -40,6 +42,7 @@ import {
 } from "./parallelDispatchSupport.js";
 
 export type {
+  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
@@ -85,6 +88,7 @@ export interface ParallelLoopDispatcherDependencies {
     appendEvent(runState: MateriaCastState["runState"], type: string, data: unknown): Promise<void>;
     writeUsage?(runState: MateriaCastState["runState"]): Promise<void>;
     lane?: ParallelLaneArtifactPort;
+    fanIn?: ParallelFanInArtifactPort;
   };
   budget?: {
     /** Check the parent budget after a child usage delta is recorded. */
@@ -155,6 +159,8 @@ export class ParallelLoopDispatcher {
   #cancelPromise?: Promise<void>;
   #cancelCastId?: string;
   #initialization?: DispatchInitialization;
+  #fanInPromise?: Promise<void>;
+  #fanInRunId?: string;
 
   constructor(deps: ParallelLoopDispatcherDependencies) {
     this.#deps = deps;
@@ -183,6 +189,8 @@ export class ParallelLoopDispatcher {
       this.#cancelRequested = false;
       this.#cancelPromise = undefined;
       this.#cancelCastId = undefined;
+      this.#fanInPromise = undefined;
+      this.#fanInRunId = undefined;
     }
 
     // Bind the input before the first await. Parent cancellation can therefore
@@ -270,6 +278,8 @@ export class ParallelLoopDispatcher {
       this.#usageWriteTail = Promise.resolve();
       this.#latestUsage.clear();
       this.#budgetFailure = undefined;
+      this.#fanInPromise = undefined;
+      this.#fanInRunId = undefined;
       // Do not reset #cancelRequested here. A cancellation may have arrived
       // while initialization was in flight; clearing it would resurrect the
       // dispatch after cancel() had already returned.
@@ -900,6 +910,167 @@ export class ParallelLoopDispatcher {
       ...(usage ? { usage } : {}),
     });
     await this.#pump();
+    await this.#maybeFanIn(input, state);
+  }
+
+  async #maybeFanIn(input: ParallelLoopDispatchInput, state: MateriaCastState): Promise<void> {
+    const run = this.#run;
+    if (!run || this.#active.size > 0 || this.#nextQueueIndex < this.#prepared.length) return;
+    if (this.#fanInPromise && this.#fanInRunId === run.runId) return this.#fanInPromise;
+    if (!Object.values(run.lanes).every((lane) => isTerminalLaneStatus(lane.status))) return;
+
+    const task = this.#performFanIn(input, state, run);
+    this.#fanInPromise = task;
+    this.#fanInRunId = run.runId;
+    try {
+      await task;
+    } finally {
+      if (this.#fanInPromise === task) this.#fanInPromise = undefined;
+    }
+  }
+
+  async #performFanIn(input: ParallelLoopDispatchInput, state: MateriaCastState, run: MateriaParallelRunState): Promise<void> {
+    const nonAccepted = Object.values(run.lanes).filter((lane) => lane.status !== "accepted");
+    if (nonAccepted.length > 0) {
+      const phase = applyParallelRunPhaseTransition(run, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        phase: "failed",
+        fanInPhase: "skipped",
+        timestamp: this.#now(),
+      });
+      if (phase.applied) {
+        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: phase.state } });
+        this.#run = state.parallelRuns?.[input.loopId];
+        this.#deps.state.saveCastState(input.pi, state);
+      }
+      await this.#appendEvent(state, "parallel_fan_in_skipped", {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        reason: "not_all_lanes_accepted",
+        laneStatuses: Object.fromEntries(Object.entries(run.lanes).map(([laneId, lane]) => [laneId, lane.status])),
+      });
+      return;
+    }
+
+    const fanIn = this.#deps.workspaces.fanIn;
+    if (!fanIn) {
+      const diagnostic = {
+        code: "parallel_fan_in_unavailable",
+        message: "No jj fan-in backend is configured for this parallel run.",
+        severity: "error" as const,
+        occurredAt: this.#now(),
+      };
+      const phase = applyParallelRunPhaseTransition(run, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        phase: "failed",
+        fanInPhase: "failed",
+        timestamp: diagnostic.occurredAt,
+      });
+      if (phase.applied) {
+        const next = { ...phase.state, diagnostics: [...phase.state.diagnostics, diagnostic].slice(-64) };
+        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: next } });
+        this.#run = state.parallelRuns?.[input.loopId];
+        this.#deps.state.saveCastState(input.pi, state);
+      }
+      await this.#appendEvent(state, "parallel_fan_in_failed", { parentCastId: state.castId, loopId: input.loopId, runId: run.runId, error: diagnostic.message });
+      return;
+    }
+
+    const ready = applyParallelRunPhaseTransition(run, {
+      parentCastId: state.castId,
+      loopId: input.loopId,
+      runId: run.runId,
+      phase: "fan_in",
+      fanInPhase: "running",
+      timestamp: this.#now(),
+    });
+    if (ready.applied) {
+      replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: ready.state } });
+      this.#run = state.parallelRuns?.[input.loopId];
+      this.#deps.state.saveCastState(input.pi, state);
+    }
+
+    try {
+      const result = await fanIn({
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        cwd: state.cwd,
+        repositoryRoot: this.#repositoryRoot ?? state.cwd,
+        baseline: run.baseline,
+        queueOrder: run.queueOrder,
+        lanes: run.queueOrder.map((laneId, queueIndex) => {
+          const lane = run.lanes[laneId]!;
+          return {
+            laneId,
+            streamIndex: lane.streamIndex,
+            queueIndex,
+            workItemIndexes: [...lane.workItemIndexes],
+            status: lane.status,
+            acceptedHead: lane.acceptedHead,
+            workspace: lane.workspace,
+          };
+        }),
+      });
+      const finalPhase = applyParallelRunPhaseTransition(this.#run ?? run, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        phase: result.outcome === "conflict" ? "conflict" : "evaluating",
+        fanInPhase: result.outcome === "conflict" ? "conflict" : "accepted",
+        timestamp: result.completedAt,
+      });
+      if (finalPhase.applied) {
+        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: finalPhase.state } });
+        this.#run = state.parallelRuns?.[input.loopId];
+      }
+      const provenance = applyParallelFanInProvenanceToCastState(state, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        provenance: result,
+        timestamp: result.completedAt,
+      });
+      if (provenance.applied) replaceState(state, provenance.state);
+      this.#run = state.parallelRuns?.[input.loopId];
+      this.#deps.state.saveCastState(input.pi, state);
+      try {
+        await this.#deps.artifacts?.fanIn?.write({ artifactRoot: state.artifactRoot, provenance: result, satisfied: result.satisfied });
+      } catch {
+        // Fan-in state is durable even when the optional convenience artifact fails.
+      }
+      await this.#appendEvent(state, result.outcome === "conflict" ? "parallel_fan_in_conflict" : "parallel_fan_in_clean", {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        orderedHeads: result.orderedHeads,
+        integrationRevision: result.integrationRevision,
+        conflictedPaths: result.conflictedPaths,
+        operationId: result.operationId,
+      });
+    } catch (error) {
+      const message = boundedFailureReason(errorMessage(error));
+      const failed = applyParallelRunPhaseTransition(this.#run ?? run, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        phase: "failed",
+        fanInPhase: "failed",
+        timestamp: this.#now(),
+      });
+      if (failed.applied) {
+        const next = { ...failed.state, diagnostics: [...failed.state.diagnostics, { code: "parallel_fan_in_failed", message, severity: "error" as const, occurredAt: this.#now() }].slice(-64) };
+        replaceState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: next } });
+        this.#run = state.parallelRuns?.[input.loopId];
+        this.#deps.state.saveCastState(input.pi, state);
+      }
+      await this.#appendEvent(state, "parallel_fan_in_failed", { parentCastId: state.castId, loopId: input.loopId, runId: run.runId, error: message });
+    }
   }
 
   async #initializeLaneArtifacts(identity: ParallelLaneArtifactIdentity, state: MateriaCastState): Promise<ParallelLaneArtifactPaths | undefined> {

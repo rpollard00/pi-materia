@@ -1,6 +1,7 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type {
+  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
@@ -9,6 +10,7 @@ import type {
   ParallelLaneRevisionArtifact,
 } from "../application/index.js";
 import type { ChildCastTerminalResult, ChildCastUsage } from "../application/childCastRunner.js";
+import type { MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
 import { boundedMessage, clone, writeJsonAtomically } from "./piChildCastSupport.js";
 
 const MAX_DIAGNOSTICS = 24;
@@ -21,7 +23,7 @@ const MAX_DIAGNOSTIC_DETAILS_BYTES = 4_096;
  * directory; this store writes the stable index and coordinator-owned records
  * beside them.
  */
-export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort {
+export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, ParallelFanInArtifactPort {
   readonly #eventTails = new Map<string, Promise<void>>();
 
   async initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths> {
@@ -81,6 +83,20 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort {
     });
   }
 
+  async writeFanIn(input: { artifactRoot: string; provenance: MateriaParallelFanInProvenance; satisfied: boolean }): Promise<void> {
+    const directory = path.join(input.artifactRoot, "parallel", safeArtifactPart(input.provenance.loopId));
+    await mkdir(directory, { recursive: true });
+    await writeJsonAtomically(path.join(directory, "fan-in.json"), {
+      version: 1,
+      satisfied: input.satisfied,
+      provenance: clone(input.provenance),
+    });
+  }
+
+  async write(input: { artifactRoot: string; provenance: MateriaParallelFanInProvenance; satisfied: boolean }): Promise<void> {
+    return this.writeFanIn(input);
+  }
+
   async writeUsage(input: ParallelLaneArtifactIdentity & { usage: ChildCastUsage }): Promise<void> {
     const paths = artifactPaths(input.paths, input.attempt);
     await writeJsonAtomically(paths.usagePath, {
@@ -128,6 +144,10 @@ function artifactPaths(paths: { sessionPath: string; artifactRoot: string; runDi
     stderrPath: path.join(paths.artifactRoot, `child-stderr${suffix}.log`),
     socketArtifactsPath: paths.artifactRoot,
   };
+}
+
+function safeArtifactPart(value: string): string {
+  return value.trim().replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "parallel";
 }
 
 function identityForArtifact(input: ParallelLaneArtifactIdentity): Record<string, unknown> {

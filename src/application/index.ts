@@ -4,3 +4,4 @@ export * from "./catalogActions.js";
 export * from "./useCases.js";
 export * from "./handoff.js";
 export * from "./workflowTransitions.js";
+export * from "./parallelArtifacts.js";

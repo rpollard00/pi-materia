@@ -3,6 +3,7 @@ import type {
   MateriaParallelConfigIdentity,
   MateriaParallelDiagnostic,
   MateriaParallelFanInPhase,
+  MateriaParallelFanInProvenance,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
@@ -31,7 +32,8 @@ export type ParallelTransitionIgnoreReason =
   | "run_terminal"
   | "phase_regression"
   | "fan_in_phase_regression"
-  | "event_regression";
+  | "event_regression"
+  | "fan_in_provenance_conflict";
 
 export interface CreateParallelRunStateInput {
   parentCastId: string;
@@ -90,6 +92,11 @@ export interface ParallelRunGuard {
 export interface ParallelRunPhaseTransitionInput extends ParallelRunGuard {
   phase?: MateriaParallelRunPhase;
   fanInPhase?: MateriaParallelFanInPhase;
+  timestamp?: number;
+}
+
+export interface ParallelFanInProvenanceTransitionInput extends ParallelRunGuard {
+  provenance: MateriaParallelFanInProvenance;
   timestamp?: number;
 }
 
@@ -335,6 +342,27 @@ export function transitionParallelRunPhase(
 
 export const applyParallelRunPhaseTransition = transitionParallelRunPhase;
 export const guardedParallelRunPhaseTransition = transitionParallelRunPhase;
+
+/** Persist one guarded fan-in result without allowing a second result to replace it. */
+export function recordParallelFanInProvenance(
+  state: MateriaParallelRunState,
+  input: ParallelFanInProvenanceTransitionInput,
+): ParallelRunTransitionResult {
+  const guardFailure = runGuardFailureFor(state, input);
+  if (guardFailure) return ignored(state, guardFailure);
+  if (state.fanInProvenance !== undefined) {
+    return JSON.stringify(state.fanInProvenance) === JSON.stringify(input.provenance)
+      ? { state, applied: false, reason: "fan_in_provenance_conflict" }
+      : ignored(state, "fan_in_provenance_conflict");
+  }
+  const timestamp = finiteTimestamp(input.timestamp, state.updatedAt);
+  const next = clone(state);
+  next.fanInProvenance = clone(input.provenance);
+  next.updatedAt = Math.max(state.updatedAt, timestamp);
+  return { state: next, applied: true };
+}
+
+export const applyParallelFanInProvenance = recordParallelFanInProvenance;
 
 export interface RestartParallelLaneInput extends ParallelTransitionGuard {
   timestamp?: number;

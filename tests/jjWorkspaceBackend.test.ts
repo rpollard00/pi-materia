@@ -40,6 +40,42 @@ function fakeJj(repositoryRoot: string) {
   return { command, calls, tracked };
 }
 
+function fakeFanInJj(repositoryRoot: string) {
+  const tracked = new Set<string>();
+  const calls: JjCommandInput[] = [];
+  const command: JjCommandExecutor = async (input) => {
+    calls.push({ ...input, args: [...input.args] });
+    const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
+    if (args[0] === "root") return { stdout: `${repositoryRoot}\n`, stderr: "", exitCode: 0 };
+    if (args[0] === "log") {
+      const template = args[args.indexOf("-T") + 1] ?? "";
+      if (template.includes("parents.map")) {
+        return { stdout: "1234567890abcdef\tintegration-change\tbaseline\tfalse\t\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "baseline\tbaseline-change\n", stderr: "", exitCode: 0 };
+    }
+    if (args[0] === "status") return { stdout: "The working copy has no changes.\n", stderr: "", exitCode: 0 };
+    if (args[0] === "op") return { stdout: "operation-latest\n", stderr: "", exitCode: 0 };
+    if (args[0] === "workspace" && args[1] === "add") {
+      const name = args[args.indexOf("--name") + 1]!;
+      const destination = args.at(-1)!;
+      await mkdir(destination, { recursive: true });
+      tracked.add(name);
+      return { stdout: "", stderr: "", exitCode: 0, operationId: `operation-add-${name}` };
+    }
+    if (args[0] === "workspace" && args[1] === "list") {
+      return { stdout: [...tracked].map((name) => `${name}: fake\n`).join(""), stderr: "", exitCode: 0 };
+    }
+    if (args[0] === "workspace" && args[1] === "forget") {
+      tracked.delete(args[2]!);
+      return { stdout: "", stderr: "", exitCode: 0, operationId: `operation-forget-${args[2]}` };
+    }
+    if (args[0] === "new") return { stdout: "Created new commit integration 12345678\n", stderr: "", exitCode: 0, operationId: "operation-fan-in" };
+    return { stdout: "", stderr: `unsupported fake command: ${args.join(" ")}`, exitCode: 1 };
+  };
+  return { command, calls };
+}
+
 describe("jj workspace lifecycle backend", () => {
   test("pins, creates idempotently, inspects, forgets, and removes owned lanes", async () => {
     const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
@@ -70,6 +106,35 @@ describe("jj workspace lifecycle backend", () => {
     const removed = await backend.removeOwnedDirectory(created);
     expect(removed.removed).toBe(true);
     expect(await backend.inspect(created)).toBeUndefined();
+  });
+
+  test("deduplicates identical accepted heads while retaining every lane in provenance", async () => {
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
+    const fake = fakeFanInJj(repositoryRoot);
+    const backend = createJjWorkspaceBackend({ workspaceRoot, command: fake.command });
+
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    const laneA = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-a" });
+    const laneB = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-b" });
+    const result = await backend.fanIn({
+      parentCastId: "cast",
+      loopId: "build",
+      runId: "run",
+      cwd: repositoryRoot,
+      baseline: pinned.baseline,
+      queueOrder: ["lane-a", "lane-b"],
+      lanes: [
+        { laneId: "lane-a", streamIndex: 0, queueIndex: 0, workItemIndexes: [0], status: "accepted", acceptedHead: pinned.baseline, workspace: laneA },
+        { laneId: "lane-b", streamIndex: 1, queueIndex: 1, workItemIndexes: [1], status: "accepted", acceptedHead: pinned.baseline, workspace: laneB },
+      ],
+    });
+
+    const newCall = fake.calls.find(({ args }) => args.includes("new"));
+    expect(newCall?.args.filter((arg) => arg !== "--ignore-working-copy")).toEqual(["new", "--no-edit", pinned.baseline.commitId]);
+    expect(result.orderedHeads.map((entry) => entry.laneId)).toEqual(["lane-a", "lane-b"]);
+    expect(result.orderedHeads.map((entry) => entry.head)).toEqual([pinned.baseline, pinned.baseline]);
+    expect(result.integrationRevision).toEqual({ commitId: "1234567890abcdef", changeId: "integration-change" });
   });
 
   test("rejects repository-local roots and traversal/symlink cleanup escapes", async () => {

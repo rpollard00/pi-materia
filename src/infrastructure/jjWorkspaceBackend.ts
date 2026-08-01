@@ -1,6 +1,7 @@
 import { lstat, mkdir, readFile, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import type { MateriaParallelFanInHead, MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
 import {
   assertAbsentOrDirectory,
   assertNoSymlinkAncestors,
@@ -34,6 +35,7 @@ export const DEFAULT_JJ_WORKSPACE_ROOT = path.join(os.tmpdir(), "pi-materia", "j
 
 const REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\n"';
 const OPERATION_TEMPLATE = 'id ++ "\\n"';
+const FAN_IN_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ conflicted_files.map(|f| f.path()).join("|") ++ "\\n"';
 
 export interface JjCommandInput {
   executable: string;
@@ -150,6 +152,34 @@ export interface JjWorkspaceRemovalResult {
   removed: boolean;
 }
 
+export interface JjFanInLaneInput {
+  laneId: string;
+  streamIndex: number;
+  queueIndex: number;
+  workItemIndexes: readonly number[];
+  status: "queued" | "running" | "accepted" | "failed" | "interrupted";
+  acceptedHead?: JjRevisionIdentity;
+  workspace?: JjWorkspaceReference;
+}
+
+export interface JjFanInInput {
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  cwd: string;
+  repositoryRoot?: string;
+  baseline: JjRevisionIdentity;
+  /** Normalized stream order. Completion order is deliberately ignored. */
+  queueOrder: readonly string[];
+  lanes: readonly JjFanInLaneInput[];
+  now?: number;
+}
+
+export interface JjFanInResult extends MateriaParallelFanInProvenance {
+  /** True for a clean integration and false for a materialized conflict. */
+  satisfied: boolean;
+}
+
 export class JjWorkspaceError extends Error {
   readonly code: string;
 
@@ -239,6 +269,122 @@ export class JjWorkspaceBackend {
   }
 
   /**
+   * Materialize one deterministic parent merge from accepted lane heads.
+   *
+   * All verification happens before `jj new`. The command is deliberately run
+   * with --ignore-working-copy: jj creates the integration revision in the
+   * repository operation while leaving the parent working-copy commit and
+   * filesystem untouched. The returned provenance proves both the pre-fan-in
+   * parent revision and the exact ordered parents of the new revision.
+   */
+  async fanIn(input: JjFanInInput): Promise<JjFanInResult> {
+    validateFanInInput(input);
+    return this.#withMutation(async () => {
+      const capability = await this.verifyRepository(input.repositoryRoot ?? input.cwd);
+      const parentBefore = await this.#readRevision(capability.repositoryRoot, "@");
+      if (!sameRevision(parentBefore, input.baseline)) {
+        throw new JjWorkspaceError("fan_in_parent_drift", `Parent working-copy revision ${parentBefore.commitId} does not match pinned baseline ${input.baseline.commitId}.`);
+      }
+      const parentStatus = await this.#run(["status"], capability.repositoryRoot);
+      this.#requireSuccess(parentStatus, ["status"], capability.repositoryRoot);
+      if (!isCleanJjStatus(parentStatus.stdout)) {
+        throw new JjWorkspaceError("fan_in_parent_dirty", "Parent working copy has changes; fan-in refuses to snapshot or rewrite it.");
+      }
+
+      const ordered = orderFanInLanes(input);
+      const startedAt = this.#now();
+      const orderedHeads: MateriaParallelFanInHead[] = [];
+      for (const lane of ordered) {
+        const workspaceReference = lane.workspace;
+        if (!workspaceReference) throw new JjWorkspaceError("fan_in_workspace_missing", `Parallel lane ${JSON.stringify(lane.laneId)} has no workspace reference.`);
+        const manifest = await this.#loadOwnedReference(workspaceReference);
+        this.#validateManifestOwnership(manifest, {
+          owner: { parentCastId: input.parentCastId, loopId: input.loopId, laneId: lane.laneId },
+          repositoryRoot: capability.repositoryRoot,
+          workspaceRoot: manifest.workspaceRoot,
+          workspacePath: manifest.workspacePath,
+        });
+        if (!sameRevision(manifest.baseline, input.baseline)) {
+          throw new JjWorkspaceError("fan_in_baseline_mismatch", `Lane ${JSON.stringify(lane.laneId)} workspace is pinned to a different baseline.`);
+        }
+
+        const inspection = await this.#inspectLoaded(manifest);
+        if (!inspection.exists || !inspection.tracked || !inspection.currentRevision) {
+          throw new JjWorkspaceError("fan_in_workspace_lost", `Lane ${JSON.stringify(lane.laneId)} workspace is missing or no longer tracked.`);
+        }
+        // A normal status command snapshots the lane filesystem, but only in
+        // the lane workspace. A dirty result is rejected rather than silently
+        // turning uncheckpointed work into an eligible head.
+        const laneStatus = await this.#run(["status"], manifest.workspacePath, false);
+        this.#requireSuccess(laneStatus, ["status"], manifest.workspacePath, false);
+        if (!isCleanJjStatus(laneStatus.stdout)) {
+          throw new JjWorkspaceError("fan_in_lane_dirty", `Lane ${JSON.stringify(lane.laneId)} workspace has uncheckpointed changes.`);
+        }
+        const acceptedHead = await this.#readRevision(manifest.workspacePath, lane.acceptedHead!.commitId);
+        if (!sameRevision(acceptedHead, lane.acceptedHead!)) {
+          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted head identity changed before fan-in.`);
+        }
+        if (!(await this.#isAncestor(manifest.workspacePath, acceptedHead.commitId, inspection.currentRevision.commitId))) {
+          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} workspace no longer descends from its accepted head.`);
+        }
+        orderedHeads.push({
+          laneId: lane.laneId,
+          streamIndex: lane.streamIndex,
+          queueIndex: lane.queueIndex,
+          workItemIndexes: [...lane.workItemIndexes],
+          head: acceptedHead,
+          workspace: workspaceOwnershipFromManifest(manifest),
+          workspaceRevision: inspection.currentRevision,
+        });
+      }
+
+      // jj models parents as a set: when multiple no-op lanes retain the same
+      // baseline head, passing that commit more than once still creates only
+      // one parent. Keep every lane in orderedHeads for provenance, but use
+      // jj's canonical unique parent list for creation and verification.
+      const parentIds = uniqueParentIds(orderedHeads.map((entry) => entry.head.commitId));
+      const createArgs = ["new", "--no-edit", ...parentIds];
+      const created = await this.#run(createArgs, capability.repositoryRoot);
+      this.#requireSuccess(created, createArgs, capability.repositoryRoot);
+      const integration = await this.#findIntegrationRevision(capability.repositoryRoot, parentIds, created);
+      const parentAfter = await this.#readRevision(capability.repositoryRoot, "@");
+      if (!sameRevision(parentBefore, parentAfter)) {
+        throw new JjWorkspaceError("fan_in_parent_changed", "jj fan-in changed the parent working-copy revision unexpectedly.");
+      }
+      const completedAt = this.#now();
+      const operationId = created.operationId ?? await this.#latestOperationId(capability.repositoryRoot);
+      const conflictDetails = integration.conflictedPaths.map((pathValue) => ({
+        path: boundedFanInText(pathValue, 512),
+        message: boundedFanInText(`jj reported a merge conflict for ${pathValue}`, 1_000),
+      }));
+      const outcome = integration.conflict ? "conflict" : "clean";
+      return {
+        version: 1,
+        parentCastId: input.parentCastId,
+        loopId: input.loopId,
+        runId: input.runId,
+        baseline: { ...input.baseline },
+        parentRevisionBefore: parentBefore,
+        parentRevisionAfter: parentAfter,
+        orderedHeads,
+        integrationRevision: integration.revision,
+        outcome,
+        conflictedPaths: integration.conflictedPaths,
+        conflictDetails,
+        operationId,
+        startedAt,
+        completedAt,
+        satisfied: outcome === "clean",
+      };
+    });
+  }
+
+  /** Alias for callers that name the operation createIntegrationRevision. */
+  async createIntegrationRevision(input: JjFanInInput): Promise<JjFanInResult> {
+    return this.fanIn(input);
+  }
+
+  /**
    * Create (or recover) one uniquely named lane workspace.
    *
    * The ownership manifest is outside the lane directory so it cannot become
@@ -275,22 +421,47 @@ export class JjWorkspaceBackend {
       await assertAbsentOrDirectory(workspacePath, "workspace destination");
       if (await exists(manifestPath)) throw new JjWorkspaceError("manifest_conflict", `Ownership manifest already exists at ${JSON.stringify(manifestPath)}.`);
 
+      const parentBeforeCreate = await this.#readRevision(capability.repositoryRoot, "@");
       const addArgs = ["workspace", "add", "--name", workspaceName, "--revision", baseline.commitId, workspacePath];
-      // Recent jj versions materialize and register the workspace, then
-      // return a non-zero status because the parent WC is intentionally not
-      // updated under --ignore-working-copy. Accept that precise outcome only
-      // after proving both the lane directory and workspace registration
-      // exist; never retry without --ignore-working-copy, since doing so can
-      // snapshot/rewrite a dirty parent working copy.
-      const addResult = await this.#run(addArgs, capability.repositoryRoot);
+      // Recent jj versions may register the workspace, then return a
+      // non-zero status because the parent WC cannot be updated under
+      // --ignore-working-copy. Accept that precise outcome only after proving
+      // both the lane directory and workspace registration exist. If the lane
+      // was left stale, the guarded recovery below retries only after a
+      // no-snapshot parent cleanliness check.
+      let addResult = await this.#run(addArgs, capability.repositoryRoot);
       if (addResult.exitCode !== 0) {
         const intentionalNoParentUpdate = /must be able to update the working copy|don't use --ignore-working-copy/i.test(addResult.stderr);
         const createdWithoutParentUpdate = await isDirectory(workspacePath) && await this.#isTracked(capability.repositoryRoot, workspaceName);
         if (!intentionalNoParentUpdate || !createdWithoutParentUpdate) this.#requireSuccess(addResult, addArgs, capability.repositoryRoot);
+
+        // Some jj versions register a workspace under --ignore-working-copy
+        // but cannot materialize it at the requested revision. Recover by
+        // forgetting only that just-created workspace, prove the parent is
+        // clean without snapshotting it, and retry the add in the lane
+        // workspace mode. The normal retry updates only the new lane WC; the
+        // parent revision is checked again after creation.
+        const parentStatus = await this.#run(["status"], capability.repositoryRoot);
+        if (parentStatus.exitCode !== 0) {
+          await this.#forgetWorkspaceByName(capability.repositoryRoot, workspaceName).catch(() => undefined);
+          await removeOwnedDirectory(workspacePath, root).catch(() => undefined);
+          this.#requireSuccess(parentStatus, ["status"], capability.repositoryRoot);
+        }
+        if (!isCleanJjStatus(parentStatus.stdout)) {
+          await this.#forgetWorkspaceByName(capability.repositoryRoot, workspaceName).catch(() => undefined);
+          await removeOwnedDirectory(workspacePath, root).catch(() => undefined);
+          throw new JjWorkspaceError("parent_dirty", "Parent working copy has changes; refusing a workspace retry that could snapshot it.");
+        }
+        await this.#forgetWorkspaceByName(capability.repositoryRoot, workspaceName);
+        await removeOwnedDirectory(workspacePath, root);
+        addResult = await this.#run(addArgs, capability.repositoryRoot, false);
+        this.#requireSuccess(addResult, addArgs, capability.repositoryRoot, false);
       }
       const operationId = addResult.operationId ?? await this.#latestOperationId(capability.repositoryRoot);
       try {
         const revision = await this.#readRevision(workspacePath, "@");
+        const parentAfterCreate = await this.#readRevision(capability.repositoryRoot, "@");
+        if (!sameRevision(parentBeforeCreate, parentAfterCreate)) throw new JjWorkspaceError("parent_changed", "Lane workspace creation changed the parent working-copy revision.");
         const timestamp = this.#now();
         const manifest: JjWorkspaceManifest = {
           version: JJ_WORKSPACE_MANIFEST_VERSION,
@@ -569,6 +740,57 @@ export class JjWorkspaceBackend {
     await assertNoSymlinkComponents(resolvedRoot, resolvedTarget);
   }
 
+  async #isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
+    const args = ["log", "-r", `${ancestor}::${descendant}`, "--no-graph", "-T", 'commit_id ++ "\\n"'];
+    const result = await this.#run(args, cwd);
+    if (result.exitCode !== 0) return false;
+    // A successful non-empty range means the accepted head is reachable from
+    // the observed workspace revision. Do not depend on template whitespace
+    // or abbreviated-id rendering when deciding ancestry.
+    return result.stdout.trim().length > 0;
+  }
+
+  async #findIntegrationRevision(repositoryRoot: string, expectedParents: readonly string[], created: JjCommandResult): Promise<{ revision: JjRevisionIdentity; conflict: boolean; conflictedPaths: string[] }> {
+    // Be defensive for callers that supply lane heads directly: jj silently
+    // deduplicates repeated parents, so verification must compare the same
+    // canonical parent list that jj records.
+    const canonicalExpectedParents = uniqueParentIds(expectedParents);
+    const candidates: string[] = [];
+    const createdText = `${created.stdout}\n${created.stderr}`;
+    const createdMatch = /created new commit\s+\S+\s+([0-9a-f]{8,64})/i.exec(createdText);
+    if (createdMatch?.[1]) candidates.push(createdMatch[1]);
+
+    const inspectCandidate = async (candidate: string): Promise<{ revision: JjRevisionIdentity; conflict: boolean; conflictedPaths: string[] } | undefined> => {
+      const details = await this.#readRevisionDetails(repositoryRoot, candidate).catch(() => undefined);
+      if (!details || !sameStringArray(details.parents, canonicalExpectedParents)) return undefined;
+      return { revision: { commitId: details.commitId, changeId: details.changeId }, conflict: details.conflict, conflictedPaths: details.conflictedPaths };
+    };
+    for (const candidate of candidates) {
+      const found = await inspectCandidate(candidate);
+      if (found) return found;
+    }
+
+    const args = ["log", "-r", "heads(all())", "--no-graph", "-T", FAN_IN_REVISION_TEMPLATE];
+    const listed = await this.#run(args, repositoryRoot);
+    this.#requireSuccess(listed, args, repositoryRoot);
+    for (const line of listed.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
+      const details = parseRevisionDetails(line);
+      if (!details || !sameStringArray(details.parents, canonicalExpectedParents)) continue;
+      return { revision: { commitId: details.commitId, changeId: details.changeId }, conflict: details.conflict, conflictedPaths: details.conflictedPaths };
+    }
+    throw new JjWorkspaceError("fan_in_revision_missing", "jj created no verifiable integration revision with the ordered lane heads as parents.");
+  }
+
+  async #readRevisionDetails(cwd: string, revset: string): Promise<RevisionDetails> {
+    const args = ["log", "-r", revset, "--no-graph", "-T", FAN_IN_REVISION_TEMPLATE];
+    const result = await this.#run(args, cwd);
+    this.#requireSuccess(result, args, cwd);
+    const line = result.stdout.trim().split(/\r?\n/).map((value) => value.trim()).find(Boolean);
+    const details = line ? parseRevisionDetails(line) : undefined;
+    if (!details) throw new JjWorkspaceError("revision_missing", `jj did not return integration metadata for ${JSON.stringify(revset)}.`);
+    return details;
+  }
+
   async #readRevision(cwd: string, revset: string): Promise<JjRevisionIdentity> {
     const args = ["log", "-r", revset, "--no-graph", "-T", REVISION_TEMPLATE];
     const result = await this.#run(args, cwd);
@@ -621,6 +843,131 @@ export class JjWorkspaceBackend {
     await previous;
     try { return await task(); } finally { release(); }
   }
+}
+
+interface RevisionDetails {
+  commitId: string;
+  changeId: string;
+  parents: string[];
+  conflict: boolean;
+  conflictedPaths: string[];
+}
+
+function validateFanInInput(input: JjFanInInput): void {
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined || ["baseline", "queueOrder", "lanes", "now"].includes(key)) continue;
+    if (typeof value !== "string" || value.trim().length === 0) throw new JjWorkspaceError("fan_in_input_invalid", `Fan-in ${key} must be a non-empty string.`);
+  }
+  if (!input.baseline || typeof input.baseline.commitId !== "string" || input.baseline.commitId.trim().length === 0 || typeof input.baseline.changeId !== "string" || input.baseline.changeId.trim().length === 0) {
+    throw new JjWorkspaceError("fan_in_baseline_invalid", "Fan-in baseline must contain commitId and changeId.");
+  }
+  if (!Array.isArray(input.queueOrder) || input.queueOrder.length === 0) throw new JjWorkspaceError("fan_in_order_invalid", "Fan-in queueOrder must be non-empty.");
+  if (!Array.isArray(input.lanes)) throw new JjWorkspaceError("fan_in_lanes_invalid", "Fan-in lanes must be an array.");
+}
+
+function orderFanInLanes(input: JjFanInInput): JjFanInLaneInput[] {
+  const byId = new Map<string, JjFanInLaneInput>();
+  for (const lane of input.lanes) {
+    if (!lane || typeof lane.laneId !== "string" || lane.laneId.trim().length === 0 || byId.has(lane.laneId)) {
+      throw new JjWorkspaceError("fan_in_order_invalid", "Fan-in lanes contain a missing or duplicate lane identity.");
+    }
+    byId.set(lane.laneId, lane);
+  }
+  const ordered: JjFanInLaneInput[] = [];
+  const seen = new Set<string>();
+  const streamIndexes = new Set<number>();
+  for (const laneId of input.queueOrder) {
+    if (typeof laneId !== "string" || laneId.trim().length === 0 || seen.has(laneId)) throw new JjWorkspaceError("fan_in_order_invalid", "Fan-in queueOrder contains a missing or duplicate lane identity.");
+    const lane = byId.get(laneId);
+    if (!lane) throw new JjWorkspaceError("fan_in_order_incomplete", `Fan-in queueOrder is missing lane ${JSON.stringify(laneId)}.`);
+    seen.add(laneId);
+    if (!Number.isSafeInteger(lane.streamIndex) || lane.streamIndex < 0 || streamIndexes.has(lane.streamIndex)) throw new JjWorkspaceError("fan_in_order_invalid", `Fan-in lane ${JSON.stringify(laneId)} has an invalid or duplicate stream index.`);
+    streamIndexes.add(lane.streamIndex);
+    if (lane.status !== "accepted") throw new JjWorkspaceError("fan_in_lane_not_accepted", `Fan-in lane ${JSON.stringify(laneId)} is ${JSON.stringify(lane.status)}; all lanes must be accepted.`);
+    if (!lane.acceptedHead || !isRevision(lane.acceptedHead)) throw new JjWorkspaceError("fan_in_head_missing", `Fan-in lane ${JSON.stringify(laneId)} has no accepted head.`);
+    if (!lane.workspace) throw new JjWorkspaceError("fan_in_workspace_missing", `Fan-in lane ${JSON.stringify(laneId)} has no workspace reference.`);
+    ordered.push(lane);
+  }
+  if (seen.size !== byId.size) throw new JjWorkspaceError("fan_in_order_incomplete", "Fan-in queueOrder does not cover every lane.");
+  return ordered;
+}
+
+function parseRevisionDetails(line: string): RevisionDetails | undefined {
+  const [commitId, changeId, parentText = "", conflictText = "false", pathsText = ""] = line.split("\t");
+  if (!commitId || !changeId) return undefined;
+  return {
+    commitId,
+    changeId,
+    parents: parentText ? parentText.split(",").filter(Boolean) : [],
+    conflict: conflictText.trim().toLowerCase() === "true",
+    conflictedPaths: pathsText ? pathsText.split("|").filter(Boolean).slice(0, 64).map((value) => boundedFanInText(value, 512)) : [],
+  };
+}
+
+function boundedFanInText(value: string, max: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/** jj removes duplicate parents while preserving their first-seen order. */
+function uniqueParentIds(parentIds: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return parentIds.filter((parentId) => {
+    if (seen.has(parentId)) return false;
+    seen.add(parentId);
+    return true;
+  });
+}
+
+function isRevision(value: unknown): value is JjRevisionIdentity {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.commitId === "string" && record.commitId.trim().length > 0
+    && typeof record.changeId === "string" && record.changeId.trim().length > 0;
+}
+
+function sameRevision(left: JjRevisionIdentity, right: JjRevisionIdentity): boolean {
+  return left.commitId === right.commitId && left.changeId === right.changeId;
+}
+
+function isCleanJjStatus(stdout: string): boolean {
+  const text = stdout.trim();
+  if (text.length === 0 || /working copy (?:has no changes|is clean)/i.test(text) || /no changes/i.test(text)) return true;
+  return !/working copy changes\s*:/i.test(text) && !/^\s*[madrcu!?]\s+\S+/im.test(text);
+}
+
+function workspaceOwnershipFromManifest(manifest: JjWorkspaceManifest): {
+  backend: "jj";
+  parentCastId: string;
+  loopId: string;
+  laneId: string;
+  repositoryRoot: string;
+  workspaceRoot: string;
+  workspacePath: string;
+  workspaceName: string;
+  baseline: JjRevisionIdentity;
+  revision: JjRevisionIdentity;
+  operationId: string;
+  manifestPath?: string;
+  state: JjWorkspaceLifecycleState;
+} {
+  return {
+    backend: "jj",
+    ...manifest.owner,
+    repositoryRoot: manifest.repositoryRoot,
+    workspaceRoot: manifest.workspaceRoot,
+    workspacePath: manifest.workspacePath,
+    workspaceName: manifest.workspaceName,
+    baseline: { ...manifest.baseline },
+    revision: { ...manifest.revision },
+    operationId: manifest.operationId,
+    manifestPath: manifestPathFor(manifest.workspaceRoot, manifest.workspaceName),
+    state: manifest.state,
+  };
 }
 
 /** Factory kept alongside the adapter for dependency-injected infrastructure wiring. */

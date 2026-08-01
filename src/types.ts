@@ -26,6 +26,8 @@ export type {
   MateriaParallelWorkspaceMode,
   MateriaParallelWorkspaceOwnership,
   MateriaParallelFanInBehavior,
+  MateriaParallelFanInHead,
+  MateriaParallelFanInProvenance,
   MateriaParallelUsageTotals,
   MateriaParallelRunRecord,
   MateriaParallelLaneRecord,

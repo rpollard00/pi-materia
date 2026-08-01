@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { HandoffWorkItem } from "../domain/handoff.js";
+import type { ParallelFanInResult } from "../domain/parallelFanIn.js";
 import type {
   MateriaCastState,
   MateriaParallelRevisionIdentity,
@@ -54,6 +55,25 @@ export interface ParallelWorkspacePort {
     baseline: ParallelWorkspaceRevision;
   }): Promise<ParallelWorkspaceRecord>;
   inspect?(reference: { workspacePath: string; workspaceRoot: string; workspaceName: string }): Promise<ParallelWorkspaceInspection | undefined>;
+  /** Materialize the ordered parent integration only after all lanes are accepted. */
+  fanIn?(input: {
+    parentCastId: string;
+    loopId: string;
+    runId: string;
+    cwd: string;
+    repositoryRoot: string;
+    baseline: ParallelWorkspaceRevision;
+    queueOrder: readonly string[];
+    lanes: readonly {
+      laneId: string;
+      streamIndex: number;
+      queueIndex: number;
+      workItemIndexes: readonly number[];
+      status: MateriaParallelRunState["lanes"][string]["status"];
+      acceptedHead?: ParallelWorkspaceRevision;
+      workspace?: MateriaParallelWorkspaceOwnership;
+    }[];
+  }): Promise<ParallelFanInResult>;
 }
 
 export function readNormalizedParallelPlan(state: MateriaCastState, pathValue: string): NormalizedParallelPlan {

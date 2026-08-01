@@ -3,6 +3,7 @@ export * from "./parallelLoop.js";
 export * from "./parallelSafety.js";
 export * from "./parallelRunTypes.js";
 export * from "./parallelRun.js";
+export * from "./parallelFanIn.js";
 export * from "./socket.js";
 export * from "./handoff.js";
 export * from "./loadout.js";
