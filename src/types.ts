@@ -444,7 +444,7 @@ export interface MateriaCastState {
   recoveryErrorMessages?: Record<string, string>;
   /** Structured terminal metadata for casts failed by same-socket recovery exhaustion or edge traversal exhaustion. */
   recoveryExhaustion?: MateriaRecoveryExhaustion;
-  /** Per-edge cast-local effective traversal limits, keyed like edgeTraversals. Populated on first traversal and updated by revive. */
+  /** Per-edge cast-local effective traversal limits scoped by edge and work-item identity (keyed like scopedEdgeRetryKey). Populated on first traversal and updated by revive. Legacy aggregate from->to keys remain readable as a fallback. */
   edgeAllowances?: Record<string, MateriaEdgeAllowance>;
   /** Clearable flag so the runtime can drop stale timeout hints after a successful retry. */
   recoveryHintSuppressed?: boolean;

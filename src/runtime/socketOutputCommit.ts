@@ -347,7 +347,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
           enforceEdgeLimit(state, socket.id, nextEdge, config);
         } catch (error) {
           if (error instanceof MateriaEdgeTraversalExhaustionError) {
-            const allowance = state.edgeAllowances?.[error.key];
+            const allowance = state.edgeAllowances?.[error.scopedKey] ?? state.edgeAllowances?.[error.key];
             state.recoveryExhaustion = {
               kind: "edge_traversal_exhausted",
               from: error.from,

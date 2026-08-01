@@ -1,4 +1,5 @@
 import { isValidRecoveryAllowance, recoveryIdentityKey } from "../application/recoveryPolicy.js";
+import { scopedEdgeRetryKey } from "../application/workflowTransitions.js";
 import { canonicalOutgoingEdges } from "../graph/graphValidation.js";
 import { loopSockets, resolvedPipelineSockets } from "../loadout/loadoutAccessors.js";
 import { currentCastSocketId } from "../runtime/castStateAccessors.js";
@@ -90,7 +91,11 @@ function relevantReworkEdgeMax(state: MateriaCastState, socketId: string): numbe
     for (const edge of canonicalOutgoingEdges(effectiveResolvedSocketConfig(socket))) {
       // A rework edge targets the current socket, re-entering it within its loop.
       if (edge.to !== socketId) continue;
-      const effectiveLimit = state.edgeAllowances?.[edgeKey(memberId, edge.to)]?.effectiveLimit;
+      // Prefer the scoped edge-and-item allowance; fall back to the aggregate
+      // key so legacy persisted allowances stay presentable.
+      const effectiveLimit =
+        state.edgeAllowances?.[scopedEdgeRetryKey(memberId, edge.to, state)]?.effectiveLimit ??
+        state.edgeAllowances?.[edgeKey(memberId, edge.to)]?.effectiveLimit;
       if (typeof effectiveLimit === "number" && Number.isSafeInteger(effectiveLimit) && effectiveLimit > 0) {
         revived = revived === undefined ? effectiveLimit : Math.max(revived, effectiveLimit);
       }

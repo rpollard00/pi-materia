@@ -93,7 +93,10 @@ export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: Ma
   const count = (state.scopedEdgeRetries[scopedKey] ?? 0) + 1;
   state.scopedEdgeRetries[scopedKey] = count;
   const originalLimit = edge.maxTraversals;
-  const effectiveLimit = resolveEdgeEffectiveLimit(state, key, originalLimit);
+  // The revived-aware allowance is scoped by the same edge-and-item identity so
+  // reviving one work item's explicit retry budget never changes another item's
+  // allowance on the same edge.
+  const effectiveLimit = resolveEdgeEffectiveLimit(state, scopedKey, originalLimit);
   if (count > effectiveLimit) throw new MateriaEdgeTraversalExhaustionError(from, to, key, scopedKey, count, originalLimit, effectiveLimit);
 }
 
@@ -108,11 +111,11 @@ export function scopedEdgeRetryKey(from: string, to: string, state: MateriaCastS
   return itemKey === undefined ? `${from}->${to}` : `${from}->${to}@${itemKey}`;
 }
 
-function resolveEdgeEffectiveLimit(state: MateriaCastState, key: string, originalLimit: number): number {
+function resolveEdgeEffectiveLimit(state: MateriaCastState, scopedKey: string, originalLimit: number): number {
   state.edgeAllowances ??= {};
-  const existing = state.edgeAllowances[key];
+  const existing = state.edgeAllowances[scopedKey];
   if (existing && existing.originalLimit === originalLimit) return existing.effectiveLimit;
-  state.edgeAllowances[key] = { originalLimit, effectiveLimit: originalLimit, reviveCount: 0 };
+  state.edgeAllowances[scopedKey] = { originalLimit, effectiveLimit: originalLimit, reviveCount: 0 };
   return originalLimit;
 }
 

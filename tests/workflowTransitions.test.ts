@@ -141,6 +141,10 @@ describe("workflow transitions", () => {
     // Stable scoped retry counts remain item-independent while aggregate diagnostics accumulate.
     expect(cast.scopedEdgeRetries).toMatchObject({ "Socket-1->retry@WI-1": 3, "Socket-1->retry@WI-2": 3 });
     expect(cast.edgeTraversals["Socket-1->retry"]).toBe(6);
+    // Revived-aware allowances are scoped by the same edge-and-item identity so
+    // reviving WI-1's exhausted retry never changes WI-2's allowance.
+    expect(cast.edgeAllowances).toMatchObject({ "Socket-1->retry@WI-1": { originalLimit: 2, effectiveLimit: 2, reviveCount: 0 }, "Socket-1->retry@WI-2": { originalLimit: 2, effectiveLimit: 2, reviveCount: 0 } });
+    expect(cast.edgeAllowances?.["Socket-1->retry"]).toBeUndefined();
   });
 
   test("retry traversals outside item loops use a singleton scope", () => {
@@ -149,6 +153,7 @@ describe("workflow transitions", () => {
     expect(selectNextTarget(cast, current, { satisfied: false }, config)).toBe("retry");
     expect(() => selectNextTarget(cast, current, { satisfied: false }, config)).toThrow(/edge traversal limit exceeded/);
     expect(cast.scopedEdgeRetries).toEqual({ "Socket-1->retry": 2 });
+    expect(cast.edgeAllowances).toEqual({ "Socket-1->retry": { originalLimit: 1, effectiveLimit: 1, reviveCount: 0 } });
   });
 
   test("edges without explicit maxTraversals remain unbounded retry budgets", () => {

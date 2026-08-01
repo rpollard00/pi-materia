@@ -128,7 +128,8 @@ function reworkCastState(fixture: ReworkFixture): MateriaCastState {
   return {
     ...base,
     edgeAllowances: {
-      "Eval->Build": {
+      // Scoped by edge and current work-item identity (base has currentItemKey "WI-1").
+      "Eval->Build@WI-1": {
         originalLimit: fixture.edgeMax,
         effectiveLimit: fixture.effectiveEdgeLimit,
         reviveCount: 1,
@@ -195,6 +196,44 @@ describe("deriveRetryBudget graph rework retries", () => {
       reworkCastState({ attempt: 4, edgeMax: 3, effectiveEdgeLimit: 6 }),
     );
     expect(revived).toEqual({ current: 4, max: 6 });
+  });
+
+  test("a revived scoped allowance is preferred per work item", () => {
+    const scoped = reworkCastState({ attempt: 4, edgeMax: 3, effectiveEdgeLimit: 6 });
+    // A different item's larger allowance on the same edge must not leak into
+    // the current item's presentation.
+    const state: MateriaCastState = {
+      ...scoped,
+      edgeAllowances: {
+        ...scoped.edgeAllowances,
+        "Eval->Build@WI-2": { originalLimit: 3, effectiveLimit: 9, reviveCount: 1 },
+      },
+    };
+    expect(deriveReworkEdgeBudget(state)).toEqual({ current: 4, max: 6 });
+  });
+
+  test("legacy aggregate-keyed edge allowances remain presentable", () => {
+    const base = baseCastState({
+      currentSocketId: "Build",
+      phase: "Build",
+      runState: { attempt: 4 } as MateriaRunState,
+      pipeline: {
+        entry: {} as never,
+        sockets: {
+          Build: agentSocket("Build", [{ when: "always", to: "Eval" }]),
+          Eval: agentSocket("Eval", [
+            { when: "not_satisfied", to: "Build", maxTraversals: 3 },
+            { when: "satisfied", to: "end" },
+          ]),
+        },
+        loops: { work: { sockets: ["Build", "Eval"] } },
+      },
+    });
+    const state: MateriaCastState = {
+      ...base,
+      edgeAllowances: { "Eval->Build": { originalLimit: 3, effectiveLimit: 6, reviveCount: 1 } },
+    };
+    expect(deriveReworkEdgeBudget(state)).toEqual({ current: 4, max: 6 });
   });
 
   test("returns undefined when the current socket has no bounded rework edge", () => {

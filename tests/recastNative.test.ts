@@ -95,7 +95,7 @@ function makeEdgeTraversalExhaustedState(state: MateriaCastState, options: { fro
   const count = options.count ?? effectiveLimit + 1;
   const failedReason = `Materia edge traversal limit exceeded for ${from}->${to} (${count}/${effectiveLimit})`;
   return cloneState(state, {
-    edgeAllowances: { ...options.extraEdgeAllowances, [key]: { originalLimit, effectiveLimit, reviveCount } },
+    edgeAllowances: { ...options.extraEdgeAllowances, [scopedKey]: { originalLimit, effectiveLimit, reviveCount } },
     edgeTraversals: { ...state.edgeTraversals, [key]: count },
     recoveryExhaustion: {
       kind: "edge_traversal_exhausted",
@@ -575,6 +575,100 @@ describe("/materia recast", () => {
     expect(secondResume.edgeAllowances?.[edgeKey]).toMatchObject({ originalLimit: 3, effectiveLimit: 9, reviveCount: 2 });
     expect(secondResume.edgeAllowances?.[edgeKey]?.effectiveLimit).not.toBe(12); // incremental, not multiplicative
     expect(secondResume.edgeAllowances?.[otherKey]).toMatchObject({ originalLimit: 2, effectiveLimit: 2, reviveCount: 0 });
+  });
+
+  test("edge-traversal revive extends only the exhausted work item's scoped allowance", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    await harness.runCommand("materia", "cast scoped edge traversal revive");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2 (3/2)");
+    const scopedKey = "Socket-1->Socket-2@WI-1";
+    const otherItemKey = "Socket-1->Socket-2@WI-2";
+    const exhausted = makeEdgeTraversalExhaustedState(failed, {
+      from: "Socket-1",
+      to: "Socket-2",
+      scopedKey,
+      originalLimit: 2,
+      effectiveLimit: 2,
+      count: 3,
+      extraEdgeAllowances: { [otherItemKey]: { originalLimit: 2, effectiveLimit: 2, reviveCount: 0 } },
+    });
+    harness.pi.appendEntry("pi-materia-cast-state", exhausted);
+
+    await harness.runCommand("materia", `revive ${exhausted.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(exhausted.castId);
+    expect(resumed.active).toBe(true);
+    // Only WI-1's scoped allowance is extended; WI-2 and the aggregate key are untouched.
+    expect(resumed.edgeAllowances?.[scopedKey]).toMatchObject({ originalLimit: 2, effectiveLimit: 4, reviveCount: 1 });
+    expect(resumed.edgeAllowances?.[otherItemKey]).toMatchObject({ originalLimit: 2, effectiveLimit: 2, reviveCount: 0 });
+    expect(resumed.edgeAllowances?.["Socket-1->Socket-2"]).toBeUndefined();
+
+    // The revive event reports the scoped identity that was extended.
+    const events = await readEvents(resumed);
+    const reviveEvent = events.find((event) => event.type === "cast_revive");
+    expect(reviveEvent?.data).toMatchObject({
+      exhaustedRecoveryKey: scopedKey,
+      traversalContext: { from: "Socket-1", to: "Socket-2", key: scopedKey },
+      newEffectiveLimit: 4,
+      reviveCount: 1,
+    });
+  });
+
+  test("legacy persisted edge exhaustion metadata without a scoped key remains revivable", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    await harness.runCommand("materia", "cast legacy edge exhaustion revive");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2 (2/1)");
+    const legacy = makeEdgeTraversalExhaustedState(failed, { from: "Socket-1", to: "Socket-2", originalLimit: 1, effectiveLimit: 1, count: 2 });
+    // Simulate pre-scoped persisted metadata: no scopedKey and an aggregate-keyed allowance.
+    delete (legacy.recoveryExhaustion as { scopedKey?: string }).scopedKey;
+    expect(legacy.recoveryExhaustion?.scopedKey).toBeUndefined();
+    expect(legacy.edgeAllowances).toHaveProperty("Socket-1->Socket-2");
+    harness.pi.appendEntry("pi-materia-cast-state", legacy);
+
+    // The cast remains revivable and the revive extends the legacy aggregate-keyed allowance.
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(completions.some((item) => item.value === `revive ${legacy.castId}`)).toBe(true);
+
+    await harness.runCommand("materia", `revive ${legacy.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(legacy.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.recoveryExhaustion).toBeUndefined();
+    expect(resumed.edgeAllowances?.["Socket-1->Socket-2"]).toMatchObject({ originalLimit: 1, effectiveLimit: 2, reviveCount: 1 });
+  });
+
+  test("prior scoped-retry exhaustion with aggregate-keyed allowances falls back to the aggregate key", async () => {
+    const harness = await makeMultiSocketHarness();
+
+    await harness.runCommand("materia", "cast mixed-version scoped exhaustion revive");
+    const failed = await failCurrentCast(harness, "Materia edge traversal limit exceeded for Socket-1->Socket-2 (2/1)");
+    const scopedKey = "Socket-1->Socket-2@WI-1";
+    const mixed = makeEdgeTraversalExhaustedState(failed, { from: "Socket-1", to: "Socket-2", scopedKey, originalLimit: 1, effectiveLimit: 1, count: 2 });
+    // Simulate a prior scoped-retry state persisted before edgeAllowances was
+    // scoped: exhaustion carries scopedKey but edgeAllowances has only the
+    // aggregate from->to entry.
+    mixed.edgeAllowances = { "Socket-1->Socket-2": { originalLimit: 1, effectiveLimit: 1, reviveCount: 0 } };
+    expect(mixed.recoveryExhaustion?.scopedKey).toBe(scopedKey);
+    expect(mixed.edgeAllowances?.[scopedKey]).toBeUndefined();
+    expect(mixed.edgeAllowances?.["Socket-1->Socket-2"]).toBeDefined();
+    harness.pi.appendEntry("pi-materia-cast-state", mixed);
+
+    // The cast remains revivable even though the scoped allowance is absent.
+    const completions = harness.getCommandCompletions("materia", "revive ") ?? [];
+    expect(completions.some((item) => item.value === `revive ${mixed.castId}`)).toBe(true);
+
+    await harness.runCommand("materia", `revive ${mixed.castId}`);
+
+    const resumed = latestState(harness);
+    expect(resumed.castId).toBe(mixed.castId);
+    expect(resumed.active).toBe(true);
+    expect(resumed.recoveryExhaustion).toBeUndefined();
+    // The fallback extended the aggregate-keyed allowance that actually exists.
+    expect(resumed.edgeAllowances?.["Socket-1->Socket-2"]).toMatchObject({ originalLimit: 1, effectiveLimit: 2, reviveCount: 1 });
   });
 
   test("no-id revive selects latest eligible edge-traversal exhausted cast", async () => {

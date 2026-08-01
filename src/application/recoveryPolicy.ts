@@ -144,7 +144,13 @@ export function extendEdgeTraversalAllowanceForRevive(state: MateriaCastState): 
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) {
     throw new Error(`pi-materia cast ${state.castId} is not revivable: edge traversal exhaustion metadata does not match the current terminal failure. Use /materia recast for general failed casts.`);
   }
-  const allowance = state.edgeAllowances?.[exhaustion.key];
+  // Prefer the scoped edge-and-item identity so reviving extends only the
+  // exhausted work item's allowance; fall back to the aggregate from->to key
+  // when the scoped allowance is absent, so prior scoped-retry states whose
+  // edgeAllowances remained aggregate-keyed stay revivable.
+  const scopedAllowance = exhaustion.scopedKey ? state.edgeAllowances?.[exhaustion.scopedKey] : undefined;
+  const allowance = scopedAllowance ?? state.edgeAllowances?.[exhaustion.key];
+  const allowanceKey = scopedAllowance ? exhaustion.scopedKey! : exhaustion.key;
   if (!allowance || !Number.isSafeInteger(allowance.originalLimit) || allowance.originalLimit <= 0 || !Number.isSafeInteger(allowance.effectiveLimit) || allowance.effectiveLimit < allowance.originalLimit || !Number.isSafeInteger(allowance.reviveCount) || allowance.reviveCount < 0) {
     throw new Error(`pi-materia cast ${state.castId} is not revivable: edge allowance metadata is missing or invalid. Use /materia recast instead.`);
   }
@@ -155,7 +161,7 @@ export function extendEdgeTraversalAllowanceForRevive(state: MateriaCastState): 
   exhaustion.effectiveLimit = allowance.effectiveLimit;
   exhaustion.reviveCount = allowance.reviveCount;
   state.updatedAt = Date.now();
-  return { key: exhaustion.key, priorEffectiveLimit, increment, newEffectiveLimit: allowance.effectiveLimit, reviveCount: allowance.reviveCount };
+  return { key: allowanceKey, priorEffectiveLimit, increment, newEffectiveLimit: allowance.effectiveLimit, reviveCount: allowance.reviveCount };
 }
 
 export function recoveryDiagnosticLabel(state: MateriaCastState): string {

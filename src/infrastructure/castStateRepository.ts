@@ -132,7 +132,11 @@ function isValidEdgeTraversalRevivableState(state: MateriaCastState, exhaustion:
   if (!exhaustion.key) return false;
   if (!exhaustion.failedReason || exhaustion.failedReason !== state.failedReason) return false;
   if (!exhaustion.from || !exhaustion.to) return false;
-  const allowance = state.edgeAllowances?.[exhaustion.key];
+  // Prefer the scoped edge-and-item identity; fall back to the aggregate key
+  // when the scoped allowance is absent, so prior scoped-retry states that
+  // record scopedKey while edgeAllowances stays aggregate-keyed remain revivable.
+  const scopedAllowance = exhaustion.scopedKey ? state.edgeAllowances?.[exhaustion.scopedKey] : undefined;
+  const allowance = scopedAllowance ?? state.edgeAllowances?.[exhaustion.key];
   return Boolean(
     allowance &&
     Number.isSafeInteger(allowance.originalLimit) && allowance.originalLimit > 0 &&
