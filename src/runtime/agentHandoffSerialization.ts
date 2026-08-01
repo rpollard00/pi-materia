@@ -1,5 +1,6 @@
 import { EVENT_SIDECHANNEL_FIELD, type MateriaEventObject } from "../domain/eventing.js";
 import type { HandoffWorkItem } from "../domain/handoff.js";
+import { cloneParallelSchedule } from "../handoff/parallelSchedule.js";
 import {
   AgentHandoffBuilderError,
   cloneAgentHandoffBuilderScope,
@@ -27,6 +28,7 @@ export function cloneHandoffWorkItem(value: HandoffWorkItem): HandoffWorkItem {
 export function cloneAgentHandoffEnvelope(value: AgentHandoffEnvelope): AgentHandoffEnvelope {
   const clone: AgentHandoffEnvelope = {};
   if (value.workItems !== undefined) clone.workItems = value.workItems.map(cloneHandoffWorkItem);
+  if (value.parallelSchedule !== undefined) clone.parallelSchedule = cloneParallelSchedule(value.parallelSchedule);
   if (value.satisfied !== undefined) clone.satisfied = value.satisfied;
   if (value.context !== undefined) clone.context = value.context;
   return clone;

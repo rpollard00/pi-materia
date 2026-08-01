@@ -8,6 +8,7 @@ import {
 } from "./handoffContract.js";
 import { formatHandoffWorkItemShape, parseHandoffWorkItem } from "../domain/handoff.js";
 import { deriveSocketOutputRequirements, socketConsumesSatisfied, type SocketOutputFieldType, type SocketOutputRequirements } from "./socketOutputRequirements.js";
+import { PARALLEL_SCHEDULE_FIELD, validateParallelSchedule } from "./parallelSchedule.js";
 import type { MateriaPipelineSocketConfig } from "../types.js";
 
 export interface HandoffValidationOptions {
@@ -18,6 +19,8 @@ export interface HandoffValidationOptions {
   agentOutput?: boolean;
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
+  /** True only when this socket's materia is explicitly enabled as a parallel planner. */
+  parallelPlanner?: boolean;
 }
 
 export interface HandoffValidationIssue {
@@ -43,7 +46,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
   const socketId = options.socketId ?? "unknown";
   const socketLabel = `socket "${socketId}"`;
   const requirements = options.requirements ?? (options.socket
-    ? deriveSocketOutputRequirements({ socket: options.socket, socketId, workItemsProducer: options.workItemsProducer })
+    ? deriveSocketOutputRequirements({ socket: options.socket, socketId, workItemsProducer: options.workItemsProducer, parallelPlanner: options.parallelPlanner })
     : undefined);
   const issues: HandoffValidationIssue[] = [];
 
@@ -54,6 +57,16 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
       message: `Invalid handoff JSON output for ${socketLabel}: expected a JSON object at the top level.`,
       reason: requirements?.jsonObjectReason ?? "Socket parse mode is json.",
     }]);
+  }
+
+  const parallelScheduleAllowed = requirements?.parallelScheduleProducer === true;
+  if (Object.prototype.hasOwnProperty.call(value, PARALLEL_SCHEDULE_FIELD) && !parallelScheduleAllowed) {
+    issues.push({
+      path: `$.${PARALLEL_SCHEDULE_FIELD}`,
+      expected: "object",
+      message: `Unexpected top-level agent handoff field ${JSON.stringify(PARALLEL_SCHEDULE_FIELD)}: only an explicitly enabled parallel planner may emit it.`,
+      reason: "Ordinary generators and utilities must emit canonical workItems only; scheduling is a gated planner sidecar.",
+    });
   }
 
   if (options.agentOutput) {
@@ -113,7 +126,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
     }
   }
 
-  if ((options.agentOutput || options.workItemsProducer) && Array.isArray(value.workItems)) {
+  if ((options.agentOutput || options.workItemsProducer || parallelScheduleAllowed) && Array.isArray(value.workItems)) {
     for (const [index, workItem] of value.workItems.entries()) {
       const result = parseHandoffWorkItem(workItem, `$.workItems.${index}`);
       if (!result.ok) {
@@ -125,6 +138,20 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
             reason: "Generator and workItems-assignment sockets must emit canonical workItems. Agent-produced workItems contain only title:string and context:string."
           });
         }
+      }
+    }
+  }
+
+  if (parallelScheduleAllowed && Object.prototype.hasOwnProperty.call(value, PARALLEL_SCHEDULE_FIELD) && Array.isArray(value.workItems)) {
+    const scheduleResult = validateParallelSchedule(value[PARALLEL_SCHEDULE_FIELD], value.workItems.length);
+    if (!scheduleResult.ok) {
+      for (const issue of scheduleResult.issues) {
+        issues.push({
+          path: issue.path,
+          expected: issue.path.endsWith(".version") ? "present" : "object",
+          message: `${issue.path}: ${issue.message}`,
+          reason: "Parallel planner streams must be ordered indexes that assign every canonical work item exactly once.",
+        });
       }
     }
   }
@@ -167,6 +194,10 @@ function formatHandoffValidationErrorMessage(socketId: string, issues: HandoffVa
 
 function validateAgentTopLevelFields(value: Record<string, unknown>, issues: HandoffValidationIssue[], requirements: SocketOutputRequirements | undefined, socket: MateriaPipelineSocketConfig | undefined): void {
   const allowed = new Set<string>(HANDOFF_ENVELOPE_FIELDS);
+  // Keep the sidecar in this parser's known vocabulary so ordinary producers
+  // receive the dedicated capability-gate diagnostic above rather than a
+  // duplicate generic unknown-field error.
+  allowed.add(PARALLEL_SCHEDULE_FIELD);
   for (const consumed of requirements?.consumedPayloadPaths ?? []) {
     if (consumed.topLevelField) allowed.add(consumed.topLevelField);
   }

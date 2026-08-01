@@ -13,6 +13,11 @@ import {
   type HandoffWorkItem,
 } from "../domain/handoff.js";
 import {
+  PARALLEL_SCHEDULE_FIELD,
+  cloneParallelSchedule,
+  isParallelSchedule,
+} from "../handoff/parallelSchedule.js";
+import {
   validateHandoffJsonOutput,
   type HandoffValidationIssue,
 } from "../handoff/handoffValidation.js";
@@ -73,6 +78,7 @@ export class AgentHandoffBuilder {
 
   private includeWorkItems = false;
   private readonly workItems: HandoffWorkItem[] = [];
+  private parallelSchedule: AgentHandoffEnvelope["parallelSchedule"];
   private satisfied: boolean | undefined;
   private context: string | undefined;
   private includeEvents = false;
@@ -88,6 +94,7 @@ export class AgentHandoffBuilder {
       satisfied: this.allowsSatisfied(),
       context: true,
       events: options.allowEventSideChannel !== false,
+      ...(options.requirements.parallelScheduleProducer ? { parallelSchedule: true as const } : {}),
     });
   }
 
@@ -95,6 +102,7 @@ export class AgentHandoffBuilder {
   beginWorkItems(): void {
     this.assertOpen();
     this.assertFieldPlacement(HANDOFF_WORK_ITEMS_FIELD);
+    this.parallelSchedule = undefined;
     this.includeWorkItems = true;
   }
 
@@ -106,6 +114,7 @@ export class AgentHandoffBuilder {
       throw this.failure("invalid_value", `$.${HANDOFF_WORK_ITEMS_FIELD}`, `handoff field ${JSON.stringify(HANDOFF_WORK_ITEMS_FIELD)} must be an array`, "array");
     }
     const parsed = value.map((item, index) => this.parseWorkItem(item, index));
+    this.parallelSchedule = undefined;
     this.workItems.splice(0, this.workItems.length, ...parsed);
     this.includeWorkItems = true;
   }
@@ -114,9 +123,21 @@ export class AgentHandoffBuilder {
   addWorkItem(value: unknown): number {
     this.assertOpen();
     this.assertFieldPlacement(HANDOFF_WORK_ITEMS_FIELD);
-    this.workItems.push(this.parseWorkItem(value, this.workItems.length));
+    const parsed = this.parseWorkItem(value, this.workItems.length);
+    this.parallelSchedule = undefined;
+    this.workItems.push(parsed);
     this.includeWorkItems = true;
     return this.workItems.length;
+  }
+
+  /** Replace the planner-owned schedule sidecar atomically. */
+  setParallelSchedule(value: unknown): void {
+    this.assertOpen();
+    this.assertFieldPlacement(PARALLEL_SCHEDULE_FIELD);
+    if (!isParallelSchedule(value)) {
+      throw this.failure("invalid_value", `$.${PARALLEL_SCHEDULE_FIELD}`, "parallelSchedule must contain version 1 and a streams array", "object");
+    }
+    this.parallelSchedule = cloneParallelSchedule(value);
   }
 
   setSatisfied(value: unknown): void {
@@ -186,6 +207,7 @@ export class AgentHandoffBuilder {
     switch (field) {
       case HANDOFF_WORK_ITEMS_FIELD: return this.setWorkItems(value);
       case HANDOFF_SATISFIED_FIELD: return this.setSatisfied(value);
+      case PARALLEL_SCHEDULE_FIELD: return this.setParallelSchedule(value);
       case HANDOFF_CONTEXT_FIELD: return this.setContext(value);
       case EVENT_SIDECHANNEL_FIELD: return this.setEvents(value);
       case HANDOFF_TEXT_FIELD:
@@ -218,6 +240,7 @@ export class AgentHandoffBuilder {
     this.assertNotDiscarded();
     const envelope: AgentHandoffEnvelope = {};
     if (this.includeWorkItems) envelope.workItems = this.workItems.map(cloneHandoffWorkItem);
+    if (this.parallelSchedule !== undefined) envelope.parallelSchedule = cloneParallelSchedule(this.parallelSchedule);
     if (this.satisfied !== undefined) envelope.satisfied = this.satisfied;
     if (this.context !== undefined) envelope.context = this.context;
     return envelope;
@@ -267,6 +290,7 @@ export class AgentHandoffBuilder {
       throw this.failure("closed", "$", "handoff builder commit is already in progress");
     }
     this.workItems.length = 0;
+    this.parallelSchedule = undefined;
     this.events.length = 0;
     this.includeWorkItems = false;
     this.includeEvents = false;
@@ -307,6 +331,7 @@ export class AgentHandoffBuilder {
       throw this.failure("misplaced_field", `$.${field}`, "event side-channel data is not permitted for this finalization strategy");
     }
     if (field === HANDOFF_WORK_ITEMS_FIELD && this.capabilities.workItems) return;
+    if (field === PARALLEL_SCHEDULE_FIELD && this.capabilities.parallelSchedule) return;
     if (field === HANDOFF_SATISFIED_FIELD && this.capabilities.satisfied) return;
     throw this.failure("misplaced_field", `$.${field}`, `handoff field ${JSON.stringify(field)} is not consumed or required by this socket placement`);
   }
@@ -370,6 +395,7 @@ export class AgentHandoffBuilder {
 
 function isBuilderPayloadField(field: string): boolean {
   return field === HANDOFF_WORK_ITEMS_FIELD
+    || field === PARALLEL_SCHEDULE_FIELD
     || field === HANDOFF_SATISFIED_FIELD
     || field === HANDOFF_CONTEXT_FIELD;
 }

@@ -1,4 +1,4 @@
-import { canonicalGeneratorConfigFor } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
 import {
   HANDOFF_CONTEXT_FIELD,
   HANDOFF_SATISFIED_FIELD,
@@ -6,6 +6,7 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
 } from "../domain/handoff.js";
+import { PARALLEL_SCHEDULE_FIELD, cloneParallelSchedule, isParallelSchedule } from "../handoff/parallelSchedule.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 import { isPlainObject } from "./workflowTransitions.js";
 
@@ -33,6 +34,14 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
   }
   const context = parsed[HANDOFF_CONTEXT_FIELD];
   if (hasOwn(parsed, HANDOFF_CONTEXT_FIELD) && typeof context === "string") state.data.context = appendAgentContext(state.data.context, context, socket);
+
+  // The sidecar is runtime-owned planner state for the deterministic
+  // normalizer. Keep it in an explicit state slot, never in the generic
+  // handoff envelope/context mirror; prompt assembly redacts this slot from
+  // ordinary downstream agent context.
+  if (isParallelPlannerMateria(socket?.materia) && isParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD])) {
+    state.data[PARALLEL_SCHEDULE_FIELD] = cloneParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD]);
+  }
 }
 
 function applyUtilityStatePatch(state: MateriaCastState, parsed: Record<string, unknown>, socket?: ResolvedMateriaSocket): void {
@@ -73,5 +82,5 @@ function hasOwn(value: Record<string, unknown>, field: string): boolean {
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
   if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(socket && canonicalGeneratorConfigFor(socket.materia)?.output === "workItems");
+  return Boolean(socket && (canonicalGeneratorConfigFor(socket.materia)?.output === "workItems" || isParallelPlannerMateria(socket.materia)));
 }

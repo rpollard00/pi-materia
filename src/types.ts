@@ -830,6 +830,8 @@ export interface MateriaDefinitionMetadata {
   parse?: MateriaParseMode;
   /** Marks this materia as a generator; runtime resolves the canonical workItems contract. */
   generator?: boolean;
+  /** Explicitly permits this materia to produce the experimental parallelSchedule sidecar. */
+  parallelPlanner?: boolean;
   /** User-controlled lock state for editable materia definitions. */
   lockState?: MateriaUserLockState;
   /**

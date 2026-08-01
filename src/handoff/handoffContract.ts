@@ -16,8 +16,10 @@ import {
   type PartialHandoffEnvelope,
 } from "../domain/handoff.js";
 import type { SocketOutputRequirements } from "./socketOutputRequirements.js";
+import { PARALLEL_SCHEDULE_FIELD } from "./parallelSchedule.js";
 
 export * from "../domain/handoff.js";
+export * from "./parallelSchedule.js";
 
 export {
   createHandoffEnvelope,
@@ -93,6 +95,12 @@ export function formatSocketOutputFinalInstruction(
     );
   }
 
+  if (requirements.parallelScheduleProducer) {
+    lines.push(
+      `This socket is the explicitly enabled parallel planner. Emit top-level ${JSON.stringify(PARALLEL_SCHEDULE_FIELD)} at $.${PARALLEL_SCHEDULE_FIELD} with ${JSON.stringify("version")}: 1 and an ordered ${JSON.stringify("streams")} array. Each stream has a unique non-empty ${JSON.stringify("name")} and a non-empty ${JSON.stringify("workItemIndexes")} array of indexes into $.${HANDOFF_WORK_ITEMS_FIELD}; assign every work item exactly once and do not copy lane metadata into workItems.`,
+    );
+  }
+
   const consumedPaths = requirements.consumedPayloadPaths.map(
     (path) => `- ${path.payloadPath} for assignment to ${path.targetPath}.`,
   );
@@ -139,10 +147,11 @@ function handoffFieldList(renderableTextIntent: boolean): string {
  */
 function socketScopedHandoffFieldGuidance(requirements: SocketOutputRequirements): string {
   const emitOnly = "Emit only the fields relevant to this socket's configured placement, routing, and assignments.";
+  const parallelField = requirements.parallelScheduleProducer ? `, and ${PARALLEL_SCHEDULE_FIELD}` : "";
   if (requirements.renderableTextIntent) {
-    return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}. ${emitOnly}`;
+    return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, ${HANDOFF_CONTEXT_FIELD}, and ${HANDOFF_TEXT_FIELD}${parallelField}. ${emitOnly}`;
   }
-  return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}. Explanatory notes belong in ${HANDOFF_CONTEXT_FIELD}; do not emit a top-level ${HANDOFF_TEXT_FIELD} field for this socket (${HANDOFF_TEXT_FIELD} is reserved for renderable-prose sockets). ${emitOnly}`;
+  return `Agent handoff fields are limited to ${HANDOFF_WORK_ITEMS_FIELD}, ${HANDOFF_SATISFIED_FIELD}, and ${HANDOFF_CONTEXT_FIELD}${parallelField}. Explanatory notes belong in ${HANDOFF_CONTEXT_FIELD}; do not emit a top-level ${HANDOFF_TEXT_FIELD} field for this socket (${HANDOFF_TEXT_FIELD} is reserved for renderable-prose sockets). ${emitOnly}`;
 }
 
 function articleForType(type: string): string {
@@ -171,6 +180,8 @@ export interface HandoffContractDocOptions {
    * `text`, reserving it for renderable-prose sockets that opt in.
    */
   renderableTextIntent?: boolean;
+  /** Include the experimental sidecar only for an explicitly enabled planner. */
+  parallelPlanner?: boolean;
 }
 
 /**
@@ -191,16 +202,20 @@ export function formatHandoffContractDocText(options?: HandoffContractDocOptions
     : "generated work, graph routing, downstream prompt context, and artifacts";
   const fields = handoffFieldList(renderableTextIntent);
   const textParagraph = renderableTextIntent ? HANDOFF_TEXT_DOC_PARAGRAPH : HANDOFF_NO_TEXT_DOC_PARAGRAPH;
+  const parallelParagraph = options?.parallelPlanner
+    ? "This socket is an explicitly enabled parallel planner. It may emit the version-1 top-level parallelSchedule sidecar: streams are ordered objects with unique non-empty names and workItemIndexes into the canonical workItems array. Every work item must appear exactly once; the sidecar is consumed by the deterministic normalizer and is not generic downstream context."
+    : undefined;
 
   return [
-    `A pi-materia agent handoff is a small JSON object consumed by socket adapters for ${purposes}. Agent-authored JSON handoffs are limited to top-level ${fields}.`,
+    `A pi-materia agent handoff is a small JSON object consumed by socket adapters for ${purposes}. Agent-authored JSON handoffs are limited to top-level ${fields}${parallelParagraph ? ` and ${JSON.stringify(PARALLEL_SCHEDULE_FIELD)}` : ""}.`,
     HANDOFF_WORK_ITEMS_DOC_PARAGRAPH,
     HANDOFF_SATISFIED_DOC_PARAGRAPH,
     HANDOFF_CONTEXT_DOC_PARAGRAPH,
     textParagraph,
+    parallelParagraph,
     HANDOFF_UTILITY_DOC_PARAGRAPH,
     HANDOFF_LEGACY_DOC_PARAGRAPH,
-  ].join("\n\n");
+  ].filter(Boolean).join("\n\n");
 }
 
 export const HANDOFF_CONTRACT_DOC_TEXT = formatHandoffContractDocText();

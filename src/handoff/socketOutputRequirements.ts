@@ -5,6 +5,7 @@ import {
   HANDOFF_TEXT_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "../domain/handoff.js";
+import { PARALLEL_SCHEDULE_FIELD } from "./parallelSchedule.js";
 import type { MateriaEdgeCondition, MateriaParseMode, MateriaPipelineSocketConfig } from "../types.js";
 
 export type SocketOutputFieldType = "array" | "boolean" | "object" | "string" | "unknown";
@@ -43,6 +44,8 @@ export interface SocketOutputRequirementsInput {
   workItemProducingSocketIds?: ReadonlySet<string> | readonly string[];
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
+  /** True only for a materia explicitly enabled as the parallel planner. */
+  parallelPlanner?: boolean;
   /**
    * Explicit renderable-text intent metadata. When true, the socket expects a
    * top-level renderable `text` payload even when no assignment consumes
@@ -71,6 +74,8 @@ export interface SocketOutputRequirements {
    * unaffected and report no intent.
    */
   renderableTextIntent: boolean;
+  /** True when this socket may emit the gated parallel scheduling sidecar. Omitted means false for legacy requirement objects. */
+  parallelScheduleProducer?: boolean;
   /** Why renderable-text intent is reported; undefined when intent is false. */
   renderableTextIntentReason?: string;
 }
@@ -94,11 +99,13 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
       consumedPayloadPaths: [],
       reservedFieldTypeRules: [],
       renderableTextIntent: false,
+      parallelScheduleProducer: false,
     };
   }
 
   const consumedPayloadPaths = deriveConsumedPayloadPaths(input.socket.assign);
   const renderableTextIntent = deriveRenderableTextIntent(consumedPayloadPaths, input.renderableTextIntent);
+  const parallelScheduleProducer = input.parallelPlanner === true;
   const requiredFields = new Map<string, SocketOutputFieldRequirement>();
 
   if (socketConsumesSatisfied(input.socket)) {
@@ -110,12 +117,23 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
     });
   }
 
-  if (isWorkItemsProducer(input)) {
+  if (isWorkItemsProducer(input) || parallelScheduleProducer) {
     addRequiredField(requiredFields, {
       field: HANDOFF_WORK_ITEMS_FIELD,
       path: `$.${HANDOFF_WORK_ITEMS_FIELD}`,
       type: "array",
-      reason: "Normalized graph semantics identify this socket as a workItems-producing generator/planner output.",
+      reason: isWorkItemsProducer(input)
+        ? "Normalized graph semantics identify this socket as a workItems-producing generator/planner output."
+        : "A parallel planner must provide the canonical workItems list referenced by its schedule.",
+    });
+  }
+
+  if (parallelScheduleProducer) {
+    addRequiredField(requiredFields, {
+      field: PARALLEL_SCHEDULE_FIELD,
+      path: `$.${PARALLEL_SCHEDULE_FIELD}`,
+      type: "object",
+      reason: "This materia is explicitly enabled as the parallel planner for the selected region.",
     });
   }
 
@@ -143,6 +161,7 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
         : "When present, this reserved canonical handoff field must have its canonical type.",
     })),
     renderableTextIntent: renderableTextIntent.intent,
+    parallelScheduleProducer,
     ...(renderableTextIntent.reason ? { renderableTextIntentReason: renderableTextIntent.reason } : {}),
   };
 }

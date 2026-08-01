@@ -3,6 +3,8 @@ import type { MateriaGeneratorConfig } from "../types.js";
 export interface GeneratorMateriaLike {
   type?: "agent" | "utility" | string;
   generator?: boolean;
+  /** Explicit opt-in allowing this materia to emit the parallel planner sidecar. */
+  parallelPlanner?: boolean;
   generates?: MateriaGeneratorConfig;
   utility?: string;
   command?: string[];
@@ -28,6 +30,14 @@ export const CANONICAL_WORK_ITEMS_GENERATOR_CONFIG: MateriaGeneratorConfig = {
  */
 export function isGeneratorMateria(definition: GeneratorMateriaLike | undefined): boolean {
   return definition?.generator === true;
+}
+
+/**
+ * Parallel scheduling is a separate explicit capability. A normal generator
+ * remains a normal generator even when it emits a field named parallelSchedule.
+ */
+export function isParallelPlannerMateria(definition: GeneratorMateriaLike | undefined): boolean {
+  return definition?.parallelPlanner === true;
 }
 
 /**

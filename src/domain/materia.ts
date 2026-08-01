@@ -39,6 +39,8 @@ export interface MateriaDefinitionCommon {
   behavior: MateriaBehaviorIdentity;
   parse?: MateriaParseMode;
   generator?: boolean;
+  /** Explicitly permits this materia to produce the experimental parallelSchedule sidecar. */
+  parallelPlanner?: boolean;
   /** Obsolete metadata; generator: true is the canonical domain flag. */
   generates?: MateriaGeneratorMetadata;
   promptIntent?: MateriaPromptIntentMetadata;
@@ -93,6 +95,7 @@ export function normalizeMateriaDefinition(id: MateriaId, config: MateriaConfigC
     behavior,
     ...(config.parse !== undefined ? { parse: config.parse as MateriaParseMode } : {}),
     ...(config.generator !== undefined ? { generator: config.generator === true } : {}),
+    ...(config.parallelPlanner !== undefined ? { parallelPlanner: config.parallelPlanner as boolean } : {}),
     ...(isPlainObject(config.generates) ? { generates: config.generates as unknown as MateriaGeneratorMetadata } : {}),
     ...(isPlainObject(config.promptIntent) ? { promptIntent: config.promptIntent as unknown as MateriaPromptIntentMetadata } : {}),
   } satisfies MateriaDefinitionCommon;
@@ -139,6 +142,7 @@ export function validateMateriaDefinition(definition: MateriaDefinition, path = 
   if (definition.type !== "agent" && definition.type !== "utility") issues.push({ path: `${path}.type`, message: "materia type must be agent or utility" });
   if (definition.parse !== undefined && definition.parse !== "text" && definition.parse !== "json") issues.push({ path: `${path}.parse`, message: "parse must be text or json" });
   if (definition.generator !== undefined && typeof definition.generator !== "boolean") issues.push({ path: `${path}.generator`, message: "generator must be a boolean" });
+  if (definition.parallelPlanner !== undefined && typeof definition.parallelPlanner !== "boolean") issues.push({ path: `${path}.parallelPlanner`, message: "parallelPlanner must be a boolean" });
   validateGenerator(definition.generates, `${path}.generates`, issues);
   validatePromptIntent(definition.promptIntent, `${path}.promptIntent`, issues);
 

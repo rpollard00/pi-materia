@@ -26,6 +26,7 @@ import { cloneAgentHandoffBuilderScope } from "./agentHandoffBuilderTypes.js";
 export const AGENT_HANDOFF_TOOL_NAMES = {
   beginWorkItems: "materia_handoff_begin_work_items",
   addWorkItem: "materia_handoff_add_work_item",
+  setParallelSchedule: "materia_handoff_set_parallel_schedule",
   setSatisfied: "materia_handoff_set_satisfied",
   setContext: "materia_handoff_set_context",
   emitEvent: "materia_handoff_emit_event",
@@ -42,6 +43,13 @@ export const BEGIN_AGENT_HANDOFF_WORK_ITEMS_PARAMETERS = Type.Object({}, { addit
 export const ADD_AGENT_HANDOFF_WORK_ITEM_PARAMETERS = Type.Object({
   title: Type.String({ minLength: 1, description: "Work item title" }),
   context: Type.String({ minLength: 1, description: "All item-specific implementation guidance" }),
+}, { additionalProperties: false });
+export const SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS = Type.Object({
+  version: Type.Integer({ minimum: 1, maximum: 1, description: "Supported parallel schedule contract version" }),
+  streams: Type.Array(Type.Object({
+    name: Type.String({ minLength: 1, description: "Stable ordered stream name" }),
+    workItemIndexes: Type.Array(Type.Integer({ minimum: 0 }), { minItems: 1, description: "Ordered indexes into workItems" }),
+  }, { additionalProperties: false }), { description: "Ordered planner streams" }),
 }, { additionalProperties: false });
 export const SET_AGENT_HANDOFF_SATISFIED_PARAMETERS = Type.Object({
   satisfied: Type.Boolean({ description: "Canonical satisfied/not_satisfied graph-control result" }),
@@ -67,14 +75,15 @@ export const EMIT_AGENT_HANDOFF_EVENT_PARAMETERS = Type.Object({
 export const COMMIT_AGENT_HANDOFF_PARAMETERS = Type.Object({}, { additionalProperties: false });
 
 export type AddAgentHandoffWorkItemInput = Static<typeof ADD_AGENT_HANDOFF_WORK_ITEM_PARAMETERS>;
+export type SetAgentHandoffParallelScheduleInput = Static<typeof SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS>;
 export type SetAgentHandoffSatisfiedInput = Static<typeof SET_AGENT_HANDOFF_SATISFIED_PARAMETERS>;
 export type SetAgentHandoffContextInput = Static<typeof SET_AGENT_HANDOFF_CONTEXT_PARAMETERS>;
 export type EmitAgentHandoffEventInput = Static<typeof EMIT_AGENT_HANDOFF_EVENT_PARAMETERS>;
 
 export interface AgentHandoffToolDetails {
-  readonly action: "begin_work_items" | "add_work_item" | "set_satisfied" | "set_context" | "emit_event" | "commit";
+  readonly action: "begin_work_items" | "add_work_item" | "set_parallel_schedule" | "set_satisfied" | "set_context" | "emit_event" | "commit";
   readonly scope: ReturnType<typeof cloneAgentHandoffBuilderScope>;
-  readonly field?: "workItems" | "satisfied" | "context" | "event";
+  readonly field?: "workItems" | "parallelSchedule" | "satisfied" | "context" | "event";
   readonly workItemCount: number;
   readonly eventCount: number;
   readonly committed: boolean;
@@ -85,6 +94,7 @@ export interface AgentHandoffToolDetails {
 export interface AgentHandoffToolsByCapability {
   readonly beginWorkItems?: ToolDefinition<typeof BEGIN_AGENT_HANDOFF_WORK_ITEMS_PARAMETERS, AgentHandoffToolDetails>;
   readonly addWorkItem?: ToolDefinition<typeof ADD_AGENT_HANDOFF_WORK_ITEM_PARAMETERS, AgentHandoffToolDetails>;
+  readonly setParallelSchedule?: ToolDefinition<typeof SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS, AgentHandoffToolDetails>;
   readonly setSatisfied?: ToolDefinition<typeof SET_AGENT_HANDOFF_SATISFIED_PARAMETERS, AgentHandoffToolDetails>;
   readonly setContext: ToolDefinition<typeof SET_AGENT_HANDOFF_CONTEXT_PARAMETERS, AgentHandoffToolDetails>;
   readonly emitEvent?: ToolDefinition<typeof EMIT_AGENT_HANDOFF_EVENT_PARAMETERS, AgentHandoffToolDetails>;
@@ -153,6 +163,25 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
     tools.beginWorkItems = beginWorkItems;
     tools.addWorkItem = addWorkItem;
     definitions.push(beginWorkItems, addWorkItem);
+  }
+
+  if (capabilities.parallelSchedule) {
+    const setParallelSchedule = defineTool({
+      name: AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule,
+      label: "Set Parallel Planner Schedule",
+      description: "Set the versioned ordered stream sidecar for the canonical workItems array. Every item index must occur exactly once.",
+      parameters: SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS,
+      prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule, SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS),
+      executionMode: "sequential",
+      async execute(_toolCallId, params) {
+        return runHandoffToolAction(() => {
+          builder.setParallelSchedule(params);
+          return handoffToolResult(builder, "Set the parallel planner schedule.", "set_parallel_schedule", "parallelSchedule");
+        });
+      },
+    });
+    tools.setParallelSchedule = setParallelSchedule;
+    definitions.push(setParallelSchedule);
   }
 
   if (capabilities.satisfied) {
@@ -287,6 +316,9 @@ function capabilityGuidelines(capabilities: AgentHandoffCapabilities): string[] 
   if (capabilities.workItems) {
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.addWorkItem} once per work item and preserve final item order.`);
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.beginWorkItems} only when an explicitly empty workItems result is required.`);
+  }
+  if (capabilities.parallelSchedule) {
+    guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} after submitting workItems to provide the ordered version-1 parallel schedule.`);
   }
   if (capabilities.satisfied) {
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setSatisfied} to supply this socket's required graph-control result.`);

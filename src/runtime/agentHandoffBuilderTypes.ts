@@ -1,5 +1,6 @@
 import type { MateriaEventObject } from "../domain/eventing.js";
 import type { HandoffEnvelope } from "../domain/handoff.js";
+import type { ParallelSchedule } from "../handoff/parallelSchedule.js";
 import type { HandoffValidationIssue } from "../handoff/handoffValidation.js";
 import type { SocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 
@@ -27,6 +28,8 @@ export interface AgentHandoffBuilderOptions {
 export interface AgentHandoffCapabilities {
   /** Include tools for beginning and appending to the canonical workItems array. */
   readonly workItems: boolean;
+  /** Include the gated parallel planner sidecar setter when this socket is enabled for it. */
+  readonly parallelSchedule?: true;
   /** Include the satisfied graph-control setter. */
   readonly satisfied: boolean;
   /** Context is the canonical cross-socket explanatory handoff field. */
@@ -37,7 +40,9 @@ export interface AgentHandoffCapabilities {
 
 export type AgentHandoffEnvelope = Partial<
   Pick<HandoffEnvelope, "workItems" | "satisfied" | "context">
->;
+> & {
+  parallelSchedule?: ParallelSchedule;
+};
 
 export type AgentHandoffOutput = AgentHandoffEnvelope & {
   event?: MateriaEventObject[];
@@ -112,6 +117,7 @@ export function cloneAgentHandoffBuilderScope(value: AgentHandoffBuilderScope): 
 export function cloneAgentHandoffCapabilities(value: AgentHandoffCapabilities): AgentHandoffCapabilities {
   return {
     workItems: value.workItems,
+    ...(value.parallelSchedule ? { parallelSchedule: true as const } : {}),
     satisfied: value.satisfied,
     context: true,
     events: value.events,

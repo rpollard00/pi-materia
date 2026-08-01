@@ -17,7 +17,7 @@ import {
   MateriaEdgeTraversalExhaustionError,
   selectNextEdge,
 } from "../application/workflowTransitions.js";
-import { canonicalGeneratorConfigFor } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
 import {
   handoffValidationIssues,
   validateHandoffJsonOutput,
@@ -246,6 +246,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
           socket: effectiveResolvedSocketConfig(socket),
           agentOutput: isAgentResolvedSocket(socket),
           workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
+          parallelPlanner: isParallelPlannerMateria(socket.materia),
         });
       } catch (error) {
         const validationError = new Error(`Pre-commit output validation failed for socket "${socket.id}": ${errorMessage(error)}`);

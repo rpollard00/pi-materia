@@ -1,4 +1,4 @@
-import { canonicalGeneratorConfigFor } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import type {
   MateriaAgentFinalizationReason,
@@ -101,6 +101,7 @@ export function supportsToolBackedFinalization(socket: ResolvedMateriaSocket): b
         socket: effectiveResolvedSocketConfig(socket),
         socketId: socket.id,
         workItemsProducer,
+        parallelPlanner: isParallelPlannerMateria(socket.materia),
       }),
       workItemsProducer,
       allowEventSideChannel: true,

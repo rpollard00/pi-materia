@@ -1,28 +1,34 @@
 import { HANDOFF_TEXT_FIELD } from "../domain/handoff.js";
 import { EVENT_SIDECHANNEL_FIELD } from "../domain/eventing.js";
+import { PARALLEL_SCHEDULE_FIELD } from "../handoff/parallelSchedule.js";
 
 /**
  * Re-stringify a parsed JSON handoff payload without its renderable `text`
- * field, for use as automatic prompt context (e.g. the synthetic "Previous
- * output" section or captured rework-feedback excerpts).
+ * field and orchestration-only parallelSchedule sidecar, for use as automatic
+ * prompt context (e.g. the synthetic "Previous output" section or captured
+ * rework-feedback excerpts).
  *
  * Renderable text must reach following materia only through explicit
  * assignment (e.g. `assign: { "prNotes": "$.text" }`) or templating, never as
  * default automatic context. Callers that derive prompt-facing excerpts from a
- * parsed handoff payload therefore strip `text` here. The authoritative raw
- * JSON (including `text`) is preserved separately in `state.lastJson` and the
- * `lastJson` artifact for debugging and replay; this helper only affects the
- * derived prompt-facing string.
+ * parsed handoff payload therefore strip `text` and the planner sidecar here.
+ * The authoritative raw JSON (including those fields) is preserved separately
+ * in `state.lastJson` and the `lastJson` artifact for debugging and replay; this
+ * helper only affects the derived prompt-facing string.
  *
- * Returns `undefined` when `text` was the only field so callers can omit an
- * empty/noisy section instead of emitting `{}`.
+ * Returns `undefined` when only presentation/orchestration fields were present
+ * so callers can omit an empty/noisy section instead of emitting `{}`.
  */
 export function stripRenderableTextField(parsed: Record<string, unknown>): string | undefined {
-  if (!Object.prototype.hasOwnProperty.call(parsed, HANDOFF_TEXT_FIELD)) {
-    return JSON.stringify(parsed);
-  }
+  const hasText = Object.prototype.hasOwnProperty.call(parsed, HANDOFF_TEXT_FIELD);
+  const hasParallelSchedule = Object.prototype.hasOwnProperty.call(parsed, PARALLEL_SCHEDULE_FIELD);
+  if (!hasText && !hasParallelSchedule) return JSON.stringify(parsed);
   const clone: Record<string, unknown> = { ...parsed };
   delete clone[HANDOFF_TEXT_FIELD];
+  // Scheduling is consumed by the deterministic parallel normalizer. It is
+  // never generic downstream agent context; explicit assignments still read
+  // the authoritative parsed payload before this presentation-only helper.
+  delete clone[PARALLEL_SCHEDULE_FIELD];
   return Object.keys(clone).length > 0 ? JSON.stringify(clone) : undefined;
 }
 

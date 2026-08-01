@@ -1104,6 +1104,9 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
       throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
     }
+    if (materia.parallelPlanner !== undefined && typeof materia.parallelPlanner !== "boolean") {
+      throw new Error(`Materia "${name}" has invalid parallelPlanner. Expected a boolean when configured.`);
+    }
     validateLegacyGeneratorDeclaration(name, materia.generates);
   }
 }
@@ -1128,6 +1131,9 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   validateMateriaParseMode(name, materia.parse);
   if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+  }
+  if (materia.parallelPlanner !== undefined && typeof materia.parallelPlanner !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid parallelPlanner. Expected a boolean when configured.`);
   }
   validateLegacyGeneratorDeclaration(name, materia.generates);
 }
