@@ -17,6 +17,7 @@ import {
   toggleEdgeConditionInLoadout,
   toggleLoopExitRouteCondition,
   updateLoopExitInLoadout,
+  updateLoopParallelInLoadout,
   upsertLoopExitRouteInLoadout,
 } from './loadoutTransforms.js';
 
@@ -126,6 +127,41 @@ describe('immutable loadout transforms', () => {
     const deleted = deleteLoopFromLoadout(previous, 'work');
     expect(deleted.loops).toBeUndefined();
     expect(previous.loops?.work).toBeDefined();
+  });
+
+  it('authors parallel metadata and region-owned fan-in routes without materializing lane sockets', () => {
+    const previous = deepFreeze({
+      ...baseLoadout(),
+      sockets: {
+        ...baseLoadout().sockets,
+        'Socket-5': { socketKind: 'normal', materia: 'Clean' as string },
+        'Socket-6': { socketKind: 'normal', materia: 'Resolve' as string },
+      },
+    } as PipelineConfig);
+    const next = updateLoopParallelInLoadout(previous, 'work', {
+      planInput: 'state.parallelPlan',
+      maxConcurrency: 2,
+      workspaceMode: 'jj',
+      failurePolicy: 'all_terminal',
+      fanIn: 'ordered',
+    }, { clean: 'Socket-5', conflict: 'Socket-6' });
+
+    expect(next).not.toBe(previous);
+    expect(next.loops?.work.parallel).toEqual({ planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' });
+    expect(next.loops?.work.exits).toEqual([
+      { id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'always', targetSocketId: 'Socket-2' },
+      { id: 'exit:Socket-4:satisfied', from: 'Socket-4', condition: 'satisfied', targetSocketId: 'Socket-5' },
+      { id: 'exit:Socket-4:not_satisfied', from: 'Socket-4', condition: 'not_satisfied', targetSocketId: 'Socket-6' },
+    ]);
+    expect(Object.keys(next.sockets ?? {})).toEqual(Object.keys(previous.sockets ?? {}));
+    expect(previous.loops?.work.parallel).toBeUndefined();
+
+    const remapped = updateLoopExitInLoadout(next, 'work', { from: 'Socket-3', when: 'satisfied', to: 'end' });
+    expect(remapped.loops?.work.exits).toEqual([
+      { id: 'exit:Socket-3:always', from: 'Socket-3', condition: 'always', targetSocketId: 'Socket-2' },
+      { id: 'exit:Socket-3:satisfied', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-5' },
+      { id: 'exit:Socket-3:not_satisfied', from: 'Socket-3', condition: 'not_satisfied', targetSocketId: 'Socket-6' },
+    ]);
   });
 
   it('deletes sockets and cleans edges/loops without mutating previous branches', () => {

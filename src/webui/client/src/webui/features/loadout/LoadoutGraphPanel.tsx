@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, Dispatch, DragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, SetStateAction } from 'react';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
-import type { MateriaEdgeCondition } from '../../../../../../types.js';
+import type { MateriaEdgeCondition, MateriaLoopParallelConfig } from '../../../../../../types.js';
 import {
   canDeleteSocket,
   formatSocketLabel,
@@ -102,6 +102,8 @@ interface LoadoutGraphLoopActions {
   breakLoop: (loopId: string) => void;
   clearLoopExit: (loopId: string) => void;
   createTaskIteratorLoop: () => void;
+  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) => boolean;
+  parallelError?: string;
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
 
@@ -220,6 +222,8 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
         closeLoopControls={() => setSelectedLoopId(undefined)}
         breakLoop={loopActions.breakLoop}
         clearLoopExit={loopActions.clearLoopExit}
+        updateLoopParallel={loopActions.updateLoopParallel}
+        parallelError={loopActions.parallelError}
         socketDisplayLabel={viewModel.socketDisplayLabel}
         socketLabel={viewModel.socketLabel}
         updateLoopExit={loopActions.updateLoopExit}
@@ -455,18 +459,31 @@ interface EdgeLayerProps {
 }
 
 function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, toggleEdgeCondition, toggleLoopExitCondition, openLoopControls, editPolicy, width }: EdgeLayerProps) {
+  const visibleRoutedEdges = routedEdges.filter(({ edge }) => {
+    const parallelLoop = edge.loopId ? activeLoadout?.loops?.[edge.loopId]?.parallel !== undefined : false;
+    if (parallelLoop && edge.kind === 'loop-exit') return false;
+    if (edge.kind === 'normal') {
+      const owningParallelLoop = Object.values(activeLoadout?.loops ?? {}).find((loop) => loop.parallel && loop.consumes?.from === edge.from && loop.sockets.includes(edge.to));
+      if (owningParallelLoop) return false;
+    }
+    return true;
+  });
+
   return (
     <svg className="loadout-edge-layer" width={width} height={height} aria-label="Loadout edges">
       <defs>
         <marker id="materia-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-edge-arrow" /></marker>
         <marker id="materia-generator-edge-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-generator-edge-arrow" /></marker>
         <marker id="materia-loop-cycle-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-cycle-arrow" /></marker>
+        <marker id="materia-parallel-fork-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-parallel-fork-arrow" /></marker>
+        <marker id="materia-parallel-fan-in-arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-parallel-fan-in-arrow" /></marker>
         <marker id="materia-loop-exit-edge-arrow-default" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-default" /></marker>
         <marker id="materia-loop-exit-edge-arrow-satisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-satisfied" /></marker>
         <marker id="materia-loop-exit-edge-arrow-unsatisfied" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto" markerUnits="strokeWidth"><path d="M2,2 L10,6 L2,10 Z" className="loadout-loop-exit-edge-arrow loadout-loop-exit-edge-arrow-unsatisfied" /></marker>
       </defs>
       {loopRegions.map((loop) => {
         const activateLoop = () => openLoopControls(loop.id);
+        const visuals = loop.parallelVisuals;
         return (
           <g
             key={loop.id}
@@ -491,7 +508,27 @@ function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, t
           </g>
         );
       })}
-      {routedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
+      {loopRegions.flatMap((loop) => {
+        const visuals = loop.parallelVisuals;
+        if (!visuals) return [];
+        return [
+          <g key={visuals.fork.id} id={visuals.fork.id} data-testid={`parallel-fork-${loop.id}`} data-parallel-visual-id={visuals.fork.id} className="loadout-parallel-symbol loadout-parallel-fork" role="img" aria-label={`${visuals.fork.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
+            <path d={visuals.fork.path} markerEnd="url(#materia-parallel-fork-arrow)" />
+            <path d={visuals.fork.branchesPath} />
+            <circle cx={visuals.fork.x} cy={visuals.fork.y} r="5" />
+          </g>,
+          <g key={visuals.barrier.id} id={visuals.barrier.id} data-testid={`parallel-barrier-${loop.id}`} data-parallel-visual-id={visuals.barrier.id} className="loadout-parallel-symbol loadout-parallel-barrier" role="img" aria-label={`${visuals.barrier.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
+            <path d={visuals.barrier.path} />
+          </g>,
+          ...visuals.fanIn.map((route) => (
+            <g key={route.id} id={route.id} data-testid={`parallel-fan-in-${loop.id}-${route.condition}`} data-parallel-visual-id={route.id} className={`loadout-parallel-symbol loadout-parallel-fan-in loadout-parallel-fan-in-${route.condition}`} role="img" aria-label={`${route.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
+              <path d={route.path} markerEnd="url(#materia-parallel-fan-in-arrow)" />
+              <text x={route.labelX} y={route.labelY}>{route.label}</text>
+            </g>
+          )),
+        ];
+      })}
+      {visibleRoutedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {
         const isGeneratorInput = isGeneratorOutputEdge(edge, activeLoadout, materia);
         const isLoopExitEdge = edge.kind === 'loop-exit';
         const edgeLabel = generatorEdgeLabel(edge, activeLoadout, materia);
@@ -529,9 +566,9 @@ function LoopRegionsLayer({ loopRegions, loopSelectionRectangle }: LoopRegionsLa
           data-testid={`loop-region-${loop.id}`}
           style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
           title={loop.summary}
-          aria-label={`${loop.label} loop: ${loop.summary}`}
+          aria-label={`${loop.label} ${loop.parallel ? 'parallel ' : ''}loop: ${loop.summary}`}
         >
-          <span className="loadout-loop-badge">Loop</span><span className="loadout-loop-title">{loop.label}</span><span className="loadout-loop-summary">{loop.summary}</span>
+          <span className={`loadout-loop-badge${loop.parallel ? ' loadout-loop-badge-parallel' : ''}`} data-testid={loop.parallel ? `parallel-badge-${loop.id}` : undefined}>{loop.parallel ? 'Parallel' : 'Loop'}</span><span className="loadout-loop-title">{loop.label}</span><span className="loadout-loop-summary">{loop.summary}</span>
         </div>
       ))}
       {loopSelectionRectangle && <div className="loadout-loop-selection-rectangle" data-testid="loop-selection-rectangle" style={{ left: `${loopSelectionRectangle.x}px`, top: `${loopSelectionRectangle.y}px`, width: `${loopSelectionRectangle.width}px`, height: `${loopSelectionRectangle.height}px` }} />}
@@ -598,18 +635,57 @@ interface LoopControlModalProps {
   closeLoopControls: () => void;
   breakLoop: (loopId: string) => void;
   clearLoopExit: (loopId: string) => void;
+  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) => boolean;
+  parallelError?: string;
   socketDisplayLabel: (socketId: string) => string;
   socketLabel: (socketId: string) => string;
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
 
-function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopControls, breakLoop, clearLoopExit, socketDisplayLabel, socketLabel, updateLoopExit }: LoopControlModalProps) {
+function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopControls, breakLoop, clearLoopExit, updateLoopParallel, parallelError, socketDisplayLabel, socketLabel, updateLoopExit }: LoopControlModalProps) {
   const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
   const exit = useMemo(() => loop ? (loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' }) : undefined, [loop]);
+  const [parallelEnabled, setParallelEnabled] = useState(false);
+  const [parallelConfig, setParallelConfig] = useState<MateriaLoopParallelConfig>({ planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' });
+  const [cleanFanInTarget, setCleanFanInTarget] = useState('');
+  const [conflictFanInTarget, setConflictFanInTarget] = useState('');
+  const [parallelFormError, setParallelFormError] = useState('');
+
+  useEffect(() => {
+    if (!loop) return;
+    const source = loop.exit?.from;
+    const clean = loop.exits?.find((route) => route.from === source && route.condition === 'satisfied');
+    const conflict = loop.exits?.find((route) => route.from === source && route.condition === 'not_satisfied');
+    setParallelEnabled(loop.parallel !== undefined);
+    setParallelConfig({
+      planInput: loop.parallel?.planInput ?? 'state.parallelPlan',
+      maxConcurrency: loop.parallel?.maxConcurrency ?? 2,
+      workspaceMode: loop.parallel?.workspaceMode ?? 'jj',
+      failurePolicy: loop.parallel?.failurePolicy ?? 'all_terminal',
+      fanIn: loop.parallel?.fanIn ?? 'ordered',
+    });
+    setCleanFanInTarget(clean?.targetSocketId ?? '');
+    setConflictFanInTarget(conflict?.targetSocketId ?? '');
+    setParallelFormError('');
+  }, [loopId, loop?.parallel, loop?.exit?.from, loop?.exits]);
 
   if (!activeLoadout || !loop || !loopId || !exit) return null;
 
   const loopLabel = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets);
+  const targetSocketIds = Object.keys(activeLoadout.sockets ?? {}).filter((socketId) => !loop.sockets.includes(socketId));
+  const applyParallel = () => {
+    if (!updateLoopParallel || !editPolicy.canEdit) return;
+    if (parallelEnabled && (!cleanFanInTarget || !conflictFanInTarget)) {
+      setParallelFormError('Parallel regions require distinct clean and conflict fan-in targets.');
+      return;
+    }
+    if (parallelEnabled && cleanFanInTarget === conflictFanInTarget) {
+      setParallelFormError('Clean and conflict fan-in targets must be different sockets.');
+      return;
+    }
+    setParallelFormError('');
+    updateLoopParallel(loopId, parallelEnabled ? parallelConfig : undefined, parallelEnabled ? { clean: cleanFanInTarget, conflict: conflictFanInTarget } : undefined);
+  };
 
   return (
     <Portal>
@@ -625,6 +701,32 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
         </div>
         {!editPolicy.canEdit && <p className="mt-4 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">{editPolicy.reason}</p>}
         <p className="mt-4 text-sm text-slate-300">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
+        <div className="mt-5 rounded-xl border border-cyan-200/20 bg-slate-950/35 p-4" data-testid={`parallel-loop-editor-${loopId}`}>
+          <label className="flex items-center gap-3 text-sm font-bold text-cyan-50">
+            <input data-testid={`parallel-loop-enabled-${loopId}`} type="checkbox" checked={parallelEnabled} disabled={!editPolicy.canEdit || !updateLoopParallel} title={readonlyTitle} onChange={(event) => { setParallelEnabled(event.target.checked); setParallelFormError(''); }} />
+            Enable experimental parallel execution
+          </label>
+          <p className="mt-2 text-xs text-slate-400">The graph stays symbolic: one planner stream becomes one child lane at runtime, while the parent region owns the fork, barrier, and fan-in.</p>
+          {parallelEnabled && <div className="mt-4 grid gap-3" data-testid={`parallel-loop-fields-${loopId}`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="graph-field">Normalized plan input<input data-testid={`parallel-plan-input-${loopId}`} value={parallelConfig.planInput} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, planInput: event.target.value })} /></label>
+              <label className="graph-field">Max concurrency<input data-testid={`parallel-max-concurrency-${loopId}`} type="number" min="1" step="1" value={parallelConfig.maxConcurrency} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, maxConcurrency: Number(event.target.value) })} /></label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="graph-field">Workspace mode<select data-testid={`parallel-workspace-mode-${loopId}`} value={parallelConfig.workspaceMode} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, workspaceMode: event.target.value as MateriaLoopParallelConfig['workspaceMode'] })}><option value="jj">jj workspace</option></select></label>
+              <label className="graph-field">Failure policy<select data-testid={`parallel-failure-policy-${loopId}`} value={parallelConfig.failurePolicy} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, failurePolicy: event.target.value as MateriaLoopParallelConfig['failurePolicy'] })}><option value="all_terminal">All lanes terminal</option></select></label>
+              <label className="graph-field">Fan-in order<select data-testid={`parallel-fan-in-${loopId}`} value={parallelConfig.fanIn} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, fanIn: event.target.value as MateriaLoopParallelConfig['fanIn'] })}><option value="ordered">Stream order</option></select></label>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="graph-field">Clean fan-in target<select data-testid={`parallel-clean-target-${loopId}`} value={cleanFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setCleanFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
+              <label className="graph-field">Conflict resolver target<select data-testid={`parallel-conflict-target-${loopId}`} value={conflictFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setConflictFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
+            </div>
+            {(parallelFormError || parallelError) && <p className="socket-property-error" role="alert" data-testid={`parallel-loop-error-${loopId}`}>{parallelFormError || parallelError}</p>}
+          </div>}
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" className="materia-button" data-testid={`parallel-loop-apply-${loopId}`} disabled={!editPolicy.canEdit || !updateLoopParallel} title={readonlyTitle} onClick={applyParallel}>{parallelEnabled ? 'Apply parallel configuration' : 'Disable parallel execution'}</button>
+          </div>
+        </div>
         <div className="mt-5 grid gap-4" data-testid={`loop-editor-${loopId}`}>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="graph-field">Exit source<select data-testid={`loop-exit-source-${loopId}`} value={exit.from} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((socketId) => <option key={socketId} value={socketId}>{socketDisplayLabel(socketId)}</option>)}</select></label>

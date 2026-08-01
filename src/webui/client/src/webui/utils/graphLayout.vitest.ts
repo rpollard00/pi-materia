@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { makeEmptySocket, type PipelineConfig } from '../../loadoutModel.js';
 import type { LoadoutEdge, PositionedSocket, RoutedLoadoutEdge } from '../types.js';
-import { formatLoopDisplayLabel, getLoopRegions, routeLoadoutEdges } from './graphLayout.js';
+import { formatLoopDisplayLabel, getLoopRegions, parallelBarrierVisualId, parallelFanInVisualId, parallelForkVisualId, routeLoadoutEdges } from './graphLayout.js';
 
 function qControlXs(cyclePath: string): number[] {
   return Array.from(cyclePath.matchAll(/Q\s+(-?\d+(?:\.\d+)?)\s+-?\d+(?:\.\d+)?/g)).map((match) => Number(match[1]));
@@ -67,6 +67,44 @@ describe('loadout edge routing', () => {
     expect(reverse.targetControl.y - centerLineY).toBeGreaterThan(0);
     expect(routed[0]!.labelY - labelCenterLineY).toBeLessThan(0);
     expect(routed[1]!.labelY - labelCenterLineY).toBeGreaterThan(0);
+  });
+});
+
+describe('parallel loop symbolic visuals', () => {
+  it('derives stable fork, barrier, and fan-in visuals without adding lane sockets', () => {
+    const loadout = {
+      entry: 'Socket-1',
+      sockets: {
+        'Socket-1': { materia: 'Planner', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-2': { materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }] },
+        'Socket-3': { materia: 'Eval', edges: [{ when: 'always', to: 'Socket-2' }] },
+        'Socket-4': { materia: 'Clean' },
+        'Socket-5': { materia: 'Resolve' },
+      },
+      loops: {
+        parallelWork: {
+          sockets: ['Socket-2', 'Socket-3'],
+          consumes: { from: 'Socket-1', output: 'workItems' },
+          exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
+          parallel: { planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' },
+          exits: [
+            { id: 'exit:Socket-3:satisfied', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-4' },
+            { id: 'exit:Socket-3:not_satisfied', from: 'Socket-3', condition: 'not_satisfied', targetSocketId: 'Socket-5' },
+          ],
+        },
+      },
+    } satisfies PipelineConfig;
+    const region = getLoopRegions(loadout, positioned(['Socket-1', 'Socket-2', 'Socket-3', 'Socket-4', 'Socket-5']))[0]!;
+
+    expect(region.parallel).toBe(true);
+    expect(region.parallelVisuals?.fork.id).toBe(parallelForkVisualId('parallelWork'));
+    expect(region.parallelVisuals?.barrier.id).toBe(parallelBarrierVisualId('parallelWork'));
+    expect(region.parallelVisuals?.fanIn.map((visual) => visual.id)).toEqual([
+      parallelFanInVisualId('parallelWork', 'satisfied', 'exit:Socket-3:satisfied'),
+      parallelFanInVisualId('parallelWork', 'not_satisfied', 'exit:Socket-3:not_satisfied'),
+    ]);
+    expect(region.parallelVisuals?.fanIn.map((visual) => visual.targetSocketId)).toEqual(['Socket-4', 'Socket-5']);
+    expect(Object.keys(loadout.sockets)).toHaveLength(5);
   });
 });
 

@@ -35,6 +35,7 @@ import {
   socketStageOffsetX,
   socketStageSize,
 } from '../constants.js';
+import { buildParallelLoopVisuals } from './parallelLoopVisuals.js';
 import type {
   LayoutSocketsResult,
   LoadoutEdge,
@@ -46,6 +47,8 @@ import type {
   SocketAnchorPoint,
   SocketAnchorSide,
 } from '../types.js';
+
+export { parallelBarrierVisualId, parallelFanInVisualId, parallelForkVisualId } from './parallelLoopVisuals.js';
 
 export function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
   if (config.loadouts && Object.keys(config.loadouts).length > 0) return config.loadouts;
@@ -642,13 +645,18 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const consumer = loopConsumerSummary(loadout, id, loop, definitions);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.sockets?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to])}` : undefined;
-    const summary = [consumer, exit].filter(Boolean).join(' • ');
+    const parallel = loop.parallel !== undefined;
+    const parallelSummary = parallel
+      ? `Parallel: ${loop.parallel?.maxConcurrency ?? 'invalid'} lanes • ${loop.parallel?.workspaceMode ?? 'unconfigured'} workspace • ${loop.parallel?.fanIn ?? 'unconfigured'} fan-in`
+      : undefined;
+    const summary = [consumer, exit, parallelSummary].filter(Boolean).join(' • ');
     const label = formatLoopDisplayLabel(loadout, id, loop.sockets);
     const socketSpanWidth = maxX - minX;
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
     const headerY = minY - loopHeaderOffset;
-    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(cycleSockets.length > 0 ? cycleSockets : sockets), ...loopAccent(index) }];
+    const visuals = parallel ? buildParallelLoopVisuals(loadout, id, loop, positions, minX, minY, maxX, Math.max(...sockets.map((socket) => socket.y))) : undefined;
+    return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(cycleSockets.length > 0 ? cycleSockets : sockets), ...(parallel ? { parallel: true, parallelVisuals: visuals } : {}), ...loopAccent(index) }];
   });
 }
 

@@ -659,6 +659,39 @@ export interface RoutedLoadoutEdge {
   routeClass: 'forward' | 'backward' | 'loop';
 }
 
+export interface ParallelLoopForkVisual {
+  id: string;
+  x: number;
+  y: number;
+  path: string;
+  branchesPath: string;
+  label: string;
+}
+
+export interface ParallelLoopBarrierVisual {
+  id: string;
+  x: number;
+  y: number;
+  path: string;
+  label: string;
+}
+
+export interface ParallelLoopFanInVisual {
+  id: string;
+  condition: MateriaEdgeCondition;
+  targetSocketId?: string;
+  path: string;
+  labelX: number;
+  labelY: number;
+  label: string;
+}
+
+export interface ParallelLoopVisuals {
+  fork: ParallelLoopForkVisual;
+  barrier: ParallelLoopBarrierVisual;
+  fanIn: ParallelLoopFanInVisual[];
+}
+
 export interface LoopRegion {
   id: string;
   label: string;
@@ -670,6 +703,10 @@ export interface LoopRegion {
   cyclePath: string;
   accent: string;
   accentSoft: string;
+  /** True when this symbolic region owns an opt-in parallel coordinator. */
+  parallel?: boolean;
+  /** Derived-only fork/barrier/fan-in visuals; never persisted as sockets or edges. */
+  parallelVisuals?: ParallelLoopVisuals;
 }
 
 export interface LoopMembership {

@@ -195,6 +195,7 @@ export function App() {
     edgeCondition,
     setEdgeCondition,
     edgeMutationError,
+    parallelMutationError,
     resetModalErrors,
     resetSocketPropertyError,
     openSocketPropertyEditor,
@@ -202,6 +203,7 @@ export function App() {
     deleteSocket,
     createConnectedSocket,
     createTaskIteratorLoop,
+    updateLoopParallel,
     updateLoopExit,
     clearLoopExit,
     breakLoop,
@@ -299,6 +301,8 @@ export function App() {
               breakLoop,
               clearLoopExit,
               createTaskIteratorLoop,
+              updateLoopParallel,
+              parallelError: parallelMutationError,
               updateLoopExit,
             }}
             socketModal={{

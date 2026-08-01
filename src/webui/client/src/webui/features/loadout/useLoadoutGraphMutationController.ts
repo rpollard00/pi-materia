@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import type { LoadoutEditPolicy } from '../../../../../../domain/loadout.js';
-import type { MateriaEdgeCondition } from '../../../../../../types.js';
+import type { MateriaEdgeCondition, MateriaLoopParallelConfig } from '../../../../../../types.js';
 import { formatGraphValidationErrors, stageValidatedPipelineGraphTransform } from '../../../../../../graph/graphValidation.js';
 import { fromWebUiLoadoutDto, toWebUiLoadoutDto } from '../../../../../loadoutDto.js';
 import {
@@ -26,6 +26,7 @@ import {
   toggleEdgeConditionInLoadout,
   toggleLoopExitRouteCondition,
   updateLoopExitInLoadout,
+  updateLoopParallelInLoadout,
   upsertLoopExitRouteInLoadout,
   type LoadoutTransform,
 } from '../../../loadoutTransforms.js';
@@ -91,10 +92,12 @@ export function useLoadoutGraphMutationController({
   const [edgeTargetId, setEdgeTargetId] = useState('');
   const [edgeCondition, setEdgeCondition] = useState<MateriaEdgeCondition>('satisfied');
   const [edgeMutationError, setEdgeMutationError] = useState('');
+  const [parallelMutationError, setParallelMutationError] = useState('');
 
   function resetModalErrors() {
     setSocketPropertyError('');
     setEdgeMutationError('');
+    setParallelMutationError('');
   }
 
   function resetSocketPropertyError() {
@@ -176,7 +179,7 @@ export function useLoadoutGraphMutationController({
     openSocketActionModal(socketId, 'connect');
   }
 
-  function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string) {
+  function commitGraphMutation(description: string, transform: LoadoutTransform, onSuccess: string, onError: (message: string) => string, options: { parallel?: boolean } = {}) {
     if (readonlyBlocked(description)) return false;
     if (!activeLoadoutName || !activeLoadout) return false;
     const result = stageValidatedWebUiLoadoutTransform(activeLoadout, transform, {
@@ -184,10 +187,22 @@ export function useLoadoutGraphMutationController({
         const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
         return Boolean(referenced && materiaGeneratorOutput(materia[referenced.materia]));
       },
+      isParallelPlanProducerSocket: (socketId) => {
+        const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
+        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallelPlanner?: boolean } : undefined;
+        return definition?.parallelPlanner === true;
+      },
+      isNormalizerSocket: (socketId) => {
+        const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
+        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallelPlanner?: boolean } : undefined;
+        return definition?.parallelPlanner === true;
+      },
+      materia: materia as never,
     });
     if (!result.ok) {
       const message = formatGraphValidationErrors(result.errors);
       setEdgeMutationError(message);
+      if (options.parallel) setParallelMutationError(message);
       notifyStatus(onError(message), 'validation');
       return false;
     }
@@ -234,6 +249,22 @@ export function useLoadoutGraphMutationController({
     if (closeModalAfterCommitted(created)) {
       setSelectedLoopSocketIds([]);
     }
+  }
+
+  function updateLoopParallel(loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) {
+    const loop = activeLoadout?.loops?.[loopId];
+    if (!loop) return false;
+    const committed = commitGraphMutation(
+      `${parallel ? 'Enabled' : 'Disabled'} parallel execution for loop ${loopId}.`,
+      (loadout) => updateLoopParallelInLoadout(loadout, loopId, parallel, fanInTargets),
+      parallel
+        ? `Staged parallel loop ${loopId}; the parent graph remains symbolic and lane sockets are not materialized.`
+        : `Disabled parallel execution for loop ${loopId}; existing region-owned routes were preserved.`,
+      (message) => `Cannot update parallel loop ${loopId}: ${message}`,
+      { parallel: true },
+    );
+    if (committed) setParallelMutationError('');
+    return committed;
   }
 
   function updateLoopExit(loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) {
@@ -425,6 +456,7 @@ export function useLoadoutGraphMutationController({
     edgeCondition,
     setEdgeCondition,
     edgeMutationError,
+    parallelMutationError,
     resetModalErrors,
     resetSocketPropertyError,
     openSocketPropertyEditor,
@@ -433,6 +465,7 @@ export function useLoadoutGraphMutationController({
     deleteSocket,
     createConnectedSocket,
     createTaskIteratorLoop,
+    updateLoopParallel,
     updateLoopExit,
     clearLoopExit,
     breakLoop,

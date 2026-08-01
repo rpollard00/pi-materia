@@ -1,4 +1,4 @@
-import type { MateriaEdgeCondition } from '../../../types.js';
+import type { MateriaEdgeCondition, MateriaLoopParallelConfig } from '../../../types.js';
 import {
   canDeleteSocket,
   clearSocketMateria,
@@ -188,6 +188,47 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
   return setLoadoutSocketLayout(replaceLoops(replaceSockets(loadout, sockets), loops), socketId, undefined);
 }
 
+export interface ParallelFanInTargets {
+  clean?: string;
+  conflict?: string;
+}
+
+/**
+ * Update the declarative parallel region as one immutable operation. Fan-in
+ * routes are supplied by the authoring surface so enabling parallel mode never
+ * creates placeholder sockets or transient lane edges in the parent graph.
+ */
+export function updateLoopParallelInLoadout(
+  loadout: PipelineConfig,
+  loopId: string,
+  parallel: MateriaLoopParallelConfig | undefined,
+  fanInTargets: ParallelFanInTargets = {},
+): PipelineConfig {
+  const loop = loadout.loops?.[loopId];
+  if (!loadout.loops || !loop) return loadout;
+  const nextLoop: PipelineLoop = { ...loop };
+  if (parallel) nextLoop.parallel = { ...parallel };
+  else delete nextLoop.parallel;
+
+  if (parallel && loop.exit?.from && (fanInTargets.clean || fanInTargets.conflict)) {
+    const source = loop.exit.from;
+    let exits = [...(loop.exits ?? [])];
+    const replaceRoute = (condition: MateriaEdgeCondition, targetSocketId: string | undefined) => {
+      if (!targetSocketId || !loadout.sockets?.[targetSocketId]) return;
+      exits = exits.filter((route) => !(route.from === source && route.condition === condition));
+      exits.push({ id: loopExitRouteId(source, condition), from: source, condition, targetSocketId });
+    };
+    // An omitted target leaves the existing region-owned route untouched so
+    // partial programmatic updates cannot silently discard the other join.
+    replaceRoute('satisfied', fanInTargets.clean);
+    replaceRoute('not_satisfied', fanInTargets.conflict);
+    if (exits.length > 0) nextLoop.exits = exits;
+    else delete nextLoop.exits;
+  }
+
+  return { ...loadout, loops: { ...loadout.loops, [loopId]: nextLoop } };
+}
+
 export function createTaskLoop(loadout: PipelineConfig, loopId: string, sockets: string[], consumes: { from: string; output: string }, exit: { from: string; when: MateriaEdgeCondition; to: string }): PipelineConfig {
   if (sockets.length === 0) return loadout;
   let nextLoadout = loadout;
@@ -206,7 +247,17 @@ export function updateLoopExitInLoadout(loadout: PipelineConfig, loopId: string,
   if (!loadout.loops || !loop) return loadout;
   const sockets = loadout.sockets ? removeLoopRuntimeControls(loadout, loadout.sockets, loop) : loadout.sockets;
   const nextLoop: PipelineLoop = { ...loop, exit };
-  if (loop.exit?.from && loop.exit.from !== exit.from) delete nextLoop.exits;
+  if (loop.exit?.from && loop.exit.from !== exit.from) {
+    if (loop.parallel && loop.exits) {
+      // Parallel fan-in routes belong to the region, so moving the terminal
+      // boundary remaps their source and regenerates their stable route ids.
+      nextLoop.exits = loop.exits.map((route) => route.from === loop.exit?.from
+        ? { ...route, id: loopExitRouteId(exit.from, route.condition), from: exit.from }
+        : route);
+    } else {
+      delete nextLoop.exits;
+    }
+  }
   return { ...loadout, ...(sockets && sockets !== loadout.sockets ? { sockets } : {}), loops: { ...loadout.loops, [loopId]: nextLoop } };
 }
 

@@ -160,6 +160,41 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(details?.open).toBe(true);
   });
 
+  it('renders a parallel badge and symbolic fork/barrier/fan-in markers without lane cards', () => {
+    const base = renderPanel();
+    const baseViewModel = base.props.viewModel;
+    base.unmount();
+    const activeLoadout = {
+      ...baseViewModel.activeLoadout,
+      loops: { parallelWork: { sockets: ['Socket-1', 'Socket-2'], parallel: { planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj' as const, failurePolicy: 'all_terminal' as const, fanIn: 'ordered' as const } } },
+    };
+    const { getByTestId, queryByTestId } = renderPanel({
+      viewModel: {
+        ...baseViewModel,
+        activeLoadout,
+        loopRegions: [{
+          id: 'parallelWork', label: 'Build → Eval', x: 12, y: 12, width: 280, height: 160,
+          summary: 'Parallel: 2 lanes', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)', parallel: true,
+          parallelVisuals: {
+            fork: { id: 'parallel-fork:parallelWork', x: 80, y: 80, path: 'M 10 10 L 80 80', branchesPath: 'M 80 80 L 110 60 M 80 80 L 110 80 M 80 80 L 110 100', label: 'Parallel fork' },
+            barrier: { id: 'parallel-barrier:parallelWork', x: 320, y: 80, path: 'M 320 40 L 320 120', label: 'Parallel barrier' },
+            fanIn: [
+              { id: 'parallel-fan-in:parallelWork:clean', condition: 'satisfied', targetSocketId: 'Socket-3', path: 'M 320 70 L 400 70', labelX: 350, labelY: 60, label: 'Clean fan-in' },
+              { id: 'parallel-fan-in:parallelWork:conflict', condition: 'not_satisfied', targetSocketId: 'Socket-4', path: 'M 320 90 L 400 90', labelX: 350, labelY: 80, label: 'Conflict resolver' },
+            ],
+          },
+        }],
+      },
+    });
+
+    expect(getByTestId('parallel-badge-parallelWork').textContent).toBe('Parallel');
+    expect(getByTestId('parallel-fork-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-fork:parallelWork');
+    expect(getByTestId('parallel-barrier-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-barrier:parallelWork');
+    expect(getByTestId('parallel-fan-in-parallelWork-satisfied')).toBeTruthy();
+    expect(getByTestId('parallel-fan-in-parallelWork-not_satisfied')).toBeTruthy();
+    expect(queryByTestId('parallel-lane-0')).toBeNull();
+  });
+
   it('omits persistent readonly copy and toolbar lock controls while keeping edits disabled', () => {
     const { queryByRole, getByLabelText, getByTestId } = renderPanel();
 

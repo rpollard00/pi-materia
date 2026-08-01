@@ -463,6 +463,66 @@
   fill: color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 58%, transparent);
 }
 
+.loadout-parallel-symbol {
+  pointer-events: none;
+  fill: none;
+  stroke: color-mix(in srgb, var(--loop-accent, rgb(103 232 249)) 78%, white 8%);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 8px rgb(34 211 238 / 0.24));
+}
+
+.loadout-parallel-fork path:first-child {
+  stroke-width: 3;
+  stroke-dasharray: 9 6;
+}
+
+.loadout-parallel-fork path:nth-child(2) {
+  stroke-width: 2;
+  stroke-dasharray: 4 5;
+}
+
+.loadout-parallel-fork circle {
+  fill: var(--loop-accent, rgb(103 232 249));
+  stroke: rgb(224 242 254 / 0.9);
+  stroke-width: 1.5;
+}
+
+.loadout-parallel-barrier path {
+  stroke-width: 5;
+  stroke: var(--loop-accent, rgb(103 232 249));
+  stroke-dasharray: 3 5;
+}
+
+.loadout-parallel-fan-in path {
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+}
+
+.loadout-parallel-fan-in-satisfied path {
+  stroke: rgb(74 222 128 / 0.86);
+}
+
+.loadout-parallel-fan-in-not_satisfied path {
+  stroke: rgb(251 146 60 / 0.9);
+}
+
+.loadout-parallel-symbol text {
+  fill: rgb(226 232 240 / 0.82);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  paint-order: stroke;
+  stroke: rgb(15 23 42 / 0.92);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.loadout-parallel-fork-arrow,
+.loadout-parallel-fan-in-arrow {
+  fill: color-mix(in srgb, var(--loop-accent, rgb(103 232 249)) 78%, white 8%);
+}
+
 .loadout-loop-badge {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--loop-accent, rgb(199 210 254)) 54%, transparent);
@@ -473,6 +533,13 @@
   line-height: 1.15;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+}
+
+.loadout-loop-badge-parallel {
+  border-color: rgb(103 232 249 / 0.82);
+  background: rgb(8 47 73 / 0.82);
+  color: rgb(165 243 252 / 0.98);
+  box-shadow: 0 0 12px rgb(34 211 238 / 0.18);
 }
 
 .loadout-loop-title {
