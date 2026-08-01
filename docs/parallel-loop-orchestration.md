@@ -5,7 +5,8 @@ existing loop region. Parallel mode is deliberately narrower than general
 workflow concurrency: it is **jj-only**, runs one persistent child process per
 planner-defined stream, and keeps the parent cast as a coordinator. A loadout
 that does not opt in has the ordinary sequential loop semantics described in
-[Loop semantics](loop-semantics.md).
+[Loop semantics](loop-semantics.md). For operator setup, authoring, monitoring,
+troubleshooting, and cleanup, see [Experimental parallel workflow operation](parallel-workflow-operation.md).
 
 The feature is experimental. Its durable state, artifacts, and workspace
 manifests are part of the recovery contract, but the MVP does not promise

@@ -209,6 +209,7 @@ Loadout and materia configuration is layered JSON (defaults → user profile →
 - [Graph semantics](docs/graph-semantics.md) — edge conditions, branching, loops, and structured iteration
 - [Loop semantics](docs/loop-semantics.md) — generator-driven loop configuration and exit routing
 - [Parallel loop orchestration](docs/parallel-loop-orchestration.md) — experimental jj-only planner streams, child lanes, fan-in, conflict resolution, and revival
+- [Parallel workflow operation](docs/parallel-workflow-operation.md) — authoring, visual interpretation, monitoring, cancellation, recovery, troubleshooting, and cleanup
 - [Workflow safety and resource limits](docs/workflow-safety.md) — operator-controlled `maxTokens`, per-invocation utility timeouts, per-item explicit retry `maxTraversals`, progress-aware no-advance protection, and diagnostic-only counters
 - [Utility materia](docs/utility-materia.md) — deterministic pre/post-processing sockets (no LLM turn)
 - [Loadout ownership & locking](docs/loadout-ownership-locking.md) — how defaults, duplicates, and locking work
