@@ -8,8 +8,6 @@ import { resetNoAdvanceCycles } from "./noAdvanceCycles.js";
 export { resolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaCastState, MateriaEdgeCondition, MateriaEdgeConfig, PiMateriaConfig, ResolvedMateriaSocket } from "../types.js";
 
-export const DEFAULT_WORKFLOW_MAX_EDGE_TRAVERSALS = 25;
-
 export class MateriaEdgeTraversalExhaustionError extends Error {
   public readonly from: string;
   public readonly to: string;

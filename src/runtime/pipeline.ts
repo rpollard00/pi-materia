@@ -445,7 +445,9 @@ function edgeLabel(edge: MateriaEdgeConfig): string {
 function formatLimits(config: PiMateriaConfig): string {
   return [
     `socket visits ${config.limits?.maxSocketVisits ?? 25}`,
-    `edge traversals ${config.limits?.maxEdgeTraversals ?? 25}`,
+    // Legacy maxEdgeTraversals is ignored (edges without explicit maxTraversals are unbounded);
+    // show only an explicitly configured value with no hardcoded fallback.
+    config.limits?.maxEdgeTraversals === undefined ? undefined : `edge traversals ${config.limits.maxEdgeTraversals}`,
     `no-advance cycles ${config.limits?.maxNoAdvanceCycles ?? 3}`,
   ].join(", ");
 }
