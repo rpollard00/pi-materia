@@ -22,6 +22,7 @@ const {
   startHeartbeat,
   stopHeartbeat,
   initializeCastEventBus,
+  extractParallelRuntimeProvenance,
   castHeartbeats,
   castEventBuses,
 } = nativeTestInternals as unknown as {
@@ -46,6 +47,7 @@ const {
   startHeartbeat: (state: MateriaCastState, config: { eventing?: { enabled?: boolean; heartbeatIntervalMs?: number } }) => void;
   stopHeartbeat: (castId: string) => void;
   initializeCastEventBus: (config: { eventing?: { enabled?: boolean; sinks?: Record<string, unknown> } }, state: MateriaCastState) => Promise<EventBus | undefined>;
+  extractParallelRuntimeProvenance: (payload: Record<string, unknown>) => { loopId?: string; laneId?: string };
   castHeartbeats: Map<string, ReturnType<typeof setInterval>>;
   castEventBuses: Map<string, EventBus>;
 };
@@ -111,6 +113,22 @@ function makeCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
 // getEventBus / removeEventBus allow reading and cleaning up.
 
 describe("lifecycle event emission", () => {
+  test("parallel runtime provenance resolves nested lane identity for monitor events", () => {
+    for (const type of ["parallel_lane_terminal", "parallel_child_event", "parallel_budget_exceeded"]) {
+      expect(extractParallelRuntimeProvenance({
+        type,
+        provenance: { loopId: "build", laneId: "lane-api" },
+      })).toEqual({ loopId: "build", laneId: "lane-api" });
+    }
+
+    // Direct fields remain authoritative for older coordinator payloads.
+    expect(extractParallelRuntimeProvenance({
+      loopId: "direct-loop",
+      laneId: "direct-lane",
+      provenance: { loopId: "nested-loop", laneId: "nested-lane" },
+    })).toEqual({ loopId: "direct-loop", laneId: "direct-lane" });
+  });
+
   test("emitLifecycleEvent is a no-op when no event bus is registered", async () => {
     const state = makeCastState();
     // No bus registered — should not throw.

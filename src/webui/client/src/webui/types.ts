@@ -1,4 +1,5 @@
 import type { ToolScopeSpec } from '../../../../domain/toolScope.js';
+import type { ParallelRunMonitorSummary } from '../../../../application/parallelMonitoring.js';
 import type { MateriaEdgeCondition } from '../../../../types.js';
 import type { MateriaConfig, PipelineConfig, PipelineSocket } from '../loadoutModel.js';
 
@@ -619,6 +620,8 @@ export interface MonitorSnapshot {
     artifactRoot: string;
     startedAt: number;
     updatedAt: number;
+    /** Durable aggregate state for symbolic parallel loop regions. */
+    parallelRuns?: Record<string, ParallelRunMonitorSummary>;
   };
 }
 
@@ -707,6 +710,8 @@ export interface LoopRegion {
   parallel?: boolean;
   /** Derived-only fork/barrier/fan-in visuals; never persisted as sockets or edges. */
   parallelVisuals?: ParallelLoopVisuals;
+  /** Live durable coordinator summary, when this region belongs to the active cast. */
+  parallelStatus?: ParallelRunMonitorSummary;
 }
 
 export interface LoopMembership {

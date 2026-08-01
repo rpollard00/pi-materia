@@ -420,7 +420,7 @@
   justify-content: flex-start;
   gap: 0.22rem;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
   border-left: 2px solid color-mix(in srgb, var(--loop-accent, rgb(165 180 252)) 48%, transparent);
   border-radius: 1rem;
   background: linear-gradient(90deg, var(--loop-accent-soft, rgb(165 180 252 / 0.22)), rgb(15 23 42 / 0.08));
@@ -560,6 +560,70 @@
   font-size: 0.62rem;
   line-height: 1.25;
   color: rgb(203 213 225 / 0.8);
+}
+
+.loadout-loop-region:has(.loadout-loop-parallel-details[open]) {
+  z-index: 5;
+}
+
+.loadout-loop-parallel-status {
+  display: flex;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 0.15rem;
+  pointer-events: auto;
+  font-size: 0.56rem;
+  line-height: 1.2;
+}
+
+.loadout-loop-parallel-counts {
+  max-width: 100%;
+  overflow: hidden;
+  color: rgb(165 243 252 / 0.9);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.loadout-loop-parallel-details {
+  position: relative;
+  z-index: 20;
+  max-width: min(30rem, 75vw);
+  color: rgb(226 232 240 / 0.92);
+}
+
+.loadout-loop-parallel-details summary {
+  cursor: pointer;
+  color: rgb(125 211 252 / 0.95);
+  font-weight: 800;
+  pointer-events: auto;
+}
+
+.loadout-loop-parallel-details ul {
+  position: absolute;
+  top: 1.35rem;
+  left: 0;
+  z-index: 30;
+  display: grid;
+  min-width: 18rem;
+  max-width: min(32rem, 78vw);
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid rgb(103 232 249 / 0.35);
+  border-radius: 0.65rem;
+  background: rgb(15 23 42 / 0.98);
+  box-shadow: 0 12px 30px rgb(2 6 23 / 0.55);
+  list-style: none;
+}
+
+.loadout-loop-parallel-details li {
+  display: grid;
+  gap: 0.1rem;
+  overflow-wrap: anywhere;
+}
+
+.loadout-loop-parallel-details small {
+  color: rgb(148 163 184 / 0.95);
 }
 
 .loadout-edge-clickable {

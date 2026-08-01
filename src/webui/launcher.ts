@@ -17,6 +17,7 @@ import { addQuest as addQuestToBoard, deleteQuest as deleteQuestFromBoard, gener
 import { FileQuestBoardRepository } from "../infrastructure/questBoardRepository.js";
 import { issuesToMessage } from "../domain/result.js";
 import { applyCatalogToLocalAction } from "../application/catalogActions.js";
+import { summarizeParallelRuns } from "../application/parallelMonitoring.js";
 import { createCentralHttpControlPlaneClient } from "../central/client/index.js";
 import { loadCentralConnectedRuntimeConfig, type CentralConnectedRuntimeConfig } from "../central/config/index.js";
 import { createLocalConfigCatalogStore } from "../infrastructure/localControlPlane/catalogStore.js";
@@ -530,6 +531,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
     : normalizeArtifactEvents(artifactSummary?.events ?? [], state?.castId);
   const activeLoadoutSnapshot = await readActiveLoadoutSnapshot(ctx.cwd, configuredPath);
   const activeCastLoadoutIdentity = state ? resolveActiveCastLoadoutIdentity(state) : undefined;
+  const parallelRuns = state ? summarizeParallelRuns(state.parallelRuns) : undefined;
   return {
     ok: true,
     scope: "session",
@@ -559,6 +561,7 @@ async function currentSessionSnapshot(ctx: ExtensionContext, sessionKey: string,
       artifactRoot: state.artifactRoot,
       startedAt: state.startedAt,
       updatedAt: state.updatedAt,
+      ...(parallelRuns ? { parallelRuns } : {}),
     } : undefined,
   };
 }
@@ -606,7 +609,7 @@ function firstNonEmptyString(...values: unknown[]): string | undefined {
  * diagnostics such as `advancement_lifecycle` carry), then the originating
  * `request` lifecycle events like `cast_start` record.
  */
-const EVENT_BODY_FIELDS: readonly string[] = ["message", "stage", "request"];
+const EVENT_BODY_FIELDS: readonly string[] = ["message", "error", "reason", "stage", "request"];
 
 /**
  * Derive a compact-row body message distinct from the event type/title.
@@ -748,11 +751,16 @@ function normalizeArtifactEvents(
       // names. Prefer canonical `socket`/`materia`, then fall back to the
       // alternate fields diagnostics and handoff events use, so materia-
       // scoped events do not degrade to a cast-level `"cast"` provenance.
-      const socketId = firstNonEmptyString(data.socket, data.currentSocketId, data.sourceSocketId, data.targetSocketId) ?? "";
-      const materia = firstNonEmptyString(data.materia, data.materiaName, data.sourceMateriaName, data.targetMateriaName) ?? "cast";
+      const parallelProvenance = isRecord(data.provenance) ? data.provenance : data;
+      const loopId = firstNonEmptyString(data.loopId, parallelProvenance.loopId);
+      const laneId = firstNonEmptyString(data.laneId, parallelProvenance.laneId);
+      const socketId = firstNonEmptyString(data.socket, data.currentSocketId, data.sourceSocketId, data.targetSocketId)
+        ?? (loopId ? `parallel:${loopId}` : "");
+      const materia = firstNonEmptyString(data.materia, data.materiaName, data.sourceMateriaName, data.targetMateriaName)
+        ?? (laneId ? `lane:${laneId}` : loopId ? "parallel-coordinator" : "cast");
       const materiaLabel = nonEmptyString(data.materiaLabel);
-      const itemKey = typeof data.itemKey === "string" ? data.itemKey : undefined;
-      const itemLabel = typeof data.itemLabel === "string" ? data.itemLabel : undefined;
+      const itemKey = firstNonEmptyString(data.itemKey, data.workItemId, laneId);
+      const itemLabel = firstNonEmptyString(data.itemLabel, laneId);
       const visit = typeof data.visit === "number" ? data.visit : 0;
       // The compact row already shows `type` as its title, so the body must
       // surface a distinct value (explicit message, diagnostic stage, or

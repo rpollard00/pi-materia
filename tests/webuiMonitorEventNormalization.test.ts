@@ -85,6 +85,14 @@ describe("normalizeArtifactEvents provenance", () => {
     expect(normalized[0].socketId).toBe("Socket-5");
   });
 
+  test("parallel lifecycle events surface loop and lane provenance in compact monitor rows", () => {
+    const normalized = normalizeArtifactEvents(
+      [entry("parallel_lane_started", { loopId: "build", laneId: "lane-api", childCastId: "child-api" })],
+      "cast-1",
+    );
+    expect(normalized[0]).toMatchObject({ socketId: "parallel:build", materia: "lane:lane-api", itemKey: "lane-api", itemLabel: "lane-api" });
+  });
+
   test("empty-string identity values are skipped so they do not shadow later candidates", () => {
     const normalized = normalizeArtifactEvents(
       [entry("edge_event", { socket: "", materia: "", materiaName: "Auto-Plan", currentSocketId: "Socket-1" })],

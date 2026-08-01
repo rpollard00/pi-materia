@@ -1,3 +1,5 @@
+import type { ParallelRunMonitorSummary } from '../../application/parallelMonitoring.js';
+
 export interface MateriaMonitorArtifactEntry {
   socket?: string;
   materia?: string;
@@ -65,5 +67,7 @@ export interface MateriaWebUiSessionSnapshot {
     artifactRoot: string;
     startedAt: number;
     updatedAt: number;
+    /** Durable aggregate state for symbolic parallel loop regions. */
+    parallelRuns?: Record<string, ParallelRunMonitorSummary>;
   };
 }

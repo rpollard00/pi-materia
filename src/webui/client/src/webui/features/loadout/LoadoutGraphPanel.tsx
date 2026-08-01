@@ -41,6 +41,7 @@ import {
 } from '../../utils/graphLayout.js';
 import { resolveMateriaModelLabel } from '../../utils/materiaModelLabel.js';
 import { selectMateriaPaletteRows } from '../../utils/materiaPaletteFiltering.js';
+import { formatParallelLaneStatus, formatParallelLoopStatus, parallelLaneAccessibleLabel } from '../../utils/parallelLoopStatus.js';
 
 export type SocketActionMode = 'actions' | 'replace' | 'edit' | 'connect';
 
@@ -565,14 +566,35 @@ function LoopRegionsLayer({ loopRegions, loopSelectionRectangle }: LoopRegionsLa
           className="loadout-loop-region"
           data-testid={`loop-region-${loop.id}`}
           style={{ left: `${loop.x}px`, top: `${loop.y}px`, width: `${loop.width}px`, height: `${loop.height}px`, '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}
-          title={loop.summary}
-          aria-label={`${loop.label} ${loop.parallel ? 'parallel ' : ''}loop: ${loop.summary}`}
+          title={loop.parallelStatus ? `${loop.summary}\n${formatParallelLoopStatus(loop.parallelStatus)}` : loop.summary}
+          aria-label={`${loop.label} ${loop.parallel ? 'parallel ' : ''}loop: ${loop.summary}${loop.parallelStatus ? `; ${formatParallelLoopStatus(loop.parallelStatus)}` : ''}`}
         >
           <span className={`loadout-loop-badge${loop.parallel ? ' loadout-loop-badge-parallel' : ''}`} data-testid={loop.parallel ? `parallel-badge-${loop.id}` : undefined}>{loop.parallel ? 'Parallel' : 'Loop'}</span><span className="loadout-loop-title">{loop.label}</span><span className="loadout-loop-summary">{loop.summary}</span>
+          {loop.parallelStatus && <ParallelLoopStatusDetails summary={loop.parallelStatus} loopId={loop.id} />}
         </div>
       ))}
       {loopSelectionRectangle && <div className="loadout-loop-selection-rectangle" data-testid="loop-selection-rectangle" style={{ left: `${loopSelectionRectangle.x}px`, top: `${loopSelectionRectangle.y}px`, width: `${loopSelectionRectangle.width}px`, height: `${loopSelectionRectangle.height}px` }} />}
     </>
+  );
+}
+
+function ParallelLoopStatusDetails({ summary, loopId }: { summary: NonNullable<LoopRegion['parallelStatus']>; loopId: string }) {
+  const aggregate = formatParallelLoopStatus(summary);
+  return (
+    <div className="loadout-loop-parallel-status" data-testid={`parallel-status-${loopId}`}>
+      <span className="loadout-loop-parallel-counts" aria-label={`Parallel loop status: ${aggregate}`}>{aggregate}</span>
+      <details className="loadout-loop-parallel-details" data-testid={`parallel-lane-details-${loopId}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
+        <summary>Lane details ({summary.counts.total})</summary>
+        <ul aria-label={`Parallel lanes for ${loopId}`}>
+          {summary.lanes.map((lane) => (
+            <li key={`${lane.laneId}:${lane.attempt}`} aria-label={parallelLaneAccessibleLabel(lane)}>
+              <strong>{lane.laneId}</strong> <span>{formatParallelLaneStatus(lane)}</span>
+              <small>Artifacts: <code>{lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'pending'}</code>; jj: <code>{lane.workspace?.workspacePath ?? 'pending'}</code></small>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
   );
 }
 

@@ -37,7 +37,20 @@ export function useLoadoutGraphViewModel({
     [activeLoadout?.entry, activeLoadout?.sockets, activeLoadout?.loops, activeLoadout?.layout, semanticEdges, materia],
   );
   const socketPositions = useMemo(() => new Map(loadoutGraph.sockets.map((socket) => [socket.id, socket])), [loadoutGraph.sockets]);
-  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia), [activeLoadout?.loops, activeLoadout?.sockets, socketPositions, materia]);
+  const parallelRuns = useMemo(() => {
+    const activeCast = monitor?.activeCast;
+    if (!activeCast?.parallelRuns) return undefined;
+    // A session can retain the terminal cast snapshot while the operator views
+    // another loadout. Do not paint that run onto a similarly named loop in an
+    // unrelated graph. Missing identity keeps legacy snapshots compatible.
+    if (activeCast.loadoutId && activeCast.loadoutId !== activeLoadout?.id) return undefined;
+    if (!activeCast.loadoutId && activeCast.loadoutName && activeCast.loadoutName !== viewedLoadoutName) return undefined;
+    return activeCast.parallelRuns;
+  }, [activeLoadout?.id, monitor?.activeCast?.loadoutId, monitor?.activeCast?.loadoutName, monitor?.activeCast?.parallelRuns, viewedLoadoutName]);
+  const loopRegions = useMemo(() => getLoopRegions(activeLoadout, socketPositions, materia).map((region) => {
+    const parallelStatus = parallelRuns?.[region.id];
+    return parallelStatus ? { ...region, parallelStatus } : region;
+  }), [activeLoadout?.loops, activeLoadout?.sockets, parallelRuns, socketPositions, materia]);
   const loopMemberships = useMemo(() => getLoopMemberships(activeLoadout), [activeLoadout?.loops]);
   const loopExitBadges = useMemo(() => getLoopExitBadges(activeLoadout), [activeLoadout?.loops]);
   const routedEdges = useMemo(() => routeLoadoutEdges(loadoutGraph.edges, socketPositions), [loadoutGraph.edges, socketPositions]);

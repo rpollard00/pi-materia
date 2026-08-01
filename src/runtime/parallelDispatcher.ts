@@ -139,6 +139,10 @@ export interface ParallelLoopDispatcherDependencies {
     lane?: ParallelLaneArtifactPort;
     fanIn?: ParallelFanInArtifactPort;
   };
+  /** Optional enriched runtime-event bridge used by the monitor feed. */
+  runtimeEvents?: {
+    emit(state: MateriaCastState, type: string, payload: Record<string, unknown>): Promise<void>;
+  };
   budget?: {
     /** Check the parent budget after a child usage delta is recorded. */
     assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void>;
@@ -1928,11 +1932,20 @@ export class ParallelLoopDispatcher {
 
   async #appendEvent(state: MateriaCastState, type: string, data: unknown): Promise<void> {
     const append = this.#deps.artifacts?.appendEvent;
-    if (!append || !state.runState) return;
+    if (append && state.runState) {
+      try {
+        await append(state.runState, type, data);
+      } catch {
+        // Parent artifact failures must not stop a child lane or corrupt state.
+      }
+    }
+    const emit = this.#deps.runtimeEvents?.emit;
+    if (!emit) return;
     try {
-      await append(state.runState, type, data);
+      await emit(state, type, isRecord(data) ? data : { value: data });
     } catch {
-      // Parent artifact failures must not stop a child lane or corrupt state.
+      // Runtime monitor delivery is best effort; durable state and artifacts
+      // remain authoritative when eventing is disabled or unavailable.
     }
   }
 }

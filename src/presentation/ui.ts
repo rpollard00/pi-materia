@@ -11,6 +11,7 @@ import {
   resolvedPipelineSockets,
 } from "../loadout/loadoutAccessors.js";
 import { deriveRetryBudget, type MateriaRetryBudget } from "./retryBudget.js";
+import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../application/parallelMonitoring.js";
 import type {
   MateriaCastState,
   MateriaRunState,
@@ -370,6 +371,8 @@ function createMateriaCastStatusModel(
         ? "waiting for refinement; /materia continue to finalize"
         : `${currentMateria ?? state.phase}${state.active ? " active" : ""}`;
   const loop = activeLoopDisplay(state);
+  const parallel = activeParallelRun(state);
+  const parallelStatus = parallel ? formatParallelRunCompactStatus(parallel) : undefined;
   return createMateriaStatusRenderModel({
     cast: state.active ? "active" : state.phase || "done",
     loadout: formatLoadoutMateria(
@@ -393,8 +396,24 @@ function createMateriaCastStatusModel(
         "-",
     ),
     path: loop?.path ?? "-",
-    message: displayMateriaStatusValue(state.runState, status),
+    message: displayMateriaStatusValue(state.runState, [parallelStatus, status].filter(Boolean).join(" · ")),
   });
+}
+
+function activeParallelRun(state: MateriaCastState): ParallelRunMonitorSummary | undefined {
+  const runs = Object.values(state.parallelRuns ?? {});
+  if (runs.length === 0) return undefined;
+  const currentSocketId = currentCastSocketId(state);
+  const currentLoop = currentSocketId && Object.entries(state.pipeline?.loops ?? {}).find(([, loop]) => loopSockets(loop).includes(currentSocketId))?.[0];
+  const selected = currentLoop ? runs.find((run) => run.loopId === currentLoop) : undefined;
+  const fallback = runs.slice().sort((left, right) => left.loopId.localeCompare(right.loopId))[0];
+  return summarizeParallelRun(selected ?? fallback!);
+}
+
+/** Compact, bounded aggregate status for the persistent Pi/TUI widget. */
+export function formatParallelRunCompactStatus(summary: ParallelRunMonitorSummary): string {
+  const { counts } = summary;
+  return `parallel ${summary.loopId} q${counts.queued} r${counts.running} a${counts.accepted} f${counts.failed} i${counts.interrupted} fi${counts.fanIn} c${counts.conflict} ✓${counts.completed}/${counts.total}`;
 }
 
 function createMateriaStatusRenderModel(

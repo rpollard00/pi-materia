@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
-import { clearWidgetTicker, formatCostLabel, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
+import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
+import type { ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
@@ -347,6 +348,23 @@ describe("persistent Materia widget formatting", () => {
     expect(lines[1]).toContain("⟲ -");
     expect(lines[2]).toBe("› Socket-9 active");
     expect(lines.join("\n")).not.toContain("undefined");
+  });
+
+  test("renders all aggregate parallel lane counters in compact status", () => {
+    const summary = {
+      version: 1,
+      loopId: "build",
+      runId: "run-1",
+      phase: "awaiting_lanes",
+      fanInPhase: "not_started",
+      planId: "plan-1",
+      baseline: { commitId: "base", changeId: "change" },
+      maxConcurrency: 2,
+      counts: { total: 5, queued: 1, running: 1, accepted: 1, failed: 1, interrupted: 1, completed: 3, fanIn: 0, conflict: 0 },
+      lanes: [],
+      updatedAt: 1,
+    } satisfies ParallelRunMonitorSummary;
+    expect(formatParallelRunCompactStatus(summary)).toBe("parallel build q1 r1 a1 f1 i1 fi0 c0 ✓3/5");
   });
 
   test("renders compact completion usage without billing disclaimers", () => {

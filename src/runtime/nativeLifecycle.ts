@@ -217,6 +217,17 @@ parallelLoopDispatcher = createParallelLoopDispatcher({
     lane: parallelLaneArtifacts,
     fanIn: parallelLaneArtifacts,
   },
+  runtimeEvents: {
+    emit: (state, type, payload) => {
+      const { loopId, laneId } = extractParallelRuntimeProvenance(payload);
+      return emitLifecycleEvent(state, type, {
+        socketId: loopId ? `parallel:${loopId}` : "parallel",
+        materia: laneId ? `lane:${laneId}` : "parallel-coordinator",
+        ...(laneId ? { itemKey: laneId, itemLabel: laneId } : {}),
+        payload,
+      });
+    },
+  },
   budget: {
     assertBudget: async (state, ctx) => assertBudget(await loadConfigFromState(state), state.runState, ctx),
   },
@@ -423,8 +434,28 @@ export const nativeTestInternals = {
   findMultiTurnAgentSockets,
   isAgentControllerPresetActive,
   validateAgentControllerMultiTurnSockets,
+  extractParallelRuntimeProvenance,
   get castHeartbeats() { return nativeEventing.castHeartbeats; },
   get castEventBuses() { return nativeEventing.castEventBuses; },
 };
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+/** Resolve monitor identity from both current and artifact-shaped event data. */
+function extractParallelRuntimeProvenance(payload: Record<string, unknown>): { loopId?: string; laneId?: string } {
+  const provenance = isRecord(payload.provenance) ? payload.provenance : undefined;
+  const loopId = nonEmptyString(payload.loopId) ?? nonEmptyString(provenance?.loopId);
+  const laneId = nonEmptyString(payload.laneId) ?? nonEmptyString(provenance?.laneId);
+  return {
+    ...(loopId !== undefined ? { loopId } : {}),
+    ...(laneId !== undefined ? { laneId } : {}),
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 
