@@ -454,6 +454,181 @@
           "empty": false
         }
       }
+    },
+    "Parallel-Experimental": {
+      "id": "default:parallel-experimental",
+      "lockState": "locked",
+      "entry": "Socket-1",
+      "loops": {
+        "parallelWork": {
+          "consumes": {
+            "from": "Socket-5",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-8",
+            "when": "satisfied",
+            "to": "end"
+          },
+          "parallel": {
+            "planInput": "state.parallelPlan",
+            "maxConcurrency": 2,
+            "workspaceMode": "jj",
+            "failurePolicy": "all_terminal",
+            "fanIn": "ordered"
+          },
+          "sockets": [
+            "Socket-6",
+            "Socket-7",
+            "Socket-8"
+          ],
+          "exits": [
+            {
+              "id": "parallel-clean-fan-in",
+              "from": "Socket-8",
+              "condition": "satisfied",
+              "targetSocketId": "Socket-9"
+            },
+            {
+              "id": "parallel-conflict-resolver",
+              "from": "Socket-8",
+              "condition": "not_satisfied",
+              "targetSocketId": "Socket-10"
+            }
+          ]
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "materia": "Ignore-Artifacts",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ]
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "materia": "Detect-VCS",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "materia": "Blackbelt-Bootstrap",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ]
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "materia": "Parallel-Plan",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ]
+        },
+        "Socket-5": {
+          "socketKind": "normal",
+          "materia": "Normalize-Parallel-Streams",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ]
+        },
+        "Socket-6": {
+          "socketKind": "normal",
+          "materia": "Build",
+          "parse": "text",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-7"
+            }
+          ]
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-8"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-6",
+              "maxTraversals": 3
+            }
+          ]
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "materia": "Parallel-Lane-Checkpoint",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ]
+        },
+        "Socket-9": {
+          "socketKind": "normal",
+          "materia": "Parallel-Integration-Eval",
+          "parse": "json",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-11"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-10",
+              "maxTraversals": 3
+            }
+          ]
+        },
+        "Socket-10": {
+          "socketKind": "normal",
+          "materia": "Parallel-Resolver",
+          "parse": "json",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-9"
+            }
+          ]
+        },
+        "Socket-11": {
+          "socketKind": "normal",
+          "materia": "Parallel-Finalize",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-12"
+            }
+          ]
+        },
+        "Socket-12": {
+          "socketKind": "normal",
+          "materia": "Narrate",
+          "parse": "text"
+        }
+      }
     }
   },
   "materia": {
@@ -473,6 +648,16 @@
       "parse": "json",
       "multiTurn": true,
       "generator": true
+    },
+    "Parallel-Plan": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia Parallel-Plan materia materia. Create an implementation plan whose canonical workItems are safe to execute in isolated jj lanes. Preserve the request's priorities and make each workItem independently actionable. Emit the planner's ordered parallelSchedule sidecar with version 1 when the plan has work items: streams are named, non-empty, ordered, and assign every workItems index exactly once. Keep each workItem limited to title:string and context:string; put item-specific guidance in context. Do not emit a top-level text field or copy lane metadata into workItems. Prefer a small number of balanced streams and keep dependent work in the same stream. Return compact JSON with workItems, parallelSchedule, and optional context.",
+      "color": "materia-color-blue",
+      "parse": "json",
+      "generator": true,
+      "parallelPlanner": true,
+      "lockState": "locked"
     },
     "Build": {
       "type": "agent",
@@ -520,6 +705,31 @@
       "color": "materia-color-yellow",
       "parse": "json",
       "parallelSafe": true
+    },
+    "Parallel-Integration-Eval": {
+      "type": "agent",
+      "tools": {
+        "type": "custom",
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash"
+        ]
+      },
+      "prompt": "You are the pi-materia Parallel-Integration-Eval materia materia. Evaluate the single jj integration revision produced by the experimental parallel coordinator after clean fan-in or resolver repair. Inspect the integrated repository state and relevant tests without modifying files. Accept only when the integration is conflict-free and satisfies the original request; explain actionable failures in context. Return compact JSON with satisfied and explanatory context. Do not emit a top-level text field.",
+      "color": "materia-color-yellow",
+      "parse": "json",
+      "lockState": "locked"
+    },
+    "Parallel-Resolver": {
+      "type": "agent",
+      "tools": "coding",
+      "prompt": "You are the pi-materia Parallel-Resolver materia materia. Repair the conflicted jj integration revision in the parent workspace after every parallel lane has been accepted. Resolve only the reported integration conflicts, preserve the accepted lane heads, inspect the conflict state, and run focused checks when useful. Do not rerun lanes, replan streams, advance the bookmark, or publish changes. Return compact JSON with satisfied and explanatory context; do not emit a top-level text field.",
+      "color": "materia-color-green",
+      "parse": "json",
+      "lockState": "locked"
     },
     "GitMaintain": {
       "type": "agent",

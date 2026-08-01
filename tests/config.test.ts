@@ -809,6 +809,66 @@ describe("config loadouts", () => {
     }
   });
 
+  test("ships the opt-in locked parallel workflow without changing the active default", async () => {
+    const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8")) as {
+      activeLoadout?: string;
+      loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown }> }>;
+      materia?: Record<string, { lockState?: string; generator?: boolean; parallelPlanner?: boolean; parallelSafe?: boolean }>;
+    };
+    const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
+    expect(rawDefault.activeLoadout).toBe("Full-Auto");
+    expect(experimental).toMatchObject({ id: "default:parallel-experimental", lockState: "locked" });
+    expect(experimental?.loops?.parallelWork?.parallel).toEqual({
+      planInput: "state.parallelPlan",
+      maxConcurrency: 2,
+      workspaceMode: "jj",
+      failurePolicy: "all_terminal",
+      fanIn: "ordered",
+    });
+    for (const id of ["Parallel-Plan", "Parallel-Integration-Eval", "Parallel-Resolver"]) {
+      expect(rawDefault.materia?.[id]?.lockState, id).toBe("locked");
+    }
+    expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallelPlanner: true });
+    for (const id of ["Build", "Auto-Eval", "Parallel-Lane-Checkpoint"]) {
+      expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
+    }
+
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-parallel-loadout-"));
+    const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
+    const previous = process.env.PI_MATERIA_PROFILE_DIR;
+    process.env.PI_MATERIA_PROFILE_DIR = profile;
+    try {
+      const loaded = await loadConfig(cwd);
+      expect(loaded.config.activeLoadout).toBe("Full-Auto");
+      expect(loaded.loadoutSources?.["Parallel-Experimental"]).toBe("default");
+      expect(loaded.config.materia["Normalize-Parallel-Streams"]?.command).toEqual(["node", path.join(profile, "utilities", "normalize-parallel-streams.mjs")]);
+      expect(loaded.config.materia["Parallel-Lane-Checkpoint"]?.command).toEqual(["node", path.join(profile, "utilities", "parallel-lane-checkpoint.mjs")]);
+      expect(loaded.config.materia["Parallel-Finalize"]?.command).toEqual(["node", path.join(profile, "utilities", "parallel-finalize.mjs")]);
+      expect(await readdir(path.join(profile, "utilities"))).toEqual(expect.arrayContaining([
+        "normalize-parallel-streams.mjs",
+        "parallel-lane-checkpoint.mjs",
+        "parallel-finalize.mjs",
+      ]));
+
+      loaded.config.activeLoadout = "Parallel-Experimental";
+      const pipeline = resolvePipeline(loaded.config);
+      expect(pipeline.entry.id).toBe("Socket-1");
+      expect(pipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallelPlanner: true });
+      expect(pipeline.sockets["Socket-5"].materiaId).toBe("Normalize-Parallel-Streams");
+      expect(pipeline.loops?.parallelWork?.parallel).toMatchObject({ planInput: "state.parallelPlan", maxConcurrency: 2, workspaceMode: "jj" });
+      expect(pipeline.loops?.parallelWork?.exits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ condition: "satisfied", targetSocketId: "Socket-9" }),
+        expect.objectContaining({ condition: "not_satisfied", targetSocketId: "Socket-10" }),
+      ]));
+      expect(pipeline.sockets["Socket-6"].materia).toMatchObject({ parallelSafe: true });
+      expect(pipeline.sockets["Socket-7"].materia).toMatchObject({ parallelSafe: true });
+      expect(pipeline.sockets["Socket-8"].materia).toMatchObject({ parallelSafe: true });
+    } finally {
+      if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
+      else process.env.PI_MATERIA_PROFILE_DIR = previous;
+    }
+  });
+
   test("loadConfig materializes declarative loop exits for existing saved loadouts", async () => {
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
@@ -943,6 +1003,9 @@ describe("config loadouts", () => {
       ["Parallel-Lane-Checkpoint", "json"],
       ["Parallel-Finalize", "json"],
       ["Auto-Architect", "json"],
+      ["Parallel-Plan", "json"],
+      ["Parallel-Integration-Eval", "json"],
+      ["Parallel-Resolver", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],
       ["Auto-Eval", "json"],
