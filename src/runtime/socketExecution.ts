@@ -16,6 +16,8 @@ import type {
   AppliedMateriaModelSettings,
   MateriaModelSettings,
 } from "../config/modelSettings.js";
+import { parallelFanInHandoff } from "../domain/parallelFanIn.js";
+import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
 import { getResolvedPipelineSocket, loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { parallelLoopForSocket, type ParallelLoopDispatcher } from "./parallelDispatcher.js";
@@ -258,7 +260,52 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         return;
       }
       try {
-        if (await deps.parallel.dispatch({ pi, ctx, state, socket, loopId: parallelRegion.loopId, config: parallelRegion.config })) {
+        if (await deps.parallel.dispatch({
+          pi,
+          ctx,
+          state,
+          socket,
+          loopId: parallelRegion.loopId,
+          config: parallelRegion.config,
+          onFanIn: async ({ loopId, result }) => {
+            const loopConfig = state.pipeline.loops?.[loopId];
+            const routeSource = loopConfig?.exit?.from ?? loopConfig?.exits?.[0]?.from;
+            const route = resolveLoopExitRoute(loopConfig, { from: routeSource, satisfied: result.satisfied });
+            if (!route) {
+              throw new Error(`Parallel loop ${JSON.stringify(loopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
+            }
+            const handoff = parallelFanInHandoff(result);
+            const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
+              ? state.data.envelope as Record<string, unknown>
+              : {};
+            // Make the barrier result available both through the canonical
+            // control fields and through a namespaced provenance object. The
+            // latter lets a resolver inspect bounded paths/details without
+            // leaking lane state into generic work-item fields.
+            const nextData: Record<string, unknown> = {
+              ...state.data,
+              envelope: { ...existingEnvelope, satisfied: handoff.satisfied, context: handoff.context },
+              parallelFanIn: handoff.parallelFanIn,
+            };
+            // The parent is leaving item-scoped lane execution. Do not let a
+            // stale lane item masquerade as the resolver/evaluator's current
+            // work item after the barrier.
+            delete nextData.item;
+            delete nextData.currentWorkItem;
+            delete nextData.workItem;
+            state.data = nextData;
+            state.lastJson = handoff;
+            state.lastOutput = JSON.stringify(handoff);
+            state.lastAssistantText = state.lastOutput;
+            state.currentItemKey = undefined;
+            state.currentItemLabel = undefined;
+            deps.state.saveCastState(pi, state);
+            await advanceToSocket(pi, ctx, state, route.targetSocketId, `parallel-fan-in:${loopId}`, undefined, false);
+          },
+          onFailure: async ({ loopId, reason }) => {
+            await deps.lifecycle.failCast(pi, ctx, state, new Error(reason), `parallel:${loopId}`);
+          },
+        })) {
           // An empty normalized plan is a coordinator no-op, but it still
           // follows the ordinary loop exhaustion route without entering a
           // member socket.

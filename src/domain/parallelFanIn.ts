@@ -95,6 +95,53 @@ export interface ParallelFanInResult extends MateriaParallelFanInProvenance {
   satisfied: boolean;
 }
 
+/** The synthetic parent handoff exposed after the successful-lanes barrier. */
+export interface ParallelFanInHandoff {
+  satisfied: boolean;
+  context: string;
+  parallelFanIn: MateriaParallelFanInProvenance;
+}
+
+/**
+ * Keep VCS-provided conflict telemetry bounded before it enters durable cast
+ * state or a resolver prompt. Infrastructure adapters should already apply the
+ * same bounds, but the runtime boundary is intentionally defensive for fakes,
+ * alternate backends, and persisted data from older versions.
+ */
+export function boundParallelFanInResult(result: ParallelFanInResult): ParallelFanInResult {
+  return {
+    ...clone(result),
+    // Outcome is the structural VCS truth. Do not allow an inconsistent
+    // adapter boolean to route a conflicted revision through the clean join.
+    satisfied: result.outcome === "clean",
+    conflictedPaths: result.conflictedPaths.slice(0, 64).map((value) => boundedText(value, 512)),
+    conflictDetails: result.conflictDetails.slice(0, 64).map((detail) => ({
+      path: boundedText(detail.path, 512),
+      message: boundedText(detail.message, 1_000),
+    })),
+  };
+}
+
+/**
+ * Convert a structural fan-in result into the canonical control handoff used
+ * by the parent resolver/evaluator sockets. The provenance remains under one
+ * namespaced field so it cannot be confused with ordinary work-item data.
+ */
+export function parallelFanInHandoff(result: ParallelFanInResult): ParallelFanInHandoff {
+  const bounded = boundParallelFanInResult(result);
+  const details = bounded.conflictDetails.length > 0
+    ? bounded.conflictDetails.map((detail) => `${detail.path}: ${detail.message}`).join("; ")
+    : bounded.conflictedPaths.map((pathValue) => `${pathValue}: jj reported a merge conflict`).join("; ");
+  const context = bounded.outcome === "conflict"
+    ? `Parallel fan-in materialized a conflicted integration revision${bounded.integrationRevision ? ` ${bounded.integrationRevision.commitId}` : ""}. Resolve the integration revision without rerunning accepted lanes. Conflicted paths: ${details || "(jj did not report paths)"}.`
+    : `Parallel fan-in cleanly integrated ${bounded.orderedHeads.length} accepted lane(s)${bounded.integrationRevision ? ` at ${bounded.integrationRevision.commitId}` : ""}. Continue with post-integration evaluation.`;
+  return {
+    satisfied: bounded.satisfied,
+    context: boundedText(context, 4_000),
+    parallelFanIn: bounded,
+  };
+}
+
 export function isRevisionIdentity(value: unknown): value is MateriaParallelRevisionIdentity {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -104,6 +151,11 @@ export function isRevisionIdentity(value: unknown): value is MateriaParallelRevi
 
 export function sameRevision(left: MateriaParallelRevisionIdentity, right: MateriaParallelRevisionIdentity): boolean {
   return left.commitId === right.commitId && left.changeId === right.changeId;
+}
+
+function boundedText(value: string, max: number): string {
+  const normalized = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : String(value);
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
 function clone<T>(value: T): T {

@@ -6,6 +6,7 @@ import type {
   ChildCastTerminalResult,
   StartChildCastInput,
 } from "../application/childCastRunner.js";
+import { boundParallelFanInResult, type ParallelFanInResult } from "../domain/parallelFanIn.js";
 import type {
   ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
@@ -59,6 +60,18 @@ export type {
   ParallelWorkspaceRevision,
 } from "./parallelDispatchSupport.js";
 
+export interface ParallelFanInCompletionInput {
+  loopId: string;
+  runId: string;
+  result: ParallelFanInResult;
+}
+
+export interface ParallelRunFailureInput {
+  loopId: string;
+  runId: string;
+  reason: string;
+}
+
 export interface ParallelLoopDispatchInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -66,6 +79,10 @@ export interface ParallelLoopDispatchInput {
   socket: ResolvedMateriaSocket;
   loopId: string;
   config: MateriaLoopParallelConfig;
+  /** Parent-session continuation at the symbolic fan-in barrier. */
+  onFanIn?: (input: ParallelFanInCompletionInput) => Promise<void>;
+  /** Turn an all-terminal coordinator failure into a parent cast failure. */
+  onFailure?: (input: ParallelRunFailureInput) => Promise<void>;
 }
 
 export interface ParallelLoopCancellationInput {
@@ -202,6 +219,41 @@ export class ParallelLoopDispatcher {
     const existing = input.state.parallelRuns?.[input.loopId];
     if (existing) {
       this.#run = existing;
+      // A process/session restart can occur after jj materializes fan-in but
+      // before the parent continuation starts. Rehydrate that barrier from
+      // durable provenance rather than leaving the parent in running_parallel.
+      if (existing.fanInProvenance && input.onFanIn && isFanInContinuationPhase(existing.phase) && isParallelLoopMember(input.state, input.loopId, input.socket.id)) {
+        const result = boundParallelFanInResult({
+          ...existing.fanInProvenance,
+          satisfied: existing.fanInProvenance.outcome === "clean",
+        });
+        const continuation = applyParallelRunPhaseTransition(existing, {
+          parentCastId: input.state.castId,
+          loopId: input.loopId,
+          runId: existing.runId,
+          phase: result.satisfied ? "evaluating" : "resolving",
+          fanInPhase: result.satisfied ? "accepted" : "conflict",
+          timestamp: this.#now(),
+        });
+        if (continuation.applied) {
+          replaceState(input.state, {
+            ...input.state,
+            parallelRuns: { ...(input.state.parallelRuns ?? {}), [input.loopId]: continuation.state },
+          });
+          this.#run = input.state.parallelRuns?.[input.loopId];
+          this.#deps.state.saveCastState(input.pi, input.state);
+        }
+        await input.onFanIn({ loopId: input.loopId, runId: existing.runId, result });
+        await this.#appendEvent(input.state, "parallel_fan_in_routed", {
+          parentCastId: input.state.castId,
+          loopId: input.loopId,
+          runId: existing.runId,
+          condition: result.satisfied ? "satisfied" : "not_satisfied",
+          integrationRevision: result.integrationRevision,
+          retainedLaneArtifacts: true,
+          rehydrated: true,
+        });
+      }
       return true;
     }
 
@@ -952,6 +1004,7 @@ export class ParallelLoopDispatcher {
         reason: "not_all_lanes_accepted",
         laneStatuses: Object.fromEntries(Object.entries(run.lanes).map(([laneId, lane]) => [laneId, lane.status])),
       });
+      await this.#notifyRunFailure(input, state, run.runId, "Parallel fan-in skipped because not every lane was accepted.");
       return;
     }
 
@@ -978,6 +1031,7 @@ export class ParallelLoopDispatcher {
         this.#deps.state.saveCastState(input.pi, state);
       }
       await this.#appendEvent(state, "parallel_fan_in_failed", { parentCastId: state.castId, loopId: input.loopId, runId: run.runId, error: diagnostic.message });
+      await this.#notifyRunFailure(input, state, run.runId, diagnostic.message);
       return;
     }
 
@@ -996,7 +1050,7 @@ export class ParallelLoopDispatcher {
     }
 
     try {
-      const result = await fanIn({
+      const rawResult = await fanIn({
         parentCastId: state.castId,
         loopId: input.loopId,
         runId: run.runId,
@@ -1017,11 +1071,18 @@ export class ParallelLoopDispatcher {
           };
         }),
       });
+      const result = boundParallelFanInResult(rawResult);
       const finalPhase = applyParallelRunPhaseTransition(this.#run ?? run, {
         parentCastId: state.castId,
         loopId: input.loopId,
         runId: run.runId,
-        phase: result.outcome === "conflict" ? "conflict" : "evaluating",
+        // A conflict is still in the coordinator's conflict phase until the
+        // parent continuation is handed to the configured resolver. Keeping
+        // the intermediate phase durable makes a crash at the barrier
+        // distinguishable from a resolver attempt.
+        phase: result.outcome === "conflict"
+          ? (input.onFanIn ? "resolving" : "conflict")
+          : "evaluating",
         fanInPhase: result.outcome === "conflict" ? "conflict" : "accepted",
         timestamp: result.completedAt,
       });
@@ -1051,8 +1112,20 @@ export class ParallelLoopDispatcher {
         orderedHeads: result.orderedHeads,
         integrationRevision: result.integrationRevision,
         conflictedPaths: result.conflictedPaths,
+        conflictDetails: result.conflictDetails,
         operationId: result.operationId,
       });
+      if (input.onFanIn) {
+        await input.onFanIn({ loopId: input.loopId, runId: run.runId, result });
+        await this.#appendEvent(state, "parallel_fan_in_routed", {
+          parentCastId: state.castId,
+          loopId: input.loopId,
+          runId: run.runId,
+          condition: result.satisfied ? "satisfied" : "not_satisfied",
+          integrationRevision: result.integrationRevision,
+          retainedLaneArtifacts: true,
+        });
+      }
     } catch (error) {
       const message = boundedFailureReason(errorMessage(error));
       const failed = applyParallelRunPhaseTransition(this.#run ?? run, {
@@ -1070,6 +1143,21 @@ export class ParallelLoopDispatcher {
         this.#deps.state.saveCastState(input.pi, state);
       }
       await this.#appendEvent(state, "parallel_fan_in_failed", { parentCastId: state.castId, loopId: input.loopId, runId: run.runId, error: message });
+      await this.#notifyRunFailure(input, state, run.runId, message);
+    }
+  }
+
+  async #notifyRunFailure(input: ParallelLoopDispatchInput, state: MateriaCastState, runId: string, reason: string): Promise<void> {
+    if (!input.onFailure) return;
+    try {
+      await input.onFailure({ loopId: input.loopId, runId, reason: boundedFailureReason(reason) });
+    } catch (error) {
+      await this.#appendEvent(state, "parallel_parent_failure_callback_failed", {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId,
+        error: boundedFailureReason(errorMessage(error)),
+      });
     }
   }
 
@@ -1580,6 +1668,15 @@ function streamForActive(run: MateriaParallelRunState | undefined, active: Activ
 
 function isTerminalLaneStatus(status: ParallelLaneState["status"]): boolean {
   return status === "accepted" || status === "failed" || status === "interrupted";
+}
+
+function isFanInContinuationPhase(phase: MateriaParallelRunState["phase"]): boolean {
+  return phase === "conflict" || phase === "resolving" || phase === "evaluating";
+}
+
+function isParallelLoopMember(state: MateriaCastState, loopId: string, socketId: string): boolean {
+  const members = state.pipeline.loops?.[loopId]?.sockets;
+  return Array.isArray(members) && members.includes(socketId);
 }
 
 function validateDispatchConfig(config: MateriaLoopParallelConfig): void {

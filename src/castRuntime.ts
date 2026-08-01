@@ -31,6 +31,8 @@ export {
 } from "./runtime/parallelDispatcher.js";
 export type {
   ParallelFanInArtifactPort,
+  ParallelFanInCompletionInput,
+  ParallelRunFailureInput,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
