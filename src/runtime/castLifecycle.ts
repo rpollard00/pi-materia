@@ -174,6 +174,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       socketState: "awaiting_agent_response",
       startedAt: Date.now(),
       updatedAt: Date.now(),
+      parallelRuns: {},
       data: { ...(options?.initialData ?? {}) },
       cursors: {},
       visits: {},

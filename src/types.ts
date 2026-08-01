@@ -2,6 +2,34 @@ import type { ToolScopeSpec } from "./domain/toolScope.js";
 import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
 import type { MateriaThinkingLevel } from "./domain/thinking.js";
 import type { ScopePath } from "./domain/scope.js";
+import type {
+  MateriaParallelFanInBehavior,
+  MateriaParallelFailurePolicy,
+  MateriaParallelRunState,
+  MateriaParallelWorkspaceMode,
+} from "./domain/parallelRunTypes.js";
+export type {
+  MateriaParallelChildSession,
+  MateriaParallelConfigIdentity,
+  MateriaParallelDiagnostic,
+  MateriaParallelDiagnosticSeverity,
+  MateriaParallelFanInPhase,
+  MateriaParallelFailurePolicy,
+  MateriaParallelLaneState,
+  MateriaParallelLaneStatus,
+  MateriaParallelLastEvent,
+  MateriaParallelPlanIdentity,
+  MateriaParallelQueueEntry,
+  MateriaParallelRevisionIdentity,
+  MateriaParallelRunPhase,
+  MateriaParallelRunState,
+  MateriaParallelWorkspaceMode,
+  MateriaParallelWorkspaceOwnership,
+  MateriaParallelFanInBehavior,
+  MateriaParallelUsageTotals,
+  MateriaParallelRunRecord,
+  MateriaParallelLaneRecord,
+} from "./domain/parallelRunTypes.js";
 
 export interface PiMateriaConfig {
   artifactDir?: string;
@@ -371,6 +399,7 @@ export type MateriaCastSocketState =
   | "awaiting_agent_response"
   | "awaiting_user_refinement"
   | "running_utility"
+  | "running_parallel"
   | "idle"
   | "complete"
   | "failed";
@@ -438,6 +467,8 @@ export interface MateriaCastState {
   failedReason?: string;
   startedAt: number;
   updatedAt: number;
+  /** Optional for load compatibility; keyed by loop id, with nested lane records. */
+  parallelRuns?: Record<string, MateriaParallelRunState>;
   data: Record<string, unknown>;
   cursors: Record<string, number>;
   visits: Record<string, number>;
@@ -725,10 +756,6 @@ export interface MateriaAdvanceConfig {
   done?: string;
   when?: string;
 }
-
-export type MateriaParallelWorkspaceMode = "jj";
-export type MateriaParallelFailurePolicy = "all_terminal";
-export type MateriaParallelFanInBehavior = "ordered";
 
 /**
  * Opt-in execution metadata for an existing loop region.
