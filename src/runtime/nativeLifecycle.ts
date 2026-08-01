@@ -8,6 +8,7 @@ import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExha
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { appendEvent, appendManifest, initializeRun, recordSocketParsedJson, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel } from "../infrastructure/castArtifacts.js";
 import { createJjWorkspaceBackend } from "../infrastructure/jjWorkspaceBackend.js";
+import { createParallelLaneArtifactStore } from "../infrastructure/parallelLaneArtifacts.js";
 import { createPiChildCastRunner } from "../infrastructure/piChildCastRunner.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
@@ -204,7 +205,15 @@ const parallelLoopDispatcher = createParallelLoopDispatcher({
   children: createPiChildCastRunner(),
   workspaces: createJjWorkspaceBackend(),
   state: { saveCastState },
-  artifacts: { appendEvent },
+  artifacts: {
+    appendEvent,
+    writeUsage,
+    lane: createParallelLaneArtifactStore(),
+  },
+  budget: {
+    assertBudget: async (state, ctx) => assertBudget(await loadConfigFromState(state), state.runState, ctx),
+  },
+  onBudgetExceeded: async (pi, ctx, state, error, entryId) => failCast(pi, ctx, state, error, entryId),
 });
 
 const { completeSocket, startSocket } = createSocketExecution({

@@ -77,6 +77,8 @@ export interface ChildCastTerminalResult {
   message?: string;
   error?: string;
   output?: unknown;
+  /** Aggregate child usage at terminal time, when the adapter reports it. */
+  usage?: ChildCastUsage;
   /** Set when the terminal state was caused by an abort request. */
   abortReason?: string;
 }
@@ -96,6 +98,7 @@ export interface ChildCastStreamEvent {
   payload?: unknown;
   socketId?: string;
   workItemId?: string;
+  /** Cumulative child-cast usage snapshot; repeated events must be idempotent. */
   usage?: ChildCastUsage;
 }
 

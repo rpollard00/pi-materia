@@ -72,6 +72,204 @@ function makeState(): MateriaCastState {
 }
 
 describe("parallel loop dispatcher", () => {
+  test("aggregates child telemetry once and forwards lane provenance", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const forwarded: Array<{ provenance: Record<string, unknown>; event: unknown }> = [];
+    const usageWrites: number[] = [];
+    const laneArtifacts = {
+      async initialize(input: any) {
+        return {
+          laneManifestPath: `${input.paths.runDirectory}/lane.json`,
+          eventStreamPath: `${input.paths.runDirectory}/events.jsonl`,
+          terminalResultPath: `${input.paths.runDirectory}/terminal.json`,
+          revisionPath: `${input.paths.runDirectory}/revision.json`,
+          diagnosticsPath: `${input.paths.runDirectory}/diagnostics.json`,
+          usagePath: `${input.paths.runDirectory}/usage.json`,
+          launchSpecPath: `${input.paths.runDirectory}/child-launch.json`,
+          sessionPath: input.paths.sessionPath,
+          stdoutPath: `${input.paths.artifactRoot}/child-stdout.jsonl`,
+          stderrPath: `${input.paths.artifactRoot}/child-stderr.log`,
+          socketArtifactsPath: input.paths.artifactRoot,
+        };
+      },
+      async appendEvent(input: any) { forwarded.push(input.event); },
+      async writeTerminalResult() {},
+      async writeRevision() {},
+      async writeDiagnostics() {},
+      async writeUsage() {},
+    };
+    const state = makeState();
+    const usage = {
+      tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 },
+      cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+    };
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces: {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } }; },
+        async create(input: { laneId: string }) {
+          return {
+            repositoryRoot: "/repo",
+            workspaceRoot: "/tmp/materia",
+            workspacePath: `/tmp/materia/${input.laneId}`,
+            workspaceName: input.laneId,
+            baseline: { commitId: "base", changeId: "base-change" },
+            revision: { commitId: "base", changeId: "base-change" },
+          };
+        },
+      },
+      state: { saveCastState: () => undefined },
+      artifacts: {
+        appendEvent: async () => undefined,
+        writeUsage: async (runState) => { usageWrites.push(runState.usage.tokens.total); },
+        lane: laneArtifacts,
+      },
+    });
+
+    await dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! });
+    const first = childRunner.listSnapshots()[0]!;
+    childRunner.emit(first.identity.childCastId, { type: "socket_output", socketId: "Build", usage });
+    childRunner.complete(first.identity.childCastId, { usage, output: { commitId: "head-a", changeId: "change-a" } });
+    await childRunner.drain();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(state.runState.usage.tokens.total).toBe(5);
+    expect(state.runState.usage.cost.total).toBe(0.5);
+    expect(usageWrites.at(-1)).toBe(5);
+    expect(forwarded.some((entry) => entry.provenance.laneId === "lane-a" && entry.provenance.childSequence !== undefined)).toBe(true);
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("accepted");
+  });
+
+  test("hard-stops all lanes when aggregated usage exhausts the parent budget", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    const budgetFailures: string[] = [];
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces: {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } }; },
+        async create(input: { laneId: string }) {
+          return {
+            repositoryRoot: "/repo",
+            workspaceRoot: "/tmp/materia",
+            workspacePath: `/tmp/materia/${input.laneId}`,
+            workspaceName: input.laneId,
+            baseline: { commitId: "base", changeId: "base-change" },
+            revision: { commitId: "base", changeId: "base-change" },
+          };
+        },
+      },
+      state: { saveCastState: () => undefined },
+      budget: {
+        async assertBudget(current) {
+          if (current.runState.usage.tokens.total >= 5) throw new Error("pi-materia budget limit reached");
+        },
+      },
+      onBudgetExceeded: async (_pi, _ctx, _state, error) => { budgetFailures.push(String(error)); },
+    });
+
+    await dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! });
+    const first = childRunner.listSnapshots()[0]!;
+    childRunner.emit(first.identity.childCastId, {
+      type: "socket_output",
+      usage: {
+        tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 },
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+    });
+    await childRunner.drain();
+
+    expect(state.runState.usage.tokens.total).toBe(5);
+    expect(budgetFailures).toEqual(["Error: pi-materia budget limit reached"]);
+    expect(state.parallelRuns?.build?.phase).toBe("failed");
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("interrupted");
+    expect(state.parallelRuns?.build?.lanes["lane-b"]?.status).toBe("interrupted");
+    expect(state.parallelRuns?.build?.lanes["lane-c"]?.status).toBe("failed");
+    expect(childRunner.listSnapshots().every((snapshot) => snapshot.status === "interrupted")).toBe(true);
+  });
+
+  test("writes terminal, revision, and bounded diagnostics when workspace creation fails", async () => {
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const state = makeState();
+    const terminal: any[] = [];
+    const revisions: any[] = [];
+    const diagnostics: any[] = [];
+    const laneArtifacts = {
+      async initialize() { return {} as any; },
+      async appendEvent() {},
+      async writeTerminalResult(input: any) { terminal.push(input); },
+      async writeRevision(input: any) { revisions.push(input); },
+      async writeDiagnostics(input: any) { diagnostics.push(input); },
+      async writeUsage() {},
+    };
+    const dispatcher = new ParallelLoopDispatcher({
+      children: childRunner,
+      workspaces: {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } }; },
+        async create() { throw new Error("jj unavailable"); },
+      },
+      state: { saveCastState: () => undefined },
+      artifacts: { lane: laneArtifacts },
+    });
+
+    await dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! });
+
+    expect(childRunner.listSnapshots()).toHaveLength(0);
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("failed");
+    expect(terminal[0]?.result).toMatchObject({ status: "failed", accepted: false, error: "workspace creation failed: jj unavailable" });
+    expect(revisions[0]?.revision).toEqual({ baseline: { commitId: "base", changeId: "base-change" } });
+    expect(diagnostics[0]?.diagnostics).toHaveLength(1);
+    expect(diagnostics[0]?.diagnostics[0].message.length).toBeLessThanOrEqual(1_000);
+  });
+
+  test("writes failure artifacts when child start fails", async () => {
+    const runner = createFakeChildCastRunner({ now: () => 10 });
+    const children = {
+      start: async () => { throw new Error("child process unavailable"); },
+      observe: runner.observe.bind(runner),
+      subscribe: runner.subscribe.bind(runner),
+      resume: runner.resume.bind(runner),
+      abort: runner.abort.bind(runner),
+    } as any;
+    const state = makeState();
+    const terminal: any[] = [];
+    const revisions: any[] = [];
+    const diagnostics: any[] = [];
+    const laneArtifacts = {
+      async initialize() { return {} as any; },
+      async appendEvent() {},
+      async writeTerminalResult(input: any) { terminal.push(input); },
+      async writeRevision(input: any) { revisions.push(input); },
+      async writeDiagnostics(input: any) { diagnostics.push(input); },
+      async writeUsage() {},
+    };
+    const dispatcher = new ParallelLoopDispatcher({
+      children,
+      workspaces: {
+        async pinBaseline() { return { repositoryRoot: "/repo", baseline: { commitId: "base", changeId: "base-change" } }; },
+        async create(input: { laneId: string }) {
+          return {
+            repositoryRoot: "/repo",
+            workspaceRoot: "/tmp/materia",
+            workspacePath: `/tmp/materia/${input.laneId}`,
+            workspaceName: input.laneId,
+            baseline: { commitId: "base", changeId: "base-change" },
+            revision: { commitId: "base", changeId: "base-change" },
+          };
+        },
+      },
+      state: { saveCastState: () => undefined },
+      artifacts: { lane: laneArtifacts },
+    });
+
+    await dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: state.pipeline.loops!.build.parallel! });
+
+    expect(state.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("failed");
+    expect(terminal[0]?.result.error).toBe("child launch failed: child process unavailable");
+    expect(revisions[0]?.revision).toMatchObject({ baseline: { commitId: "base", changeId: "base-change" }, workspace: { commitId: "base", changeId: "base-change" } });
+    expect(diagnostics[0]?.diagnostics[0].message).toBe("child launch failed: child process unavailable");
+  });
+
   test("launches ordered streams with bounded concurrency and child context", async () => {
     const childRunner = createFakeChildCastRunner({ now: () => 10 });
     const created: string[] = [];

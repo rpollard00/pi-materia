@@ -30,6 +30,12 @@ export {
   ParallelLoopDispatcher,
 } from "./runtime/parallelDispatcher.js";
 export type {
+  ParallelLaneArtifactIdentity,
+  ParallelLaneArtifactPaths,
+  ParallelLaneArtifactPort,
+  ParallelLaneDiagnosticArtifact,
+  ParallelLaneEventArtifact,
+  ParallelLaneRevisionArtifact,
   NormalizedParallelPlan,
   NormalizedParallelStream,
   ParallelLoopDispatchInput,

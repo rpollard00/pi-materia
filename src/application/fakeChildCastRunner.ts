@@ -272,10 +272,10 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       accepted: result.accepted,
       updatedAt: timestamp,
       ...(usage ? { usage: clone(usage) } : {}),
-      terminalResult: clone(terminalResult),
+      terminalResult: clone({ ...terminalResult, ...(usage ? { usage } : {}) }),
     });
     this.emit(childCastId, { type: "terminal", payload: terminalResult, ...(usage ? { usage } : {}), occurredAt: timestamp });
-    this.notifyTerminal(childCastId, terminalResult);
+    this.notifyTerminal(childCastId, { ...terminalResult, ...(usage ? { usage } : {}) });
     return this.requireSnapshot(childCastId);
   }
 

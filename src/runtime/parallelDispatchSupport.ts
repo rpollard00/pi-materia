@@ -158,7 +158,10 @@ export function revisionInValue(value: unknown): ParallelWorkspaceRevision | und
 
 export function isParallelUsage(value: unknown): value is MateriaParallelUsageTotals {
   if (!isRecord(value) || !isRecord(value.tokens) || !isRecord(value.cost)) return false;
-  return ["input", "output", "cacheRead", "cacheWrite", "total"].every((key) => typeof value.tokens[key] === "number" && typeof value.cost[key] === "number");
+  return ["input", "output", "cacheRead", "cacheWrite", "total"].every((key) =>
+    typeof value.tokens[key] === "number" && Number.isFinite(value.tokens[key]) && value.tokens[key] >= 0 &&
+    typeof value.cost[key] === "number" && Number.isFinite(value.cost[key]) && value.cost[key] >= 0,
+  );
 }
 
 export function replaceParallelState(target: MateriaCastState, source: MateriaCastState): void {

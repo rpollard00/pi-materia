@@ -5,5 +5,6 @@ export * from "./centralConnectedModelPolicyResolver.js";
 export * from "./centralConnectedTelemetrySink.js";
 export * from "./localControlPlane/index.js";
 export * from "./piChildCastRunner.js";
+export * from "./parallelLaneArtifacts.js";
 export * from "./jjWorkspaceBackend.js";
 export * from "./questBoardRepository.js";

@@ -2,16 +2,26 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type {
   ChildCastRunnerPort,
   ChildCastSnapshot,
+  ChildCastStreamEvent,
   ChildCastTerminalResult,
   StartChildCastInput,
 } from "../application/childCastRunner.js";
+import type {
+  ParallelLaneArtifactIdentity,
+  ParallelLaneArtifactPaths,
+  ParallelLaneArtifactPort,
+  ParallelLaneDiagnosticArtifact,
+  ParallelLaneEventArtifact,
+} from "../application/parallelArtifacts.js";
+import { addUsage } from "../telemetry/usage.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
 import {
+  applyParallelRunPhaseTransition,
   applyParallelTransitionToCastState,
   attachParallelRunToCastState,
   createParallelRunState,
 } from "./parallelCoordinatorState.js";
-import type { MateriaCastState, MateriaLoopParallelConfig, MateriaParallelRunState, ResolvedMateriaSocket } from "../types.js";
+import type { MateriaCastState, MateriaLoopParallelConfig, MateriaParallelRunState, MateriaParallelUsageTotals, ResolvedMateriaSocket } from "../types.js";
 import {
   boundedParallelContext,
   childCastIdentity,
@@ -29,6 +39,14 @@ import {
   type ParallelWorkspaceRevision,
 } from "./parallelDispatchSupport.js";
 
+export type {
+  ParallelLaneArtifactIdentity,
+  ParallelLaneArtifactPaths,
+  ParallelLaneArtifactPort,
+  ParallelLaneDiagnosticArtifact,
+  ParallelLaneEventArtifact,
+  ParallelLaneRevisionArtifact,
+} from "../application/parallelArtifacts.js";
 export type {
   NormalizedParallelPlan,
   NormalizedParallelStream,
@@ -55,7 +73,25 @@ export interface ParallelLoopDispatcherDependencies {
   };
   artifacts?: {
     appendEvent(runState: MateriaCastState["runState"], type: string, data: unknown): Promise<void>;
+    writeUsage?(runState: MateriaCastState["runState"]): Promise<void>;
+    lane?: ParallelLaneArtifactPort;
   };
+  budget?: {
+    /** Check the parent budget after a child usage delta is recorded. */
+    assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void>;
+  };
+  /**
+   * Hard-stop the parent cast after a child usage update exhausts its budget.
+   * The callback is optional for embedders that only need coordinator state;
+   * native runtime wiring uses it to terminate the parent cast as well.
+   */
+  onBudgetExceeded?(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: MateriaCastState,
+    error: unknown,
+    entryId: string,
+  ): Promise<void>;
   /** Injectable clock keeps scheduler tests deterministic. */
   now?: () => number;
 }
@@ -67,9 +103,11 @@ interface PreparedLane {
 }
 
 interface ActiveLane {
-  prepared: PreparedLane;
   workspace: ParallelWorkspaceRecord;
   childCastId: string;
+  attempt: number;
+  artifactIdentity: ParallelLaneArtifactIdentity;
+  artifactPaths?: ParallelLaneArtifactPaths;
 }
 
 /**
@@ -92,6 +130,10 @@ export class ParallelLoopDispatcher {
   #active = new Map<string, ActiveLane>();
   #pumpTail: Promise<void> = Promise.resolve();
   #dispatching = false;
+  #eventTails = new Map<string, Promise<void>>();
+  #usageWriteTail: Promise<void> = Promise.resolve();
+  #latestUsage = new Map<string, MateriaParallelUsageTotals>();
+  #budgetFailure?: Error;
 
   constructor(deps: ParallelLoopDispatcherDependencies) {
     this.#deps = deps;
@@ -105,6 +147,10 @@ export class ParallelLoopDispatcher {
    */
   async dispatch(input: ParallelLoopDispatchInput): Promise<boolean> {
     validateDispatchConfig(input.config);
+    // Do not fan out work when the parent is already over its hard limit. The
+    // ordinary socket path performs the same check at its output boundary;
+    // parallel entry must preserve that invariant before creating workspaces.
+    await this.#deps.budget?.assertBudget?.(input.state, input.ctx);
     const existing = input.state.parallelRuns?.[input.loopId];
     if (existing) {
       this.#state = input.state;
@@ -170,9 +216,14 @@ export class ParallelLoopDispatcher {
     this.#prepared = prepared;
     this.#nextQueueIndex = 0;
     this.#active.clear();
+    this.#eventTails.clear();
+    this.#usageWriteTail = Promise.resolve();
+    this.#latestUsage.clear();
+    this.#budgetFailure = undefined;
     replaceState(input.state, attachParallelRunToCastState(input.state, run));
     this.#deps.state.saveCastState(input.pi, input.state);
     await this.#appendEvent(input.state, "parallel_dispatch_started", {
+      parentCastId: input.state.castId,
       loopId: input.loopId,
       runId: run.runId,
       planId: plan.planId,
@@ -206,7 +257,7 @@ export class ParallelLoopDispatcher {
       const input = this.#input;
       const state = this.#state;
       if (!input || !state || !this.#run) return;
-      while (this.#active.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
+      while (!this.#budgetFailure && this.#active.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
         const prepared = this.#prepared[this.#nextQueueIndex++];
         if (!prepared) break;
         await this.#launchLane(input, state, prepared);
@@ -220,6 +271,24 @@ export class ParallelLoopDispatcher {
     const lane = this.#run?.lanes[prepared.stream.laneId];
     if (!lane || lane.status !== "queued") return;
 
+    const attempt = lane.attempt;
+    const childCastId = childCastIdentity(state.castId, input.loopId, prepared.stream.laneId, attempt);
+    const childPaths = lanePaths(state, input.loopId, prepared.stream.laneId, attempt);
+    // Initialize the lane record before workspace creation. A workspace failure
+    // is still a terminal lane attempt and must have a durable artifact trail.
+    const baseArtifactIdentity: ParallelLaneArtifactIdentity = {
+      parentCastId: state.castId,
+      runId: this.#run!.runId,
+      loopId: input.loopId,
+      laneId: prepared.stream.laneId,
+      childCastId,
+      attempt,
+      streamIndex: prepared.stream.streamIndex,
+      workItemIndexes: [...prepared.stream.workItemIndexes],
+      paths: childPaths,
+    };
+    let artifactPaths = await this.#initializeLaneArtifacts(baseArtifactIdentity, state);
+
     let workspace: ParallelWorkspaceRecord;
     try {
       workspace = await this.#deps.workspaces.create({
@@ -232,13 +301,17 @@ export class ParallelLoopDispatcher {
       });
       prepared.workspace = workspace;
     } catch (error) {
-      await this.#markLaneFailure(input, state, prepared.stream.laneId, `workspace creation failed: ${errorMessage(error)}`);
+      const reason = `workspace creation failed: ${errorMessage(error)}`;
+      const diagnostic = await this.#markLaneFailure(input, state, prepared.stream.laneId, reason, childCastId);
+      await this.#writeLaneFailureArtifacts(baseArtifactIdentity, {
+        status: "failed",
+        accepted: false,
+        endedAt: diagnostic.occurredAt,
+        error: boundedFailureReason(reason),
+      }, { baseline: this.#run!.baseline }, [diagnostic]);
       return;
     }
 
-    const attempt = lane.attempt;
-    const childCastId = childCastIdentity(state.castId, input.loopId, prepared.stream.laneId, attempt);
-    const childPaths = lanePaths(state, input.loopId, prepared.stream.laneId, attempt);
     const childSession = {
       childCastId,
       sessionPath: childPaths.sessionPath,
@@ -246,6 +319,9 @@ export class ParallelLoopDispatcher {
       runDirectory: childPaths.runDirectory,
     };
     const ownership = workspaceOwnership(state, input.loopId, prepared.stream.laneId, workspace);
+    const artifactIdentity: ParallelLaneArtifactIdentity = { ...baseArtifactIdentity, workspace: ownership };
+    // Refresh the manifest with workspace ownership after the workspace exists.
+    artifactPaths = await this.#initializeLaneArtifacts(artifactIdentity, state) ?? artifactPaths;
 
     const transitioned = this.#applyLaneTransition(input, state, {
       laneId: prepared.stream.laneId,
@@ -258,7 +334,7 @@ export class ParallelLoopDispatcher {
     });
     if (!transitioned) return;
 
-    const active: ActiveLane = { prepared, workspace, childCastId };
+    const active: ActiveLane = { workspace, childCastId, attempt, artifactIdentity, artifactPaths };
     this.#active.set(prepared.stream.laneId, active);
     const startInput: StartChildCastInput = {
       identity: {
@@ -286,10 +362,11 @@ export class ParallelLoopDispatcher {
     try {
       await this.#deps.children.start(startInput);
       this.#deps.children.subscribe({ childCastId }, {
-        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, event),
+        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
         onTerminal: (result) => this.#handleChildTerminal(input, state, prepared.stream, active, result),
       });
       await this.#appendEvent(state, "parallel_lane_started", {
+        parentCastId: state.castId,
         loopId: input.loopId,
         runId: this.#run?.runId,
         laneId: prepared.stream.laneId,
@@ -297,10 +374,22 @@ export class ParallelLoopDispatcher {
         streamIndex: prepared.stream.streamIndex,
         workItemIndexes: [...prepared.stream.workItemIndexes],
         workspace: ownership,
+        ...(artifactPaths ? { artifactPaths } : {}),
       });
     } catch (error) {
       this.#active.delete(prepared.stream.laneId);
-      await this.#markLaneFailure(input, state, prepared.stream.laneId, `child launch failed: ${errorMessage(error)}`, childCastId);
+      await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${errorMessage(error)}` }).catch(() => undefined);
+      const reason = `child launch failed: ${errorMessage(error)}`;
+      const diagnostic = await this.#markLaneFailure(input, state, prepared.stream.laneId, reason, childCastId);
+      await this.#writeLaneFailureArtifacts(artifactIdentity, {
+        status: "failed",
+        accepted: false,
+        endedAt: diagnostic.occurredAt,
+        error: boundedFailureReason(reason),
+      }, {
+        baseline: workspace.baseline,
+        workspace: workspace.revision,
+      }, [diagnostic]);
     }
   }
 
@@ -308,17 +397,44 @@ export class ParallelLoopDispatcher {
     input: ParallelLoopDispatchInput,
     state: MateriaCastState,
     stream: NormalizedParallelStream,
-    event: { childCastId: string; sequence: number; type: string; occurredAt: number; usage?: unknown },
+    active: ActiveLane,
+    event: ChildCastStreamEvent,
+  ): Promise<void> {
+    const previous = this.#eventTails.get(active.childCastId) ?? Promise.resolve();
+    const next = previous.catch(() => undefined).then(() => this.#processChildEvent(input, state, stream, active, event));
+    this.#eventTails.set(active.childCastId, next);
+    try {
+      await next;
+    } finally {
+      if (this.#eventTails.get(active.childCastId) === next) this.#eventTails.delete(active.childCastId);
+    }
+  }
+
+  async #processChildEvent(
+    input: ParallelLoopDispatchInput,
+    state: MateriaCastState,
+    stream: NormalizedParallelStream,
+    active: ActiveLane,
+    event: ChildCastStreamEvent,
   ): Promise<void> {
     const usage = isUsage(event.usage) ? event.usage : undefined;
-    this.#applyLaneTransition(input, state, {
+    const provenance = this.#eventProvenance(state, input.loopId, this.#run?.runId, stream, active, event.sequence, event.workItemId);
+    const eventArtifact = { provenance, event };
+    await this.#appendLaneArtifact(active.artifactIdentity, eventArtifact);
+    await this.#appendEvent(state, "parallel_child_event", eventArtifact);
+
+    const applied = this.#applyLaneTransition(input, state, {
       laneId: stream.laneId,
-      attempt: this.#run?.lanes[stream.laneId]?.attempt ?? 1,
+      attempt: active.attempt,
       childCastId: event.childCastId,
       lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt },
       ...(usage ? { usage } : {}),
       timestamp: event.occurredAt,
     });
+    if (usage && applied) await this.#aggregateUsage(state, input, stream, active, usage);
+
+    const diagnostic = childDiagnosticFromEvent(event);
+    if (diagnostic) await this.#appendLaneDiagnostic(input, state, stream, active, diagnostic);
   }
 
   async #handleChildTerminal(
@@ -328,18 +444,31 @@ export class ParallelLoopDispatcher {
     active: ActiveLane,
     result: ChildCastTerminalResult,
   ): Promise<void> {
+    // Drain child events first so the lane event stream remains ordered before
+    // the normalized terminal record is written.
+    await this.#eventTails.get(active.childCastId)?.catch(() => undefined);
     // The terminal callback can be delivered more than once by an adapter. The
-    // active-map deletion makes releasing the scheduler slot idempotent.
+    // active-map deletion makes releasing the scheduler slot idempotent. A
+    // budget stop may have already removed and finalized this lane.
+    if (this.#budgetFailure) return;
     if (!this.#active.delete(stream.laneId)) return;
 
     const currentLane = this.#run?.lanes[stream.laneId];
-    const attempt = currentLane?.attempt ?? 1;
+    const attempt = currentLane?.attempt ?? active.attempt;
     const childSnapshot = await this.#deps.children.observe({ childCastId: active.childCastId }).catch(() => undefined);
-    const usage = childSnapshot && isUsage(childSnapshot.snapshot.usage) ? childSnapshot.snapshot.usage : undefined;
+    const usage = highestUsage([
+      childSnapshot && isUsage(childSnapshot.snapshot.usage) ? childSnapshot.snapshot.usage : undefined,
+      isUsage(result.usage) ? result.usage : undefined,
+      this.#latestUsage.get(active.childCastId),
+    ]);
+    if (usage) await this.#aggregateUsage(state, input, stream, active, usage);
+    if (this.#budgetFailure) return;
     const head = result.status === "succeeded" && result.accepted
       ? await this.#acceptedHead(active.workspace, result, childSnapshot?.snapshot)
       : undefined;
 
+    const reason = result.error
+      ?? (result.status === "succeeded" ? "Child completed without a verifiable accepted lane head." : "Child lane did not complete successfully.");
     if (result.status === "succeeded" && result.accepted && head) {
       this.#applyLaneTransition(input, state, {
         laneId: stream.laneId,
@@ -354,30 +483,337 @@ export class ParallelLoopDispatcher {
       });
     } else {
       const status = result.status === "interrupted" ? "interrupted" : "failed";
-      const reason = result.error
-        ?? (result.status === "succeeded" ? "Child completed without a verifiable accepted lane head." : "Child lane did not complete successfully.");
       this.#applyLaneTransition(input, state, {
         laneId: stream.laneId,
         attempt,
         childCastId: active.childCastId,
         status,
         ...(usage ? { usage } : {}),
-        failureReason: reason,
+        failureReason: boundedFailureReason(reason),
+        diagnostic: {
+          code: "parallel_lane_terminal",
+          message: boundedFailureReason(reason),
+          severity: "error",
+          occurredAt: result.endedAt,
+        },
         timestamp: result.endedAt,
       });
     }
 
+    const childDiagnostics = childSnapshot?.snapshot.diagnostics.map(toParallelDiagnostic) ?? [];
+    const terminalDiagnostic = result.status === "succeeded" && result.accepted && head ? undefined : {
+      code: "parallel_lane_terminal",
+      message: boundedFailureReason(reason),
+      severity: "error" as const,
+      occurredAt: result.endedAt,
+    };
+    const allDiagnostics = terminalDiagnostic ? [...childDiagnostics, terminalDiagnostic] : childDiagnostics;
+    for (const diagnostic of childDiagnostics) {
+      await this.#appendLaneDiagnostic(input, state, stream, active, diagnostic);
+    }
+    await this.#writeLaneTerminalArtifacts(active, result, usage, head, allDiagnostics);
     await this.#appendEvent(state, "parallel_lane_terminal", {
-      loopId: input.loopId,
-      runId: this.#run?.runId,
-      laneId: stream.laneId,
-      childCastId: active.childCastId,
+      ...this.#eventProvenance(state, input.loopId, this.#run?.runId, stream, active),
       status: result.status,
       accepted: result.accepted,
       ...(head ? { acceptedHead: head } : {}),
-      ...(result.error ? { error: result.error } : {}),
+      ...(result.error ? { error: boundedFailureReason(result.error) } : {}),
+      ...(usage ? { usage } : {}),
     });
     await this.#pump();
+  }
+
+  async #initializeLaneArtifacts(identity: ParallelLaneArtifactIdentity, state: MateriaCastState): Promise<ParallelLaneArtifactPaths | undefined> {
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return undefined;
+    try {
+      return await lane.initialize(identity);
+    } catch (error) {
+      await this.#appendEvent(state, "parallel_artifact_failure", {
+        laneId: identity.laneId,
+        childCastId: identity.childCastId,
+        operation: "initialize",
+        error: boundedFailureReason(errorMessage(error)),
+      });
+      return undefined;
+    }
+  }
+
+  async #appendLaneArtifact(identity: ParallelLaneArtifactIdentity, event: ParallelLaneEventArtifact): Promise<void> {
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return;
+    try {
+      await lane.appendEvent({ ...identity, event });
+    } catch {
+      // Artifact telemetry must not stop a child lane. The child runner keeps
+      // its own stdout/stderr and session files as the recovery source.
+    }
+  }
+
+  async #aggregateUsage(
+    state: MateriaCastState,
+    input: ParallelLoopDispatchInput,
+    stream: NormalizedParallelStream,
+    active: ActiveLane,
+    usage: MateriaParallelUsageTotals,
+  ): Promise<void> {
+    const previous = this.#latestUsage.get(active.childCastId);
+    const delta = usageDelta(previous, usage);
+    this.#latestUsage.set(active.childCastId, usage);
+    if (!hasUsage(delta)) return;
+
+    const report = state.runState.usage;
+    report.byMateria ??= {};
+    report.bySocket ??= {};
+    report.byTask ??= {};
+    report.byAttempt ??= {};
+    addUsage(report, delta, {
+      socket: `parallel/${input.loopId}/${stream.laneId}`,
+      materia: "parallel-child",
+      taskId: stream.laneId,
+      attempt: active.attempt,
+    });
+    this.#deps.state.saveCastState(input.pi, state);
+    await this.#writeParentUsage(state);
+    await this.#appendLaneUsage(active, usage);
+    try {
+      await this.#deps.budget?.assertBudget?.(state, input.ctx);
+    } catch (error) {
+      await this.#enforceBudget(input, state, stream, active, error);
+    }
+  }
+
+  async #writeParentUsage(state: MateriaCastState): Promise<void> {
+    const writeUsage = this.#deps.artifacts?.writeUsage;
+    if (!writeUsage) return;
+    this.#usageWriteTail = this.#usageWriteTail.catch(() => undefined).then(() => writeUsage(state.runState));
+    try {
+      await this.#usageWriteTail;
+    } catch {
+      // Parent usage artifacts are best effort; in-memory state remains current.
+    }
+  }
+
+  async #appendLaneUsage(active: ActiveLane, usage: MateriaParallelUsageTotals): Promise<void> {
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return;
+    try {
+      await lane.writeUsage({ ...active.artifactIdentity, usage });
+    } catch {
+      // See #appendLaneArtifact: telemetry is best effort and child files are
+      // still available for recovery.
+    }
+  }
+
+  async #appendLaneDiagnostic(
+    input: ParallelLoopDispatchInput,
+    state: MateriaCastState,
+    stream: NormalizedParallelStream,
+    active: ActiveLane,
+    diagnostic: ParallelLaneDiagnosticArtifact,
+  ): Promise<void> {
+    const existingDiagnostics = this.#run?.lanes[stream.laneId]?.diagnostics ?? [];
+    if (existingDiagnostics.some((entry) => entry.code === diagnostic.code && entry.message === diagnostic.message && entry.occurredAt === diagnostic.occurredAt)) return;
+    const applied = this.#applyLaneTransition(input, state, {
+      laneId: stream.laneId,
+      attempt: active.attempt,
+      childCastId: active.childCastId,
+      diagnostic,
+      timestamp: diagnostic.occurredAt,
+    });
+    if (!applied) return;
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return;
+    try {
+      const diagnostics = this.#run?.lanes[stream.laneId]?.diagnostics ?? [diagnostic];
+      await lane.writeDiagnostics({ ...active.artifactIdentity, diagnostics });
+    } catch {
+      // Best effort; state already retains a bounded copy.
+    }
+  }
+
+  async #writeLaneTerminalArtifacts(
+    active: ActiveLane,
+    result: ChildCastTerminalResult,
+    usage: MateriaParallelUsageTotals | undefined,
+    head: ParallelWorkspaceRevision | undefined,
+    diagnostics: readonly ParallelLaneDiagnosticArtifact[],
+  ): Promise<void> {
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return;
+    await this.#safeLaneWrite(() => lane.writeTerminalResult({ ...active.artifactIdentity, result, ...(usage ? { usage } : {}) }));
+    await this.#safeLaneWrite(() => lane.writeRevision({
+      ...active.artifactIdentity,
+      revision: {
+        baseline: active.workspace.baseline,
+        workspace: active.workspace.revision,
+        ...(head ? { acceptedHead: head } : {}),
+      },
+    }));
+    await this.#safeLaneWrite(() => lane.writeDiagnostics({ ...active.artifactIdentity, diagnostics }));
+    if (usage) await this.#safeLaneWrite(() => lane.writeUsage({ ...active.artifactIdentity, usage }));
+  }
+
+  async #writeLaneFailureArtifacts(
+    identity: ParallelLaneArtifactIdentity,
+    result: ChildCastTerminalResult,
+    revision: { baseline?: unknown; workspace?: unknown },
+    diagnostics: readonly ParallelLaneDiagnosticArtifact[],
+  ): Promise<void> {
+    const lane = this.#deps.artifacts?.lane;
+    if (!lane) return;
+    await this.#safeLaneWrite(() => lane.writeTerminalResult({ ...identity, result }));
+    await this.#safeLaneWrite(() => lane.writeRevision({ ...identity, revision }));
+    await this.#safeLaneWrite(() => lane.writeDiagnostics({ ...identity, diagnostics: diagnostics.slice(-24) }));
+  }
+
+  async #enforceBudget(
+    input: ParallelLoopDispatchInput,
+    state: MateriaCastState,
+    stream: NormalizedParallelStream,
+    triggeringLane: ActiveLane,
+    error: unknown,
+  ): Promise<void> {
+    if (this.#budgetFailure) return;
+    const budgetError = error instanceof Error ? error : new Error(String(error));
+    this.#budgetFailure = budgetError;
+    const occurredAt = this.#now();
+    const reason = boundedFailureReason(`Parallel parent budget exhausted: ${errorMessage(error)}`);
+    const diagnostic: ParallelLaneDiagnosticArtifact = {
+      code: "parallel_budget_exceeded",
+      message: reason,
+      severity: "error",
+      occurredAt,
+    };
+    await this.#appendEvent(state, "parallel_budget_exceeded", {
+      ...this.#eventProvenance(state, input.loopId, this.#run?.runId, stream, triggeringLane),
+      error: boundedFailureReason(errorMessage(error)),
+      consumedTokens: state.runState.usage.tokens.total,
+    });
+
+    // Remove every live lane before aborting. Adapters are allowed to invoke
+    // terminal callbacks synchronously from abort(), and those callbacks must
+    // not reopen or overwrite the budget-stop artifacts.
+    const lanesToStop = new Map<string, ActiveLane>(this.#active);
+    lanesToStop.set(stream.laneId, triggeringLane);
+    this.#active.clear();
+    for (const [laneId, active] of lanesToStop) {
+      const lane = this.#run?.lanes[laneId];
+      if (!lane || lane.status !== "running") continue;
+      this.#applyLaneTransition(input, state, {
+        laneId,
+        attempt: active.attempt,
+        childCastId: active.childCastId,
+        status: "interrupted",
+        failureReason: reason,
+        diagnostic,
+        timestamp: occurredAt,
+      });
+      const diagnostics = this.#run?.lanes[laneId]?.diagnostics ?? [diagnostic];
+      await this.#writeLaneFailureArtifacts(active.artifactIdentity, {
+        status: "interrupted",
+        accepted: false,
+        endedAt: occurredAt,
+        error: reason,
+        abortReason: "parallel parent budget exhausted",
+      }, {
+        baseline: active.workspace.baseline,
+        workspace: active.workspace.revision,
+      }, diagnostics);
+    }
+
+    const queued = this.#prepared.slice(this.#nextQueueIndex);
+    this.#nextQueueIndex = this.#prepared.length;
+    for (const prepared of queued) {
+      const lane = this.#run?.lanes[prepared.stream.laneId];
+      if (!lane || lane.status !== "queued") continue;
+      const childCastId = childCastIdentity(state.castId, input.loopId, prepared.stream.laneId, lane.attempt);
+      const identity: ParallelLaneArtifactIdentity = {
+        parentCastId: state.castId,
+        runId: this.#run!.runId,
+        loopId: input.loopId,
+        laneId: prepared.stream.laneId,
+        childCastId,
+        attempt: lane.attempt,
+        streamIndex: prepared.stream.streamIndex,
+        workItemIndexes: [...prepared.stream.workItemIndexes],
+        paths: lanePaths(state, input.loopId, prepared.stream.laneId, lane.attempt),
+      };
+      const artifactReason = "parallel parent budget exhausted before child launch";
+      const laneDiagnostic = await this.#markLaneFailure(input, state, prepared.stream.laneId, artifactReason, childCastId);
+      await this.#initializeLaneArtifacts(identity, state);
+      await this.#writeLaneFailureArtifacts(identity, {
+        status: "failed",
+        accepted: false,
+        endedAt: laneDiagnostic?.occurredAt ?? occurredAt,
+        error: artifactReason,
+      }, { baseline: this.#run!.baseline }, laneDiagnostic ? [laneDiagnostic] : [diagnostic]);
+    }
+
+    const run = this.#run;
+    if (run) {
+      const phase = applyParallelRunPhaseTransition(run, {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        phase: "failed",
+        fanInPhase: "failed",
+        timestamp: occurredAt,
+      });
+      if (phase.applied) {
+        replaceState(state, {
+          ...state,
+          parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: phase.state },
+        });
+        this.#run = state.parallelRuns?.[input.loopId];
+      }
+    }
+    this.#deps.state.saveCastState(input.pi, state);
+
+    for (const active of lanesToStop.values()) {
+      await this.#deps.children.abort({ childCastId: active.childCastId, reason }).catch(() => undefined);
+    }
+    try {
+      await this.#deps.onBudgetExceeded?.(input.pi, input.ctx, state, budgetError, `parallel:${input.loopId}`);
+    } catch (callbackError) {
+      await this.#appendEvent(state, "parallel_budget_callback_failure", {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        error: boundedFailureReason(errorMessage(callbackError)),
+      });
+    }
+  }
+
+  async #safeLaneWrite(action: () => Promise<void>): Promise<void> {
+    try {
+      await action();
+    } catch {
+      // A failed artifact write must not change an already terminal lane or
+      // release a scheduler slot twice.
+    }
+  }
+
+  #eventProvenance(
+    state: MateriaCastState,
+    loopId: string,
+    runId: string | undefined,
+    stream: NormalizedParallelStream,
+    active: ActiveLane,
+    sequence?: number,
+    workItemId?: string,
+  ): Record<string, unknown> {
+    return {
+      parentCastId: state.castId,
+      loopId,
+      runId,
+      laneId: stream.laneId,
+      childCastId: active.childCastId,
+      attempt: active.attempt,
+      streamIndex: stream.streamIndex,
+      workItemIndexes: [...stream.workItemIndexes],
+      ...(workItemId !== undefined ? { workItemId } : {}),
+      ...(sequence !== undefined ? { childSequence: sequence } : {}),
+    };
   }
 
   async #acceptedHead(
@@ -407,24 +843,35 @@ export class ParallelLoopDispatcher {
     laneId: string,
     reason: string,
     childCastId?: string,
-  ): Promise<void> {
+  ): Promise<ParallelLaneDiagnosticArtifact> {
     const lane = this.#run?.lanes[laneId];
-    if (!lane) return;
+    const occurredAt = this.#now();
+    const boundedReason = boundedFailureReason(reason);
+    const diagnostic: ParallelLaneDiagnosticArtifact = {
+      code: "parallel_lane_failure",
+      message: boundedReason,
+      severity: "error",
+      occurredAt,
+    };
+    if (!lane) return diagnostic;
     this.#applyLaneTransition(input, state, {
       laneId,
       attempt: lane.attempt,
       ...(childCastId !== undefined ? { childCastId } : lane.childCastId !== undefined ? { childCastId: lane.childCastId } : {}),
       status: lane.status === "queued" ? "failed" : lane.status === "running" ? "failed" : undefined,
-      failureReason: reason,
-      timestamp: this.#now(),
+      failureReason: boundedReason,
+      diagnostic,
+      timestamp: occurredAt,
     });
     await this.#appendEvent(state, "parallel_lane_failed", {
+      parentCastId: state.castId,
       loopId: input.loopId,
       runId: this.#run?.runId,
       laneId,
       ...(childCastId !== undefined ? { childCastId } : {}),
-      error: reason,
+      error: boundedReason,
     });
+    return diagnostic;
   }
 
   #applyLaneTransition(
@@ -448,8 +895,13 @@ export class ParallelLoopDispatcher {
   }
 
   async #appendEvent(state: MateriaCastState, type: string, data: unknown): Promise<void> {
-    if (!this.#deps.artifacts) return;
-    await this.#deps.artifacts.appendEvent(state.runState, type, data).catch(() => undefined);
+    const append = this.#deps.artifacts?.appendEvent;
+    if (!append || !state.runState) return;
+    try {
+      await append(state.runState, type, data);
+    } catch {
+      // Parent artifact failures must not stop a child lane or corrupt state.
+    }
   }
 }
 
@@ -475,6 +927,80 @@ function boundedParallelChildData(run: MateriaParallelRunState, stream: Normaliz
       workItemIndexes: [...stream.workItemIndexes],
     },
   };
+}
+
+function childDiagnosticFromEvent(event: ChildCastStreamEvent): ParallelLaneDiagnosticArtifact | undefined {
+  if (event.type !== "diagnostic" || !isRecord(event.payload)) return undefined;
+  return toParallelDiagnostic(event.payload);
+}
+
+function toParallelDiagnostic(value: unknown): ParallelLaneDiagnosticArtifact {
+  const record = isRecord(value) ? value : {};
+  const severity = record.severity === "info" || record.severity === "warning" || record.severity === "error" ? record.severity : "warning";
+  const details = isRecord(record.details) ? boundDiagnosticDetails(record.details) : undefined;
+  return {
+    code: boundedFailureReason(typeof record.code === "string" ? record.code : "child_diagnostic", 120),
+    message: boundedFailureReason(typeof record.message === "string" ? record.message : "Child emitted a diagnostic."),
+    severity,
+    occurredAt: typeof record.occurredAt === "number" && Number.isFinite(record.occurredAt) ? record.occurredAt : Date.now(),
+    ...(details ? { details } : {}),
+  };
+}
+
+function highestUsage(values: readonly (MateriaParallelUsageTotals | undefined)[]): MateriaParallelUsageTotals | undefined {
+  return values.filter((value): value is MateriaParallelUsageTotals => value !== undefined)
+    .sort((left, right) => usageMagnitude(right) - usageMagnitude(left))[0];
+}
+
+function usageMagnitude(usage: MateriaParallelUsageTotals): number {
+  return usage.tokens.total + usage.cost.total;
+}
+
+function usageDelta(previous: MateriaParallelUsageTotals | undefined, next: MateriaParallelUsageTotals): MateriaParallelUsageTotals {
+  return {
+    tokens: {
+      input: usageComponentDelta(previous?.tokens.input, next.tokens.input),
+      output: usageComponentDelta(previous?.tokens.output, next.tokens.output),
+      cacheRead: usageComponentDelta(previous?.tokens.cacheRead, next.tokens.cacheRead),
+      cacheWrite: usageComponentDelta(previous?.tokens.cacheWrite, next.tokens.cacheWrite),
+      total: usageComponentDelta(previous?.tokens.total, next.tokens.total),
+    },
+    cost: {
+      input: usageComponentDelta(previous?.cost.input, next.cost.input),
+      output: usageComponentDelta(previous?.cost.output, next.cost.output),
+      cacheRead: usageComponentDelta(previous?.cost.cacheRead, next.cost.cacheRead),
+      cacheWrite: usageComponentDelta(previous?.cost.cacheWrite, next.cost.cacheWrite),
+      total: usageComponentDelta(previous?.cost.total, next.cost.total),
+    },
+  };
+}
+
+function usageComponentDelta(previous: number | undefined, next: number): number {
+  if (previous === undefined) return next;
+  return next >= previous ? next - previous : next;
+}
+
+function hasUsage(usage: MateriaParallelUsageTotals): boolean {
+  return Object.values(usage.tokens).some((value) => value > 0) || Object.values(usage.cost).some((value) => value > 0);
+}
+
+function boundDiagnosticDetails(details: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const serialized = JSON.stringify(details);
+    if (Buffer.byteLength(serialized, "utf8") <= 4_096) return details;
+    return { excerpt: serialized.slice(0, 4_000) };
+  } catch {
+    return { note: "child diagnostic details were not JSON serializable" };
+  }
+}
+
+function boundedFailureReason(value: string, max = 1_000): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function validateDispatchConfig(config: MateriaLoopParallelConfig): void {

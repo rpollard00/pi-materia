@@ -3,6 +3,7 @@ import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPi
 
 export * from "./childCastRunner.js";
 export * from "./fakeChildCastRunner.js";
+export * from "./parallelArtifacts.js";
 
 export interface ConfigRepository {
   load(cwd: string, configuredPath?: string): Promise<LoadedConfig>;

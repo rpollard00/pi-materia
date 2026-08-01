@@ -145,6 +145,7 @@ export function terminalFromEvent(event: Record<string, unknown>, now: () => num
     ...(typeof candidate.message === "string" ? { message: candidate.message } : {}),
     ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
     ...(Object.prototype.hasOwnProperty.call(candidate, "output") ? { output: clone(candidate.output) } : {}),
+    ...(childUsage(candidate.usage) ? { usage: childUsage(candidate.usage) } : {}),
     ...(typeof candidate.abortReason === "string" ? { abortReason: candidate.abortReason } : {}),
   };
 }
