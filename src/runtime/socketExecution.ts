@@ -52,8 +52,6 @@ import type {
   SocketOutputRoutingOutcome,
 } from "./socketOutputCommit.js";
 
-const DEFAULT_MAX_SOCKET_VISITS = 25;
-
 export interface SocketExecutionDependencies {
   artifacts: {
     appendEvent(runState: MateriaRunState, type: string, data: unknown): Promise<void>;
@@ -269,7 +267,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
       );
       return;
     }
-    enforceSocketVisitLimit(state, socket, config);
+    recordSocketVisitCount(state, socket);
     const attempt = startTaskAttempt(state, socket.id);
 
     state.phase = socket.id;
@@ -435,17 +433,12 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
   };
 }
 
-function enforceSocketVisitLimit(
-  state: MateriaCastState,
-  socket: ResolvedMateriaSocket,
-  config: PiMateriaConfig,
-): void {
-  const count = (state.visits[socket.id] ?? 0) + 1;
-  const limit = resolvedSocketConfig(socket).limits?.maxVisits
-    ?? config.limits?.maxSocketVisits
-    ?? DEFAULT_MAX_SOCKET_VISITS;
-  if (count > limit) {
-    throw new Error(`Materia socket visit limit exceeded for ${socket.id} (${count}/${limit}).`);
-  }
-  state.visits[socket.id] = count;
+/**
+ * Records a socket visit for artifact identity, provenance, telemetry, and
+ * diagnostics. Cumulative socket-visit limits (socket maxVisits and global
+ * maxSocketVisits) are deprecated and diagnostic-only: they never fail
+ * execution, even when legacy configs set very low values.
+ */
+function recordSocketVisitCount(state: MateriaCastState, socket: ResolvedMateriaSocket): void {
+  state.visits[socket.id] = (state.visits[socket.id] ?? 0) + 1;
 }

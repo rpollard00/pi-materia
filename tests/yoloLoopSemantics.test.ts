@@ -206,6 +206,25 @@ describe("Yolo loop semantics regression", () => {
     expect(noMatchState.visits?.["Socket-2"]).toBeUndefined();
   });
 
+  test("legacy low visit limits are diagnostic-only and repeated legitimate visits continue beyond prior limits", async () => {
+    const workItems = Array.from({ length: 30 }, (_, index) => ({ id: `wi${index + 1}`, title: `Item ${index + 1}` }));
+    const config = yoloConfig(workItems);
+    // Legacy cumulative limits set far below the number of legitimate visits.
+    // maxEdgeTraversals is kept high because edge traversal policy is separate;
+    // socket visit limits must never fail execution.
+    config.limits = { maxSocketVisits: 2, maxEdgeTraversals: 60 };
+    for (const id of ["Socket-3", "Socket-4"]) {
+      (testSockets(config.loadouts!.Yolo)[id] as { limits?: { maxVisits?: number } }).limits = { maxVisits: 1 };
+    }
+
+    const { state } = await runYolo(config);
+
+    expect(state.phase).toBe("complete");
+    expect(state.visits).toMatchObject({ "Socket-3": 30, "Socket-4": 30 });
+    expect(state.cursors?.workItemIndex).toBe(30);
+    expect(state.edgeTraversals).toMatchObject({ "Socket-3->Socket-4": 30, "Socket-4->Socket-3": 29 });
+  });
+
   test("UI-authored and default-style Yolo loadouts normalize to equivalent executable semantics", () => {
     const uiAuthored = yoloConfig([{ id: "one", title: "One" }]);
     const defaultStyle = structuredClone(uiAuthored) as PiMateriaConfig;
