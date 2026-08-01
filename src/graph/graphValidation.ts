@@ -1,8 +1,9 @@
 import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
+import { validateParallelSafeMateria } from "../domain/parallelSafety.js";
 import { validateMateriaLoopParallelConfig } from "../domain/parallelLoop.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
 import { classifyGraphTarget, formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
-import type { MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
+import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
 
 export const CANONICAL_EDGE_CONDITIONS = HANDOFF_EDGE_CONDITIONS;
 export type MateriaGraphEdgeCondition = MateriaEdgeCondition | "invalid";
@@ -23,6 +24,10 @@ export interface MateriaGraphValidationResult {
 
 export interface MateriaGraphValidationOptions {
   isGeneratorSocket?: (socketId: string) => boolean;
+  /** Resolved materia catalog used to validate opted-in parallel child sockets. */
+  materia?: Record<string, MateriaConfig>;
+  /** Optional direct child-safety predicate for adapters that resolve materia elsewhere. */
+  isParallelSafeSocket?: (socketId: string) => boolean;
   /** Optional parallel-plan producer predicate for normalizer utilities. */
   isParallelPlanProducerSocket?: (socketId: string) => boolean;
   /** Alias for callers that model the normalizer explicitly. */
@@ -449,6 +454,8 @@ function validateParallelLoopTopology(
     }
   }
 
+  validateParallelChildSafety(graph, errors, loopId, loopMemberSockets, options);
+
   const fanInRoutes = configuredExits.filter((route) => route?.from === terminalSource);
   const cleanRoute = fanInRoutes.find((route) => route.condition === "satisfied");
   const conflictRoute = fanInRoutes.find((route) => route.condition === "not_satisfied");
@@ -473,6 +480,49 @@ function validateParallelLoopTopology(
   for (const [field, target] of [["consumes.done", loop?.consumes?.done], ["iterator.done", loop?.iterator?.done]] as const) {
     if (target && target !== "end" && !loopSet.has(target)) {
       errors.push({ code: "invalid-loop", source: `${loopPath}.${field}`, from: terminalSource, to: target, message: `Parallel loop "${loopId}" ${field} must terminate locally at "end"; parent completion must use symbolic fan-in exits.` });
+    }
+  }
+}
+
+function validateParallelChildSafety(
+  graph: MateriaPipelineConfig,
+  errors: MateriaGraphValidationError[],
+  loopId: string,
+  loopMemberSockets: string[],
+  options: MateriaGraphValidationOptions,
+): void {
+  if (!options.materia && !options.isParallelSafeSocket) return;
+  for (const [index, socketId] of loopMemberSockets.entries()) {
+    if (options.isParallelSafeSocket && !options.isParallelSafeSocket(socketId)) {
+      errors.push({
+        code: "invalid-loop",
+        source: `loops.${loopId}.sockets[${index}]`,
+        from: socketId,
+        message: `Parallel loop "${loopId}" cannot execute child socket "${socketId}": its materia is not declared parallel-safe for a workspace-local child.`,
+      });
+    }
+    if (!options.materia) continue;
+    const socket = getLoadoutSocket(graph, socketId);
+    const materiaId = socket?.materia;
+    if (typeof materiaId !== "string" || materiaId.trim().length === 0) {
+      errors.push({
+        code: "invalid-loop",
+        source: `loops.${loopId}.sockets[${index}].materia`,
+        from: socketId,
+        message: `Parallel loop "${loopId}" child socket "${socketId}" must reference a materia definition.`,
+      });
+      continue;
+    }
+    const result = validateParallelSafeMateria(materiaId, options.materia[materiaId], `loops.${loopId}.sockets[${index}]`);
+    if (!result.ok) {
+      for (const issue of result.issues) {
+        errors.push({
+          code: "invalid-loop",
+          source: issue.path,
+          from: socketId,
+          message: `Parallel loop "${loopId}" child socket "${socketId}" (${JSON.stringify(materiaId)}) is not parallel-safe: ${issue.message}.`,
+        });
+      }
     }
   }
 }

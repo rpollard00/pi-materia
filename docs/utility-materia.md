@@ -242,11 +242,12 @@ identities and stream order. Invalid schedules produce actionable
 subprocess. The sidecar is not placed in generic downstream agent context.
 
 Parallel child loops may use deterministic utilities only when their
-capabilities are explicitly workspace-local and child-safe. Bookmark
-advancement, publishing, parent integration, interactive utilities, and other
-shared-state operations remain parent-only. Utility commands are trusted local
-code, not a sandbox; the parallel safety declaration is a graph validation
-boundary rather than a security boundary.
+materia definition explicitly sets `parallelSafe: true`, declaring the
+operation workspace-local and child-safe. Bookmark advancement, publishing,
+parent integration, interactive utilities, and other known shared-state
+operations remain parent-only. Utility commands are trusted local code, not a
+sandbox; the parallel safety declaration is a graph validation boundary rather
+than a security boundary.
 
 Utility scripts should not emit broad agent-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, or `missing`. When deterministic structured data is needed in shared runtime state, put it under a separate top-level `state` object (for example, `{ "state": { "planMetadata": { "source": "script" } }, "workItems": [...] }`) or map script-owned output with explicit `assign` entries. Do not use generated-output aliases such as `tasks`.
 

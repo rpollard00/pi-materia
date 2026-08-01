@@ -859,6 +859,8 @@ export interface MateriaDefinitionMetadata {
   generator?: boolean;
   /** Explicitly permits this materia to produce the experimental parallelSchedule sidecar. */
   parallelPlanner?: boolean;
+  /** Explicitly permits execution in an isolated, workspace-local parallel child. */
+  parallelSafe?: boolean;
   /** User-controlled lock state for editable materia definitions. */
   lockState?: MateriaUserLockState;
   /**

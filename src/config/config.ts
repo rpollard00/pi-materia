@@ -1097,6 +1097,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.thinking !== undefined && typeof materia.thinking !== "string") {
       throw new Error(`Materia "${name}" has invalid thinking. Expected a string when configured.`);
     }
+    validateParallelSafeMarker(name, materia.parallelSafe);
     if (materia.multiTurn !== undefined && typeof materia.multiTurn !== "boolean") {
       throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
     }
@@ -1128,6 +1129,7 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   if (materia.timeoutMs !== undefined && (!Number.isFinite(materia.timeoutMs) || Number(materia.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
+  validateParallelSafeMarker(name, materia.parallelSafe);
   validateMateriaParseMode(name, materia.parse);
   if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
@@ -1146,6 +1148,12 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 function validateMateriaParseMode(name: string, parse: unknown): void {
   if (parse === undefined) return;
   if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
+}
+
+function validateParallelSafeMarker(name: string, parallelSafe: unknown): void {
+  if (parallelSafe !== undefined && typeof parallelSafe !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid parallelSafe. Expected a boolean when configured.`);
+  }
 }
 
 function validateMateriaLockState(name: string, lockState: unknown): void {

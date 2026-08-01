@@ -195,6 +195,9 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
               <label className="graph-field graph-field-inline text-sm" title="Generator materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
                 <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
               </label>
+              <label className="graph-field graph-field-inline text-sm" title="Allow this materia in an experimental parallel child workspace. This is a trusted workspace-local capability declaration, not a sandbox.">Parallel-safe child
+                <input data-testid="materia-parallel-safe" type="checkbox" checked={materiaForm.parallelSafe} onChange={(event) => setMateriaForm({ ...materiaForm, parallelSafe: event.target.checked })} />
+              </label>
               </div>
             </div>
           </fieldset>
@@ -208,6 +211,9 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
               <ColorPickerField form={form} colorPicker={colorPicker} />
               <label className="graph-field graph-field-inline text-sm" title="Generator utility materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
                 <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
+              </label>
+              <label className="graph-field graph-field-inline text-sm" title="Allow this materia in an experimental parallel child workspace. This is a trusted workspace-local capability declaration, not a sandbox.">Parallel-safe child
+                <input data-testid="materia-parallel-safe" type="checkbox" checked={materiaForm.parallelSafe} onChange={(event) => setMateriaForm({ ...materiaForm, parallelSafe: event.target.checked })} />
               </label>
             </div>
           </fieldset>

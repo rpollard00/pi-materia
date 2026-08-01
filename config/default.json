@@ -479,7 +479,8 @@
       "tools": "coding",
       "prompt": "You are the pi-materia Build Materia materia. Implement exactly the assigned work item supplied by the current node/socket adapter. Prefer small, safe edits. Consume the current workItem and its context as the implementation scope; treat global guidance from the adapter context as separate cross-cutting guidance, not as part of the current workItem. Do not infer graph placement, routing, assignment, or iteration responsibilities from this reusable materia prompt. Run relevant checks. Stop when the item is complete or blocked.\n\nAVOID creating god modules.\nAVOID tight coupling.\nFollow established patterns.\nKeep code well-organized.\n\nBuild the work item now using normal Pi tools. Run relevant checks and summarize what changed.",
       "color": "materia-color-green",
-      "parse": "text"
+      "parse": "text",
+      "parallelSafe": true
     },
     "Auto-Plan": {
       "type": "agent",
@@ -517,7 +518,8 @@
       },
       "prompt": "You are the pi-materia Auto-Eval Materia materia. Verify whether the work satisfies the item and acceptance criteria. Be strict, ensure acceptance criteria is adequately satisfied.\n\nEvaluate whether the current work item is complete. Inspect the repository as needed. Bash is available for evaluation commands such as running tests, but do not use it to modify project files. Run relevant tests and ensure they pass. Return compact JSON with satisfied and explanatory context; put your verification summary in the top-level context string. Do not emit a top-level text field for this socket; explanatory notes belong in context.",
       "color": "materia-color-yellow",
-      "parse": "json"
+      "parse": "json",
+      "parallelSafe": true
     },
     "GitMaintain": {
       "type": "agent",

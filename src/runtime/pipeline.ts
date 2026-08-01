@@ -38,7 +38,10 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   const effective = getEffectivePipelineConfig(config);
   validateAuthoredUtilityRuntimeSockets(config, effective.loadoutName);
   validateLoadout(effective.loadoutName, effective.pipeline);
-  assertValidPipelineGraph(effective.pipeline, { isGeneratorSocket: (socketId) => isGeneratorPipelineSocket(config, effective.pipeline, socketId) });
+  assertValidPipelineGraph(effective.pipeline, {
+    materia: config.materia,
+    isGeneratorSocket: (socketId) => isGeneratorPipelineSocket(config, effective.pipeline, socketId),
+  });
   const sockets = Object.fromEntries(
     loadoutSocketIds(effective.pipeline).map((id) => [id, resolveSocket(config, effective, id, `${pipelineSource(effective)}.sockets.${id}`)]),
   );
@@ -190,6 +193,7 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   if (rawMateria.multiTurn !== undefined && typeof rawMateria.multiTurn !== "boolean") {
     throw new Error(`Materia "${name}" has invalid multiTurn. Expected a boolean when configured.`);
   }
+  validateParallelSafeMarker(name, rawMateria.parallelSafe);
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
   validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
@@ -203,6 +207,7 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   if (rawMateria.timeoutMs !== undefined && (!Number.isFinite(rawMateria.timeoutMs) || Number(rawMateria.timeoutMs) <= 0)) {
     throw new Error(`Utility materia "${name}" has invalid timeoutMs. Expected a positive number of milliseconds.`);
   }
+  validateParallelSafeMarker(name, rawMateria.parallelSafe);
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
   validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
@@ -211,6 +216,12 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
 function validateGeneratorMarker(name: string, generator: unknown): void {
   if (generator !== undefined && typeof generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+  }
+}
+
+function validateParallelSafeMarker(name: string, parallelSafe: unknown): void {
+  if (parallelSafe !== undefined && typeof parallelSafe !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid parallelSafe. Expected a boolean when configured.`);
   }
 }
 

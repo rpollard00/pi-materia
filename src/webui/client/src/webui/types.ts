@@ -60,6 +60,7 @@ export interface MateriaFormState {
   outputFormat: 'text' | 'json';
   multiTurn: boolean;
   generator: boolean;
+  parallelSafe: boolean;
   utility: string;
   command: string;
   params: string;

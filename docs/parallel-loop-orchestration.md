@@ -386,11 +386,12 @@ budget or double-counts forwarded events.
 ## 11. Child safety and workflow limits
 
 A parallel child subgraph is a trusted, workspace-local capability boundary,
-not a sandbox. The graph validator must reject known unsafe or interactive
-materia, including multi-turn/user-interactive steps and operations that
-advance a parent bookmark, publish externally, or integrate the parent
-repository. Custom safety declarations are explicit trusted configuration;
-they do not make arbitrary code safe.
+not a sandbox. Every referenced child materia must explicitly set
+`parallelSafe: true`. The graph validator must still reject known unsafe or
+interactive materia, including multi-turn/user-interactive steps and shipped
+operations that advance a parent bookmark, publish externally, or integrate
+the parent repository. Custom safety declarations are explicit trusted
+configuration; they authorize custom local code but do not provide a sandbox.
 
 The selected subgraph must have deterministic entry and terminal boundaries,
 compatible symbolic exits, and no route that makes the parent traverse lane

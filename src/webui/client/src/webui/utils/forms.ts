@@ -18,6 +18,7 @@ export const emptyMateriaForm = (): MateriaFormState => ({
   outputFormat: 'json',
   multiTurn: false,
   generator: false,
+  parallelSafe: false,
   utility: '',
   command: '',
   params: '{}',
@@ -116,6 +117,7 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
           timeoutMs,
           parse: form.generator ? 'json' : form.outputFormat,
           generator: form.generator || undefined,
+          ...(form.parallelSafe ? { parallelSafe: true } : form.editingSocketId ? { parallelSafe: null as unknown as boolean } : {}),
           color: form.color.trim() || undefined,
         },
       },
@@ -135,6 +137,7 @@ export function buildMateriaPatch(form: MateriaFormState): MateriaConfig {
     color: form.color.trim() || undefined,
     parse: form.outputFormat,
     multiTurn: form.multiTurn || undefined,
+    ...(form.parallelSafe ? { parallelSafe: true } : form.editingSocketId ? { parallelSafe: null as unknown as boolean } : {}),
     ...(form.generator ? { generator: true, generates: null } : form.editingSocketId ? { generator: null, generates: null } : {}),
   };
   return {
