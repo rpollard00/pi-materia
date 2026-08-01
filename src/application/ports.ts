@@ -1,6 +1,9 @@
 import type { QuestBoard } from "../domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 
+export * from "./childCastRunner.js";
+export * from "./fakeChildCastRunner.js";
+
 export interface ConfigRepository {
   load(cwd: string, configuredPath?: string): Promise<LoadedConfig>;
   saveActiveLoadout(cwd: string, loadoutName: string, configuredPath?: string): Promise<string>;
