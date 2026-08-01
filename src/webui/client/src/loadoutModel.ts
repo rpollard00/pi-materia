@@ -1,10 +1,11 @@
 import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from '../../../graph/loadoutGraphAnalysis.js';
 import { normalizeLoadedLoadout } from '../../../loadout/loadoutNormalization.js';
 import { materializeLoadoutLoopSemantics } from '../../../graph/loopSemantics.js';
+import { validateMateriaLoopParallelConfig } from '../../../domain/parallelLoop.js';
 import { assertCanonicalSocketId, parseCanonicalSocketId } from '../../../domain/socket.js';
 import { fromWebUiLoadoutDto, toWebUiConfigDto, toWebUiLoadoutDto } from '../../loadoutDto.js';
 import type { ToolScopeSpec } from '../../../domain/toolScope.js';
-import type { MateriaEdgeCondition, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
+import type { MateriaEdgeCondition, MateriaLoopParallelConfig, MateriaPipelineConfig, PiMateriaConfig } from '../../../types.js';
 
 type SocketType = 'agent' | 'utility';
 export type SocketKind = 'entry' | 'normal';
@@ -44,6 +45,7 @@ export interface PipelineLoop {
   consumes?: { from: string; output?: string; as?: string; cursor?: string; done?: string };
   iterator?: { items: string; as?: string; cursor?: string; done?: string };
   exit?: { from: string; when: MateriaEdgeCondition; to: string };
+  parallel?: MateriaLoopParallelConfig;
   exits?: PipelineLoopExitRoute[];
   [key: string]: unknown;
 }
@@ -518,6 +520,9 @@ export function validateLoadoutSaveSemantics(config: MateriaConfig): string[] {
       if (diagnostic.code === 'loop-consumer-missing' || diagnostic.code === 'loop-consumer-ambiguous') errors.push(`Loadout "${loadoutName}" ${diagnostic.message}`);
     }
     for (const [loopId, loop] of Object.entries(loadout.loops ?? {})) {
+      for (const issue of validateMateriaLoopParallelConfig(loop.parallel, `loadouts.${loadoutName}.loops.${loopId}.parallel`)) {
+        errors.push(`${issue.path}: ${issue.message}`);
+      }
       for (const [index, route] of (loop.exits ?? []).entries()) {
         const source = loadout.sockets?.[route.from];
         const parse = effectiveSocketParse(source, config.materia ?? {});

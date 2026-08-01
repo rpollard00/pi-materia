@@ -59,6 +59,62 @@ describe("schema/persistence adapters", () => {
     expect((serialized.sockets as Record<string, Record<string, unknown>>)["Socket-2"]).toEqual({ materia: "Noop", parse: "json", assign: { noop: "$" } });
   });
 
+  test("round-trips opt-in parallel loop metadata without changing sequential loop shape", () => {
+    const parallel = {
+      planInput: "state.parallelPlan",
+      maxConcurrency: 2,
+      workspaceMode: "jj",
+      failurePolicy: "all_terminal",
+      fanIn: "ordered",
+    } as const;
+    const parsed = parsePersistedLoadout({
+      entry: "Socket-1",
+      sockets: { "Socket-1": { materia: "Build" } },
+      loops: {
+        sequential: { sockets: ["Socket-1"] },
+        parallel: { sockets: ["Socket-1"], parallel },
+      },
+    }, "loadout", { Build: { type: "agent" } });
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const serialized = serializePersistedLoadout(parsed.value);
+    expect(serialized.loops).toEqual({ sequential: { sockets: ["Socket-1"] }, parallel: { sockets: ["Socket-1"], parallel } });
+
+    const pipeline = domainLoadoutToPipelineConfig(parsed.value);
+    expect(pipeline.loops?.sequential).toEqual({ sockets: ["Socket-1"] });
+    expect(pipeline.loops?.parallel?.parallel).toEqual(parallel);
+  });
+
+  test("rejects unsupported parallel workspace and policy values clearly", () => {
+    const parsed = parsePersistedLoadout({
+      entry: "Socket-1",
+      sockets: { "Socket-1": { materia: "Build" } },
+      loops: {
+        work: {
+          sockets: ["Socket-1"],
+          parallel: {
+            planInput: "state.parallelPlan",
+            maxConcurrency: 2,
+            workspaceMode: "git",
+            failurePolicy: "fail_fast",
+            fanIn: "completion_order",
+          },
+        },
+      },
+    }, "loadout", { Build: { type: "agent" } });
+
+    expect(parsed.ok).toBe(false);
+    if (parsed.ok) return;
+    expect(parsed.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining([
+      "loadout.loops.work.parallel.workspaceMode",
+      "loadout.loops.work.parallel.failurePolicy",
+      "loadout.loops.work.parallel.fanIn",
+    ]));
+    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("unsupported parallel workspace mode");
+    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("unsupported parallel failure policy");
+  });
+
   test("reports malformed loadout data and missing optional fields remain optional", () => {
     const malformed = parsePersistedLoadout({ entry: "Socket-1", sockets: [] });
     expect(malformed.ok).toBe(false);

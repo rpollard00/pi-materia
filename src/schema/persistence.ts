@@ -74,6 +74,7 @@ export interface CurrentPersistedLoop {
   consumes?: MateriaLoopConfig["consumes"];
   iterator?: MateriaLoopConfig["iterator"];
   exit?: MateriaLoopConfig["exit"];
+  parallel?: MateriaLoopConfig["parallel"];
   exits?: MateriaLoopConfig["exits"];
 }
 
@@ -230,6 +231,7 @@ function serializePipelineLoop(loop: MateriaLoopConfig): CurrentPersistedLoop {
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
     ...(loop.exit ? { exit: { ...loop.exit } } : {}),
+    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -276,6 +278,7 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],
     ...(isPlainObject(value.consumes) ? { consumes: { ...value.consumes } as unknown as LoadoutLoop["consumes"] } : {}),
     ...(isPlainObject(value.iterator) ? { iterator: { ...value.iterator } as unknown as LoadoutLoop["iterator"] } : {}),
+    ...(value.parallel !== undefined ? { parallel: cloneRecord(value.parallel) as LoadoutLoop["parallel"] } : {}),
     ...(Array.isArray(value.exits) ? { exits: value.exits.map((exit) => ({ ...(isPlainObject(exit) ? exit : {}) })) as unknown as LoadoutLoop["exits"] } : {}),
   };
 }
@@ -285,6 +288,7 @@ function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
+    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -294,6 +298,7 @@ function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
     sockets: [...(loop.sockets ?? [])],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
+    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -303,6 +308,7 @@ function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
+    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }

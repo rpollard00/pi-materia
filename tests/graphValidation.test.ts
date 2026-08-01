@@ -366,6 +366,34 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("has no not_satisfied route back into the loop");
   });
 
+  test("validates opt-in parallel loop metadata and leaves omitted loops sequential", () => {
+    const sequential = { ...validGraph(), loops: { work: { sockets: ["Socket-2"] } } };
+    expect(validatePipelineGraph(sequential).ok).toBe(true);
+
+    const parallel: MateriaPipelineConfig = {
+      ...validGraph(),
+      loops: {
+        work: {
+          sockets: ["Socket-2"],
+          parallel: {
+            planInput: "state.parallelPlan",
+            maxConcurrency: 2,
+            workspaceMode: "jj",
+            failurePolicy: "all_terminal",
+            fanIn: "ordered",
+          },
+        },
+      },
+    };
+    expect(validatePipelineGraph(parallel).ok).toBe(true);
+
+    const unsupported = structuredClone(parallel);
+    (unsupported.loops!.work!.parallel as unknown as { workspaceMode: string }).workspaceMode = "git";
+    const result = validatePipelineGraph(unsupported);
+    expect(result.ok).toBe(false);
+    expect(formatGraphValidationErrors(result.errors)).toContain("unsupported parallel workspace mode");
+  });
+
   test("keeps canonical edges unchanged during graph normalization", () => {
     const graph = validGraph();
     graph.sockets["Socket-1"].edges = [{ when: "always", to: "Socket-4" }, { when: "satisfied", to: "Socket-2" }];

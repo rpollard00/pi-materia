@@ -1,4 +1,5 @@
 import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
+import { validateMateriaLoopParallelConfig } from "../domain/parallelLoop.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
 import { classifyGraphTarget, formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
 import type { MateriaAdvanceConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
@@ -147,6 +148,9 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
       continue;
     }
     let loopSocketsAreValid = true;
+    for (const issue of validateMateriaLoopParallelConfig(loop.parallel, `loops.${loopId}.parallel`)) {
+      errors.push({ code: "invalid-loop", source: issue.path, message: `Loop "${loopId}" has invalid parallel execution metadata at ${issue.path}: ${issue.message}.` });
+    }
     for (const [index, socketId] of sockets.entries()) {
       if (!validateSocketReference(errors, socketIds, socketId, `loops.${loopId}.sockets[${index}]`)) loopSocketsAreValid = false;
     }

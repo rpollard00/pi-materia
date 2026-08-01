@@ -726,6 +726,31 @@ export interface MateriaAdvanceConfig {
   when?: string;
 }
 
+export type MateriaParallelWorkspaceMode = "jj";
+export type MateriaParallelFailurePolicy = "all_terminal";
+export type MateriaParallelFanInBehavior = "ordered";
+
+/**
+ * Opt-in execution metadata for an existing loop region.
+ *
+ * The presence of `parallel` on a loop is the opt-in switch. The values are
+ * deliberately closed for this experimental MVP: only normalized plans,
+ * jj-backed workspaces, all-terminal failure handling, and stream-ordered
+ * fan-in are supported.
+ */
+export interface MateriaLoopParallelConfig {
+  /** State/input path containing the deterministic normalized parallel plan. */
+  planInput: string;
+  /** Maximum number of live child lanes. Must be a positive safe integer. */
+  maxConcurrency: number;
+  /** Workspace backend/mode used for lane isolation. */
+  workspaceMode: MateriaParallelWorkspaceMode;
+  /** Failure aggregation policy applied after every lane is terminal. */
+  failurePolicy: MateriaParallelFailurePolicy;
+  /** Deterministic fan-in behavior for accepted lane heads. */
+  fanIn: MateriaParallelFanInBehavior;
+}
+
 export interface MateriaLoopConfig {
   /** Socket ids contained by this loop region. */
   sockets?: string[];
@@ -735,6 +760,8 @@ export interface MateriaLoopConfig {
   iterator?: MateriaForeachConfig;
   /** Optional documented exit edge/condition. */
   exit?: MateriaLoopExitConfig;
+  /** Optional experimental parallel coordinator metadata. Omitted means sequential execution. */
+  parallel?: MateriaLoopParallelConfig;
   /**
    * Canonical loop-owned routes followed after the loop exits.
    * These are graph semantics metadata, not normal socket edges, generator edges,

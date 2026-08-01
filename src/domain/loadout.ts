@@ -1,4 +1,5 @@
 import { HANDOFF_EDGE_CONDITIONS, isHandoffEdgeCondition, type HandoffEdgeCondition } from "./handoff.js";
+import { validateMateriaLoopParallelConfig } from "./parallelLoop.js";
 import { err, ok, type DomainIssue, type DomainResult } from "./result.js";
 import { classifyGraphTarget, isCanonicalSocketId } from "./socket.js";
 
@@ -99,11 +100,20 @@ export interface AdvanceConfig {
   when?: HandoffEdgeCondition;
 }
 
+export interface LoadoutLoopParallelConfig {
+  planInput: string;
+  maxConcurrency: number;
+  workspaceMode: "jj";
+  failurePolicy: "all_terminal";
+  fanIn: "ordered";
+}
+
 export interface LoadoutLoop {
   sockets: SocketId[];
   consumes?: LoadoutLoopConsumer;
   iterator?: ForeachConfig;
   exit?: LoadoutLoopExit;
+  parallel?: LoadoutLoopParallelConfig;
   exits?: LoadoutLoopExitRoute[];
 }
 
@@ -209,6 +219,7 @@ export function validateLoadout(loadout: Loadout): DomainResult<Loadout> {
       if (!Object.prototype.hasOwnProperty.call(sockets, socketId)) issues.push({ path: `${loopPath}.sockets.${index}`, message: "loop socket must reference an existing socket" });
     }
     if (loop.consumes && !Object.prototype.hasOwnProperty.call(sockets, loop.consumes.from)) issues.push({ path: `${loopPath}.consumes.from`, message: "loop consumer source must reference an existing socket" });
+    issues.push(...validateMateriaLoopParallelConfig(loop.parallel, `${loopPath}.parallel`));
     validateSocketOrTerminalTarget(loop.consumes?.done, sockets, `${loopPath}.consumes.done`, "loop consumer done target", issues);
     validateSocketOrTerminalTarget(loop.iterator?.done, sockets, `${loopPath}.iterator.done`, "loop iterator done target", issues);
     if (loop.exit) {
@@ -258,7 +269,7 @@ function copyLoadout(loadout: Loadout): Loadout {
   return {
     ...loadout,
     sockets: Object.fromEntries(Object.entries(loadout.sockets).map(([id, socket]) => [id, { ...socket, edges: socket.edges?.map((edge) => ({ ...edge })) }])),
-    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}), ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}), ...(loop.exit ? { exit: { ...loop.exit } } : {}), ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}) }])) } : {}),
+    ...(loadout.loops ? { loops: Object.fromEntries(Object.entries(loadout.loops).map(([id, loop]) => [id, { ...loop, sockets: [...loop.sockets], ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}), ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}), ...(loop.exit ? { exit: { ...loop.exit } } : {}), ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}), ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}) }])) } : {}),
   };
 }
 
