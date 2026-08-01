@@ -13,6 +13,7 @@ import {
   applyAdvance,
   applyAssignments,
   enforceEdgeLimit,
+  hasExplicitRetryBudget,
   MateriaEdgeTraversalExhaustionError,
   selectNextEdge,
 } from "../application/workflowTransitions.js";
@@ -61,6 +62,8 @@ export type SocketOutputRoutingOutcome =
   | {
       kind: "route";
       targetId: string;
+      /** True when the route follows an edge with an explicit per-item {@code maxTraversals} retry budget. */
+      retryEdge?: boolean;
       diagnostics?: AdvancementLifecycleDiagnostics;
     }
   | { kind: "recovery_started" }
@@ -340,6 +343,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
     await deps.budget.assertBudget(config, state.runState, ctx);
 
     let nextTarget = advanceTarget;
+    let retryEdge = false;
     if (!nextTarget) {
       const nextEdge = selectNextEdge(state, socket, parsed);
       if (nextEdge) {
@@ -382,6 +386,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
           throw error;
         }
         nextTarget = nextEdge.to;
+        retryEdge = hasExplicitRetryBudget(nextEdge);
         captureReworkFeedbackForRoute(state, {
           sourceSocket: socket,
           targetSocketId: nextEdge.to,
@@ -407,6 +412,7 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
       kind: "route",
       targetId: nextTarget ?? "end",
       diagnostics: nextDiagnostics,
+      ...(retryEdge ? { retryEdge } : {}),
     };
   }
 

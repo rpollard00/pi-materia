@@ -76,6 +76,15 @@ export function selectNextTarget(state: MateriaCastState, socket: ResolvedMateri
   return "end";
 }
 
+/**
+ * True when the edge configures an explicit per-item retry budget. Only these
+ * explicit {@code maxTraversals} budgets are enforced; edges without them are
+ * unbounded and legacy global/socket traversal settings never cap execution.
+ */
+export function hasExplicitRetryBudget(edge: MateriaEdgeConfig): edge is MateriaEdgeConfig & { maxTraversals: number } {
+  return typeof edge.maxTraversals === "number" && Number.isSafeInteger(edge.maxTraversals) && edge.maxTraversals > 0;
+}
+
 export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: MateriaEdgeConfig, _config: PiMateriaConfig): void {
   const to = edge.to;
   const key = `${from}->${to}`;
@@ -85,7 +94,7 @@ export function enforceEdgeLimit(state: MateriaCastState, from: string, edge: Ma
   // maxTraversals is the only explicit retry budget. Edges without it are
   // unbounded: the historical 25-edge fallback and legacy global/socket
   // maxEdgeTraversals settings never fail execution.
-  if (typeof edge.maxTraversals !== "number" || !Number.isSafeInteger(edge.maxTraversals) || edge.maxTraversals <= 0) return;
+  if (!hasExplicitRetryBudget(edge)) return;
   // Retry consumption is scoped by edge and current work-item identity so one
   // item's retries never reduce another item's allowance on the same edge.
   const scopedKey = scopedEdgeRetryKey(from, to, state);

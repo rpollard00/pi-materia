@@ -24,6 +24,7 @@ interface LoopSafetyFixtureOptions {
   failuresBeforeEvalSuccess?: number;
   maintainOutput: Record<string, unknown>;
   maxNoAdvanceCycles?: number;
+  reworkEdgeMaxTraversals?: number;
 }
 
 function buildEvalMaintainFixture(options: LoopSafetyFixtureOptions): unknown {
@@ -51,7 +52,13 @@ function buildEvalMaintainFixture(options: LoopSafetyFixtureOptions): unknown {
             materia: "Synthetic-Auto-Evala",
             edges: [
               { when: "satisfied", to: "Socket-4" },
-              { when: "not_satisfied", to: "Socket-2" },
+              {
+                when: "not_satisfied",
+                to: "Socket-2",
+                ...(options.reworkEdgeMaxTraversals === undefined
+                  ? {}
+                  : { maxTraversals: options.reworkEdgeMaxTraversals }),
+              },
             ],
           },
           "Socket-4": {
@@ -207,5 +214,42 @@ describe("runtime Builda -> Auto-Evala -> Mime-Maintain loop safety", () => {
     expect(state.cursors?.workItemIndex).toBe(0);
     expect(state.visits).toMatchObject({ "Socket-2": 2, "Socket-3": 2, "Socket-4": 2 });
     expect(state.edgeTraversals?.["Socket-4->Socket-2"]).toBe(2);
+  });
+
+  test("explicit rework retries use the per-item retry budget without an unrelated no-advance cap", async () => {
+    // maxNoAdvanceCycles is 1, but the not_satisfied rework edge carries an
+    // explicit per-item maxTraversals budget of 5. Retry cycles closed by that
+    // edge must be governed by the explicit budget alone: the workflow retries
+    // three times within budget and completes instead of failing on an
+    // unrelated cumulative no-advance cycle cap.
+    const harness = await makeHarness({
+      failuresBeforeEvalSuccess: 3,
+      reworkEdgeMaxTraversals: 5,
+      maxNoAdvanceCycles: 1,
+      maintainOutput: {
+        satisfied: true,
+        context: "maintain complete",
+        state: { syntheticMaintain: { ok: true } },
+      },
+    });
+
+    await harness.runCommand("materia", "cast explicit retry budget loop");
+
+    const state = harness.appendedEntries.at(-1)?.data as {
+      phase?: string;
+      failedReason?: string;
+      data?: Record<string, unknown>;
+      cursors?: Record<string, number>;
+      visits?: Record<string, number>;
+      edgeTraversals?: Record<string, number>;
+      scopedEdgeRetries?: Record<string, number>;
+    };
+    expect(state.phase).toBe("complete");
+    expect(state.failedReason).toBeUndefined();
+    expect(state.data?.evalAttempts).toBe(4);
+    expect(state.cursors?.workItemIndex).toBe(1);
+    expect(state.visits).toMatchObject({ "Socket-2": 4, "Socket-3": 4, "Socket-4": 1 });
+    expect(state.edgeTraversals?.["Socket-3->Socket-2"]).toBe(3);
+    expect(state.scopedEdgeRetries).toMatchObject({ "Socket-3->Socket-2@WI-1": 3 });
   });
 });

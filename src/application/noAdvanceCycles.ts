@@ -23,11 +23,18 @@ export class MateriaNoAdvanceCycleExhaustionError extends Error {
  * Records socket starts for the current work item. Re-entering a socket already
  * on the current path closes one no-advance cycle. The path then starts again
  * at that socket so overlapping graph shapes remain bounded deterministically.
+ *
+ * Re-entry via an explicit retry edge ({@code explicitRetryEdge}) is governed
+ * solely by that edge's per-item {@code maxTraversals} policy. The structural
+ * no-advance counter does not stack an unrelated cumulative cap on top of the
+ * configured retry budget; only genuinely unbounded same-item cycles advance
+ * the counter and can fail with route diagnostics.
  */
 export function recordNoAdvanceSocketStart(
   state: MateriaCastState,
   socketId: string,
   limit: number = DEFAULT_MAX_NO_ADVANCE_CYCLES,
+  explicitRetryEdge = false,
 ): void {
   const itemKey = state.currentItemKey;
   if (itemKey === undefined) {
@@ -48,9 +55,13 @@ export function recordNoAdvanceSocketStart(
   }
 
   const sockets = [...tracker.socketPath.slice(previousIndex), socketId];
-  tracker.count += 1;
+  // The path always restarts at the re-entered socket so overlapping graph
+  // shapes stay bounded deterministically, but an explicit retry re-entry
+  // never advances the structural counter.
   tracker.socketPath = [socketId];
   tracker.lastCycleSockets = sockets;
+  if (explicitRetryEdge) return;
+  tracker.count += 1;
   if (tracker.count > limit) {
     throw new MateriaNoAdvanceCycleExhaustionError(itemKey, tracker.count, limit, sockets);
   }

@@ -167,7 +167,15 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
   ): Promise<void> {
     const outcome = await deps.output.commitSocketOutput(pi, ctx, state, text, entryId, options);
     if (outcome.kind === "route") {
-      await advanceToSocket(pi, ctx, state, outcome.targetId, entryId, outcome.diagnostics);
+      await advanceToSocket(
+        pi,
+        ctx,
+        state,
+        outcome.targetId,
+        entryId,
+        outcome.diagnostics,
+        outcome.retryEdge,
+      );
     }
   }
 
@@ -178,6 +186,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
     targetId: string | undefined,
     entryId: string,
     diagnostics?: AdvancementLifecycleDiagnostics,
+    retryEdge?: boolean,
   ): Promise<void> {
     const target = targetId ?? "end";
     const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: target } : undefined;
@@ -201,7 +210,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
     }
     const socket = getResolvedPipelineSocket(state.pipeline, target);
     if (!socket) throw new Error(`Unknown graph target "${target}"`);
-    await startSocket(pi, ctx, state, socket, nextDiagnostics);
+    await startSocket(pi, ctx, state, socket, nextDiagnostics, retryEdge);
     await deps.prompts.appendAdvancementDiagnostic(
       ctx,
       state,
@@ -217,6 +226,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
     state: MateriaCastState,
     socket: ResolvedMateriaSocket,
     diagnostics?: AdvancementLifecycleDiagnostics,
+    retryEdge?: boolean,
   ): Promise<void> {
     const config = await deps.state.loadConfigFromState(state);
     const nextDiagnostics = diagnostics ? { ...diagnostics, nextSocketTarget: socket.id } : undefined;
@@ -248,6 +258,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         state,
         socket.id,
         config.limits?.maxNoAdvanceCycles ?? DEFAULT_MAX_NO_ADVANCE_CYCLES,
+        retryEdge,
       );
     } catch (error) {
       if (!(error instanceof MateriaNoAdvanceCycleExhaustionError)) throw error;
