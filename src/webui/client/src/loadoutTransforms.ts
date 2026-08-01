@@ -78,9 +78,7 @@ export function setSocketLayouts(loadout: PipelineConfig, layouts: Record<string
 }
 
 function socketLimitsEqual(left: PipelineSocket['limits'] | undefined, right: PipelineSocket['limits'] | undefined): boolean {
-  return (left?.maxVisits ?? undefined) === (right?.maxVisits ?? undefined)
-    && (left?.maxEdgeTraversals ?? undefined) === (right?.maxEdgeTraversals ?? undefined)
-    && (left?.maxOutputBytes ?? undefined) === (right?.maxOutputBytes ?? undefined);
+  return (left?.maxOutputBytes ?? undefined) === (right?.maxOutputBytes ?? undefined);
 }
 
 export function setSocketLimits(loadout: PipelineConfig, socketId: string, limits: PipelineSocket['limits'] | undefined): PipelineConfig {

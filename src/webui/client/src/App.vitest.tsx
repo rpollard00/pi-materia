@@ -2188,8 +2188,6 @@ describe('Materia loadout grid editor', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
     expect(await screen.findByTestId('socket-property-editor')).toBeTruthy();
     expect(screen.getByTestId('socket-layout-x')).toHaveProperty('value', '1');
-    fireEvent.change(screen.getByTestId('socket-max-visits'), { target: { value: '7' } });
-    fireEvent.change(screen.getByTestId('socket-max-edge-traversals'), { target: { value: '3' } });
     fireEvent.change(screen.getByTestId('socket-max-output-bytes'), { target: { value: '2048' } });
     fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: '4' } });
     fireEvent.change(screen.getByTestId('socket-layout-y'), { target: { value: '1.5' } });
@@ -2199,12 +2197,40 @@ describe('Materia loadout grid editor', () => {
     await waitForConfigPostCount(fetchMock, 1);
     const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
     const saved = savedLoadout.sockets;
-    expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift', limits: { maxVisits: 7, maxEdgeTraversals: 3, maxOutputBytes: 2048 } });
+    expect(saved['Socket-2']).toMatchObject({ materia: 'Build', edges: [{ when: 'always', to: 'Socket-3' }], insertedBy: 'socket-shift', limits: { maxOutputBytes: 2048 } });
     expect(saved['Socket-2'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 4, y: 1.5 });
     expect(saved['Socket-1'].layout).toBeUndefined();
     expect(savedLoadout.layout.sockets['Socket-1']).toEqual({ x: 0, y: 0 });
     expect(saved['Socket-3'].edges).toEqual([{ when: 'satisfied', to: 'Socket-4' }, { when: 'not_satisfied', to: 'Socket-2' }]);
+  });
+
+  it('loads legacy socket traversal limits read-only and preserves them across layout edits', async () => {
+    const config = structuredClone(testConfig) as typeof testConfig;
+    (config.loadouts['Full-Auto'].sockets['Socket-2'] as { limits?: Record<string, number> }).limits = { maxVisits: 7, maxEdgeTraversals: 3 };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByTestId('socket-Socket-2'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    expect(await screen.findByTestId('socket-property-editor')).toBeTruthy();
+    expect(screen.queryByTestId('socket-max-visits')).toBeNull();
+    expect(screen.queryByTestId('socket-max-edge-traversals')).toBeNull();
+    expect(screen.queryByText('Max visits')).toBeNull();
+    expect(screen.queryByText('Retries / edge traversals')).toBeNull();
+    fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: '9' } });
+    fireEvent.click(screen.getByTestId('save-socket-properties'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitForConfigPostCount(fetchMock, 1);
+    const savedLoadout = configPostBody(fetchMock).config.loadouts['Full-Auto'];
+    expect(savedLoadout.sockets['Socket-2'].limits).toEqual({ maxVisits: 7, maxEdgeTraversals: 3 });
+    expect(savedLoadout.layout.sockets['Socket-2']).toEqual({ x: 9, y: 0 });
   });
 
   it('rejects invalid socket property input without mutating draft state', async () => {
@@ -2218,12 +2244,12 @@ describe('Materia loadout grid editor', () => {
 
     fireEvent.click(await screen.findByTestId('socket-Socket-2'));
     fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-    fireEvent.change(await screen.findByTestId('socket-max-visits'), { target: { value: '0' } });
+    fireEvent.change(await screen.findByTestId('socket-max-output-bytes'), { target: { value: '0' } });
     fireEvent.change(screen.getByTestId('socket-layout-x'), { target: { value: 'NaN' } });
     fireEvent.click(screen.getByTestId('save-socket-properties'));
 
     const validationToast = await findToastAlert();
-    expect(validationToast.textContent).toContain('Max visits must be a positive whole number.');
+    expect(validationToast.textContent).toContain('Max output bytes must be a positive whole number.');
     expect(validationToast.textContent).toContain('Layout X must be a finite number.');
     expect(screen.getByTestId('socket-property-editor')).toBeTruthy();
     expect(screen.queryByText('staged edits')).toBeNull();

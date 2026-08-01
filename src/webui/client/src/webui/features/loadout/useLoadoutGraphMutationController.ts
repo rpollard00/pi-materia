@@ -366,8 +366,6 @@ export function useLoadoutGraphMutationController({
     if (readonlyBlocked(`Save socket properties for ${socketLabel(socketId)}`)) return;
     if (!activeLoadoutName || !activeLoadout?.sockets?.[socketId]) return;
     const errors: string[] = [];
-    const maxVisits = parseOptionalPositiveInteger('Max visits', socketPropertyForm.maxVisits, errors);
-    const maxEdgeTraversals = parseOptionalPositiveInteger('Retry / edge traversal limit', socketPropertyForm.maxEdgeTraversals, errors);
     const maxOutputBytes = parseOptionalPositiveInteger('Max output bytes', socketPropertyForm.maxOutputBytes, errors);
     const layoutX = parseOptionalFiniteNumber('Layout X', socketPropertyForm.layoutX, errors);
     const layoutY = parseOptionalFiniteNumber('Layout Y', socketPropertyForm.layoutY, errors);
@@ -379,8 +377,6 @@ export function useLoadoutGraphMutationController({
     }
 
     const limits: PipelineSocket['limits'] = {};
-    if (maxVisits !== undefined) limits.maxVisits = maxVisits;
-    if (maxEdgeTraversals !== undefined) limits.maxEdgeTraversals = maxEdgeTraversals;
     if (maxOutputBytes !== undefined) limits.maxOutputBytes = maxOutputBytes;
     const nextLimits = Object.keys(limits).length > 0 ? limits : undefined;
     const layout: Parameters<typeof setSocketLayouts>[1][string] = {};
@@ -388,9 +384,7 @@ export function useLoadoutGraphMutationController({
     if (layoutY !== undefined) layout.y = layoutY;
     const nextLayout = Object.keys(layout).length > 0 ? layout : undefined;
     const currentSocket = activeLoadout.sockets[socketId];
-    const limitsChanged = (currentSocket.limits?.maxVisits ?? undefined) !== (nextLimits?.maxVisits ?? undefined)
-      || (currentSocket.limits?.maxEdgeTraversals ?? undefined) !== (nextLimits?.maxEdgeTraversals ?? undefined)
-      || (currentSocket.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
+    const limitsChanged = (currentSocket.limits?.maxOutputBytes ?? undefined) !== (nextLimits?.maxOutputBytes ?? undefined);
     const currentLayout = getSocketLayout(activeLoadout, socketId);
     const layoutChanged = (currentLayout?.x ?? undefined) !== (nextLayout?.x ?? undefined) || (currentLayout?.y ?? undefined) !== (nextLayout?.y ?? undefined);
 

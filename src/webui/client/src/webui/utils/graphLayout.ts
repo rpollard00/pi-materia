@@ -230,8 +230,6 @@ export function buildSocketHoverDetails(id: string, socket?: PipelineSocket, def
   }
   if (socket?.limits) {
     const limits = [
-      socket.limits.maxVisits !== undefined ? `max visits ${socket.limits.maxVisits}` : undefined,
-      socket.limits.maxEdgeTraversals !== undefined ? `max edge traversals ${socket.limits.maxEdgeTraversals}` : undefined,
       socket.limits.maxOutputBytes !== undefined ? `max output bytes ${socket.limits.maxOutputBytes}` : undefined,
     ].filter(Boolean);
     if (limits.length) lines.push(`Limits: ${limits.join(', ')}`);

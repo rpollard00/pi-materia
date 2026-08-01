@@ -69,8 +69,6 @@ export interface MateriaFormState {
 }
 
 export interface SocketPropertyFormState {
-  maxVisits: string;
-  maxEdgeTraversals: string;
   maxOutputBytes: string;
   layoutX: string;
   layoutY: string;

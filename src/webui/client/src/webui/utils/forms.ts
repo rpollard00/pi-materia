@@ -27,8 +27,6 @@ export const emptyMateriaForm = (): MateriaFormState => ({
 });
 
 export const emptySocketPropertyForm = (): SocketPropertyFormState => ({
-  maxVisits: '',
-  maxEdgeTraversals: '',
   maxOutputBytes: '',
   layoutX: '',
   layoutY: '',
@@ -61,8 +59,6 @@ export function commandParts(raw: string): string[] | undefined {
 
 export function socketPropertyFormFromSocket(socket?: PipelineSocket, layout?: SocketLayout): SocketPropertyFormState {
   return {
-    maxVisits: socket?.limits?.maxVisits === undefined ? '' : String(socket.limits.maxVisits),
-    maxEdgeTraversals: socket?.limits?.maxEdgeTraversals === undefined ? '' : String(socket.limits.maxEdgeTraversals),
     maxOutputBytes: socket?.limits?.maxOutputBytes === undefined ? '' : String(socket.limits.maxOutputBytes),
     layoutX: layout?.x === undefined ? '' : String(layout.x),
     layoutY: layout?.y === undefined ? '' : String(layout.y),

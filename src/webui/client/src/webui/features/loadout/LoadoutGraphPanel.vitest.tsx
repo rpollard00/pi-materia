@@ -109,7 +109,7 @@ function renderPanel(overrides: Partial<ComponentProps<typeof LoadoutGraphPanel>
         socketActionId: undefined,
         socketActionMode: 'actions',
         socketPropertyError: '',
-        socketPropertyForm: { maxVisits: '', maxEdgeTraversals: '', maxOutputBytes: '', layoutX: '', layoutY: '' },
+        socketPropertyForm: { maxOutputBytes: '', layoutX: '', layoutY: '' },
       },
       actions: {
         closeSocketActionModal: vi.fn(),
@@ -511,7 +511,7 @@ describe('LoadoutGraphPanel readonly defaults', () => {
           socketActionId: 'Socket-1',
           socketActionMode: 'actions',
           socketPropertyError: '',
-          socketPropertyForm: { maxVisits: '', maxEdgeTraversals: '', maxOutputBytes: '', layoutX: '', layoutY: '' },
+          socketPropertyForm: { maxOutputBytes: '', layoutX: '', layoutY: '' },
         },
         actions: baseActions,
       },
