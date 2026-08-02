@@ -2,6 +2,7 @@ import type { ToolScopeSpec } from "./domain/toolScope.js";
 import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
 import type { MateriaThinkingLevel } from "./domain/thinking.js";
 import type { ScopePath } from "./domain/scope.js";
+import type { ExecutionScope } from "./domain/executionScope.js";
 import type { LoopParallelismConfig, ParallelismConfig } from "./domain/parallelLoop.js";
 import type {
   MateriaParallelFanInBehavior,
@@ -422,7 +423,12 @@ export interface MateriaCastState {
   request: string;
   configSource: string;
   configHash: string;
+  /** Legacy project cwd retained while persisted casts migrate to execution scopes. */
   cwd: string;
+  /** Immutable origin scope for this cast. */
+  baseScope: ExecutionScope;
+  /** Explicit scope used by the currently executing cast socket. */
+  activeScope: ExecutionScope;
   runDir: string;
   artifactRoot: string;
   phase: MateriaCastPhase;

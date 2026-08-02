@@ -6,6 +6,7 @@ import {
   extendSameSocketRecoveryAllowanceForRevive,
 } from "../application/recoveryPolicy.js";
 import { resolveArtifactRoot } from "../config/config.js";
+import { cloneExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
 import { parallelFanInHandoff } from "../domain/parallelFanIn.js";
 import { isParallelLaneRevivalCandidate } from "../domain/parallelRecovery.js";
 import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
@@ -160,6 +161,8 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     const effectivePipeline = getEffectivePipelineConfig(config);
     const loadoutIdentity = castLoadoutIdentity(config, effectivePipeline.pipeline, effectivePipeline.loadoutName);
     const runState = createRunState(castId, runDir, ctx.model, loadoutIdentity);
+    const baseScope = createBaseExecutionScope(castId, ctx.cwd);
+    const activeScope = cloneExecutionScope(baseScope);
     runState.currentSocketId = pipeline.entry.id;
     runState.currentMateria = socketMateriaName(pipeline.entry);
     runState.lastMessage = pipeline.entry.id;
@@ -168,7 +171,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     // Enrich cast_start artifact with resolved per-socket materia names and
     // multiTurn flags so future misconfigurations are diagnosable at a glance.
     const socketDetails = deps.validation.buildPipelineSocketDetails(pipeline);
-    await deps.artifacts.appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}), nativeSession: true, isolatedMateriaContext: true, socketDetails, ...(options?.startEventDetails ?? {}) });
+    await deps.artifacts.appendEvent(runState, "cast_start", { request, configSource: loaded.source, artifactRoot, pipeline: effectivePipeline.pipeline, loadout: effectivePipeline.loadoutName, ...(loadoutIdentity.loadoutId ? { loadoutId: loadoutIdentity.loadoutId } : {}), nativeSession: true, isolatedMateriaContext: true, executionScope: { baseScopeId: baseScope.id, activeScopeId: activeScope.id, cwd: activeScope.cwd }, socketDetails, ...(options?.startEventDetails ?? {}) });
 
     const state: MateriaCastState = {
       version: 2,
@@ -178,6 +181,8 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       configSource: loaded.source,
       configHash: hashConfig(config),
       cwd: ctx.cwd,
+      baseScope,
+      activeScope,
       runDir,
       artifactRoot,
       phase: pipeline.entry.id,

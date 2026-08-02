@@ -147,6 +147,22 @@ async function failCurrentCast(harness: FakePiHarness, message = "provider outag
 }
 
 describe("/materia recast", () => {
+  test("starts every cast in a persisted base execution scope at the session project cwd", async () => {
+    const harness = await makeHarness();
+
+    await harness.runCommand("materia", "cast scoped task");
+    const state = latestState(harness);
+
+    expect(state.baseScope).toEqual({
+      id: `cast:${encodeURIComponent(state.castId)}:base`,
+      cwd: harness.cwd,
+      state: {},
+      exports: {},
+    });
+    expect(state.activeScope).toEqual(state.baseScope);
+    expect(state.activeScope).not.toBe(state.baseScope);
+  });
+
   test("native TUI status prefers Materia names over socket ids on start, restore, and recast", async () => {
     const harness = await makeHarness({ socketId: "Socket-4", materia: "Build" });
 
