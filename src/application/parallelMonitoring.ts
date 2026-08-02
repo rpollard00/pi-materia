@@ -62,7 +62,8 @@ export interface ParallelRunMonitorSummary {
   phase: MateriaParallelRunState["phase"];
   fanInPhase: MateriaParallelRunState["fanInPhase"];
   planId: string;
-  baseline: { commitId: string; changeId: string };
+  /** Present only for legacy jj-coupled runs. */
+  baseline?: { commitId: string; changeId: string };
   maxConcurrency: number;
   counts: ParallelRunMonitorCounts;
   lanes: ParallelLaneMonitorSummary[];
@@ -102,7 +103,7 @@ export function summarizeParallelRun(run: MateriaParallelRunState): ParallelRunM
     phase: run.phase,
     fanInPhase: run.fanInPhase,
     planId: run.planIdentity.planId,
-    baseline: { ...run.baseline },
+    ...(run.baseline ? { baseline: { ...run.baseline } } : {}),
     maxConcurrency: run.maxConcurrency,
     counts,
     lanes,

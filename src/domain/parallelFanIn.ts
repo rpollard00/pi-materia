@@ -71,7 +71,7 @@ export function orderAcceptedParallelLaneHeads(
     if (!lane.workspace) {
       throw new ParallelFanInValidationError("fan_in_workspace_missing", `Parallel lane ${JSON.stringify(laneId)} has no owned workspace record.`, laneId);
     }
-    if (!isRevisionIdentity(lane.workspace.baseline) || !sameRevision(lane.workspace.baseline, run.baseline)) {
+    if (!isRevisionIdentity(run.baseline) || !isRevisionIdentity(lane.workspace.baseline) || !sameRevision(lane.workspace.baseline, run.baseline)) {
       throw new ParallelFanInValidationError("fan_in_baseline_mismatch", `Parallel lane ${JSON.stringify(laneId)} is pinned to a different baseline.`, laneId);
     }
     ordered.push({

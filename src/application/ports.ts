@@ -1,4 +1,5 @@
 import type { QuestBoard } from "../domain/questBoard.js";
+import type { ExecutionScope } from "../domain/executionScope.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 
 export * from "./childCastRunner.js";
@@ -50,6 +51,8 @@ export type InitialPromptDispatchPolicy = "immediate" | "defer-agent-trigger";
 export interface CastStartOptions {
   /** Optional shared cast data to seed before the first socket starts. */
   initialData?: Record<string, unknown>;
+  /** Optional active scope supplied by a parent branch dispatcher. */
+  initialExecutionScope?: ExecutionScope;
   /** Optional extra details recorded on the normal cast_start event. */
   startEventDetails?: Record<string, unknown>;
   /** Transient policy for dispatching the first agent prompt of a new cast. */

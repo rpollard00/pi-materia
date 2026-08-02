@@ -1,4 +1,6 @@
-/** Stable jj revision identity retained by the parallel coordinator. */
+import type { ExecutionScope } from "./executionScope.js";
+
+/** Stable jj revision identity retained by legacy parallel coordinator records. */
 export interface MateriaParallelRevisionIdentity {
   commitId: string;
   changeId: string;
@@ -64,11 +66,12 @@ export interface MateriaParallelPlanIdentity {
 export interface MateriaParallelConfigIdentity {
   configHash: string;
   loopId: string;
-  planInput: string;
   maxConcurrency: number;
-  workspaceMode: MateriaParallelWorkspaceMode;
-  failurePolicy: MateriaParallelFailurePolicy;
-  fanIn: MateriaParallelFanInBehavior;
+  /** Legacy coordinator fields retained only while persisted v1 runs migrate. */
+  planInput?: string;
+  workspaceMode?: MateriaParallelWorkspaceMode;
+  failurePolicy?: MateriaParallelFailurePolicy;
+  fanIn?: MateriaParallelFanInBehavior;
 }
 
 /** Ordered stream membership copied from the immutable normalized plan. */
@@ -162,6 +165,11 @@ export interface MateriaParallelLaneState {
   status: MateriaParallelLaneStatus;
   attempt: number;
   childCastId?: string;
+  /** Detached branch scope used by this child. Core does not interpret exports. */
+  executionScope?: ExecutionScope;
+  /** Opaque terminal child output retained for intrinsic ordered fan-in. */
+  terminalOutput?: unknown;
+  /** Legacy jj coordinator fields retained only for persisted v1 compatibility. */
   workspace?: MateriaParallelWorkspaceOwnership;
   childSession?: MateriaParallelChildSession;
   acceptedHead?: MateriaParallelRevisionIdentity;
@@ -182,12 +190,13 @@ export interface MateriaParallelRunState {
   runId: string;
   planIdentity: MateriaParallelPlanIdentity;
   configIdentity: MateriaParallelConfigIdentity;
-  baseline: MateriaParallelRevisionIdentity;
+  /** Legacy jj baseline retained only when reading an older coordinator run. */
+  baseline?: MateriaParallelRevisionIdentity;
   queueOrder: string[];
   maxConcurrency: number;
-  workspaceMode: MateriaParallelWorkspaceMode;
-  failurePolicy: MateriaParallelFailurePolicy;
-  fanIn: MateriaParallelFanInBehavior;
+  workspaceMode?: MateriaParallelWorkspaceMode;
+  failurePolicy?: MateriaParallelFailurePolicy;
+  fanIn?: MateriaParallelFanInBehavior;
   /** Durable provenance from the explicit successful-lanes fan-in boundary. */
   fanInProvenance?: MateriaParallelFanInProvenance;
   /** Durable result of the post-integration evaluation/finalization gate. */

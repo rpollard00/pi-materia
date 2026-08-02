@@ -77,6 +77,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       cwd: input.cwd,
       compiledLoadout: clone(input.compiledLoadout),
       paths: clone(input.paths),
+      executionScope: clone(input.executionScope ?? { id: `child:${encodeURIComponent(input.identity.childCastId)}:base`, cwd: input.cwd, state: {}, exports: {} }),
       status: this.initialStatus,
       accepted: false,
       attempt: input.attempt ?? 1,

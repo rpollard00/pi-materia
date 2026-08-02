@@ -248,6 +248,9 @@ export function validateStartInput(input: StartChildCastInput): void {
   if (!input.compiledLoadout || typeof input.compiledLoadout !== "object" || !input.compiledLoadout.loadout) {
     throw new Error("Child cast compiledLoadout must contain a compiled loadout.");
   }
+  if (input.executionScope && (input.executionScope.cwd !== input.cwd || typeof input.executionScope.id !== "string")) {
+    throw new Error("Child cast executionScope must be valid and match cwd.");
+  }
   if (input.attempt !== undefined && (!Number.isSafeInteger(input.attempt) || input.attempt < 1)) {
     throw new Error("Child cast attempt must be a positive safe integer.");
   }

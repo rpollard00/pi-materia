@@ -218,6 +218,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       cwd: existing.snapshot.cwd,
       compiledLoadout: clone(existing.snapshot.compiledLoadout),
       paths: clone(existing.snapshot.paths),
+      executionScope: clone(existing.snapshot.executionScope),
       attempt: existing.snapshot.attempt + 1,
     };
     const replacement = await this.#prepareRecord(inputForLaunch, inputForLaunch.attempt!);
@@ -326,6 +327,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       cwd: input.cwd,
       compiledLoadout: clone(input.compiledLoadout),
       paths: clone(input.paths),
+      executionScope: clone(input.executionScope ?? legacyChildScope(input)),
       status: "starting",
       accepted: false,
       attempt,
@@ -349,6 +351,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       cwd: input.cwd,
       compiledLoadout: clone(input.compiledLoadout),
       paths: clone(input.paths),
+      executionScope: clone(input.executionScope ?? legacyChildScope(input)),
       attempt,
       ...(configPath ? { configPath } : {}),
     };
@@ -616,6 +619,10 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 }
 
 export type PiChildCastRunnerPort = PiChildCastRunner;
+
+function legacyChildScope(input: StartChildCastInput) {
+  return { id: `child:${encodeURIComponent(input.identity.childCastId)}:base`, cwd: input.cwd, state: {}, exports: {} };
+}
 
 export function createPiChildCastRunner(options: PiChildCastRunnerOptions = {}): PiChildCastRunner {
   return new PiChildCastRunner(options);

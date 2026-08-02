@@ -16,6 +16,7 @@ import type {
   MateriaParallelUsageTotals,
   MateriaParallelWorkspaceOwnership,
 } from "./parallelRunTypes.js";
+import type { ExecutionScope } from "./executionScope.js";
 
 export const PARALLEL_RUN_STATE_VERSION = 1 as const;
 export const PARALLEL_RUN_DIAGNOSTIC_LIMIT = 64 as const;
@@ -29,7 +30,6 @@ export type ParallelTransitionIgnoreReason =
   | "child_mismatch"
   | "terminal_lane"
   | "invalid_status_transition"
-  | "accepted_head_required"
   | "run_terminal"
   | "phase_regression"
   | "fan_in_phase_regression"
@@ -43,7 +43,8 @@ export interface CreateParallelRunStateInput {
   runId?: string;
   planIdentity: MateriaParallelPlanIdentity;
   configIdentity: MateriaParallelConfigIdentity;
-  baseline: MateriaParallelRevisionIdentity;
+  /** Optional only for legacy jj-coupled coordinator records. */
+  baseline?: MateriaParallelRevisionIdentity;
   queue: readonly MateriaParallelQueueEntry[];
   now?: number;
 }
@@ -66,6 +67,8 @@ export interface ParallelLaneTransitionInput extends ParallelTransitionGuard {
   status?: MateriaParallelLaneStatus;
   acceptedHead?: MateriaParallelRevisionIdentity;
   accepted?: boolean;
+  executionScope?: ExecutionScope;
+  terminalOutput?: unknown;
   workspace?: MateriaParallelWorkspaceOwnership;
   childSession?: MateriaParallelChildSession;
   usage?: MateriaParallelUsageTotals;
@@ -126,7 +129,6 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
   assertNonEmpty(input.loopId, "loopId");
   if (!input.planIdentity || typeof input.planIdentity !== "object") throw new Error("parallel planIdentity is required");
   if (!input.configIdentity || typeof input.configIdentity !== "object") throw new Error("parallel configIdentity is required");
-  if (!input.baseline || typeof input.baseline !== "object") throw new Error("parallel baseline is required");
   assertNonEmpty(input.planIdentity.planId, "planIdentity.planId");
   assertNonEmpty(input.configIdentity.configHash, "configIdentity.configHash");
   if (input.configIdentity.loopId !== input.loopId) throw new Error("parallel configIdentity.loopId must match loopId");
@@ -136,7 +138,7 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
   if (!Number.isSafeInteger(input.configIdentity.maxConcurrency) || input.configIdentity.maxConcurrency < 1) {
     throw new Error("parallel maxConcurrency must be a positive safe integer");
   }
-  if (typeof input.baseline.commitId !== "string" || typeof input.baseline.changeId !== "string" || input.baseline.commitId.trim().length === 0 || input.baseline.changeId.trim().length === 0) {
+  if (input.baseline && (typeof input.baseline.commitId !== "string" || typeof input.baseline.changeId !== "string" || input.baseline.commitId.trim().length === 0 || input.baseline.changeId.trim().length === 0)) {
     throw new Error("parallel baseline must contain commitId and changeId");
   }
 
@@ -189,12 +191,12 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
     runId: input.runId?.trim() || `parallel:${input.parentCastId}:${input.loopId}:${input.planIdentity.planId}`,
     planIdentity: clone(input.planIdentity),
     configIdentity: clone(input.configIdentity),
-    baseline: clone(input.baseline),
+    ...(input.baseline ? { baseline: clone(input.baseline) } : {}),
     queueOrder: queue.map((entry) => entry.laneId),
     maxConcurrency: input.configIdentity.maxConcurrency,
-    workspaceMode: input.configIdentity.workspaceMode,
-    failurePolicy: input.configIdentity.failurePolicy,
-    fanIn: input.configIdentity.fanIn,
+    ...(input.configIdentity.workspaceMode ? { workspaceMode: input.configIdentity.workspaceMode } : {}),
+    ...(input.configIdentity.failurePolicy ? { failurePolicy: input.configIdentity.failurePolicy } : {}),
+    ...(input.configIdentity.fanIn ? { fanIn: input.configIdentity.fanIn } : {}),
     phase: noLanes ? "completed" : "dispatching",
     fanInPhase: noLanes ? "skipped" : "not_started",
     lanes,
@@ -242,10 +244,6 @@ export function transitionParallelRun(
   if (input.status !== undefined) {
     if (isTerminalLaneStatus(lane.status)) return ignored(state, "terminal_lane");
     if (!isValidLaneTransition(lane.status, input.status)) return ignored(state, "invalid_status_transition");
-    const acceptedHead = input.acceptedHead ?? lane.acceptedHead;
-    if (input.status === "accepted" && !isRevisionIdentity(acceptedHead)) {
-      return ignored(state, "accepted_head_required");
-    }
     if (input.status === "accepted" && input.accepted === false) {
       return ignored(state, "invalid_status_transition");
     }
@@ -263,6 +261,14 @@ export function transitionParallelRun(
     }
   }
 
+  if (input.executionScope !== undefined) {
+    nextLane.executionScope = clone(input.executionScope);
+    changed = true;
+  }
+  if (input.terminalOutput !== undefined) {
+    nextLane.terminalOutput = clone(input.terminalOutput);
+    changed = true;
+  }
   if (input.workspace !== undefined) {
     nextLane.workspace = clone(input.workspace);
     changed = true;
@@ -527,16 +533,10 @@ function applyRunPhase(
   return { state: next, applied: next.phase !== state.phase || next.fanInPhase !== state.fanInPhase };
 }
 
-function isRevisionIdentity(value: MateriaParallelRevisionIdentity | undefined): boolean {
-  return Boolean(
-    value &&
-    typeof value.commitId === "string" && value.commitId.trim().length > 0 &&
-    typeof value.changeId === "string" && value.changeId.trim().length > 0,
-  );
-}
-
 function hasTerminalLaneMutation(input: ParallelLaneTransitionInput): boolean {
   return input.childCastId !== undefined
+    || input.executionScope !== undefined
+    || input.terminalOutput !== undefined
     || input.workspace !== undefined
     || input.childSession !== undefined
     || input.acceptedHead !== undefined

@@ -162,7 +162,10 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     const loadoutIdentity = castLoadoutIdentity(config, effectivePipeline.pipeline, effectivePipeline.loadoutName);
     const runState = createRunState(castId, runDir, ctx.model, loadoutIdentity);
     const baseScope = createBaseExecutionScope(castId, ctx.cwd);
-    const activeScope = cloneExecutionScope(baseScope);
+    const activeScope = options?.initialExecutionScope
+      ? cloneExecutionScope(options.initialExecutionScope)
+      : cloneExecutionScope(baseScope);
+    if (activeScope.cwd !== ctx.cwd) throw new Error("Initial execution scope cwd must match the child session cwd.");
     runState.currentSocketId = pipeline.entry.id;
     runState.currentMateria = socketMateriaName(pipeline.entry);
     runState.lastMessage = pipeline.entry.id;

@@ -1,3 +1,4 @@
+import type { ExecutionScope } from "../domain/executionScope.js";
 import type {
   MateriaPipelineConfig,
   ResolvedMateriaPipeline,
@@ -109,6 +110,7 @@ export interface ChildCastSnapshot {
   cwd: string;
   compiledLoadout: ChildCastCompiledLoadout;
   paths: ChildCastPaths;
+  executionScope: ExecutionScope;
   status: ChildCastStatus;
   /** False until a terminal result explicitly accepts the child output. */
   accepted: boolean;
@@ -128,6 +130,8 @@ export interface StartChildCastInput {
   cwd: string;
   compiledLoadout: ChildCastCompiledLoadout;
   paths: ChildCastPaths;
+  /** Detached parent branch scope; cwd may intentionally equal another lane. */
+  executionScope?: ExecutionScope;
   /** Initial attempt number for revival/recovery; defaults to one. */
   attempt?: number;
 }
@@ -147,6 +151,7 @@ export interface ChildCastLaunchSpec {
   cwd: string;
   compiledLoadout: ChildCastCompiledLoadout;
   paths: ChildCastPaths;
+  executionScope: ExecutionScope;
   attempt: number;
   /** Explicit config generated for the child, when one is required. */
   configPath?: string;

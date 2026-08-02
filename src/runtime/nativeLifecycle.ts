@@ -7,7 +7,6 @@ import { renderTemplate } from "../application/promptAssembly.js";
 import { applyAdvance, applyAssignments, evaluateCondition, resolveEmptyLoopExhaustionTarget, resolveValue, selectNextTarget, setCurrentItem, setPath } from "../application/workflowTransitions.js";
 import { applyMateriaModelSettings } from "../config/modelSettings.js";
 import { appendEvent, appendManifest, initializeRun, recordSocketParsedJson, recordUtilityInput as recordUtilityInputFile, shortMetadataLabel } from "../infrastructure/castArtifacts.js";
-import { createJjWorkspaceBackend } from "../infrastructure/jjWorkspaceBackend.js";
 import { createParallelLaneArtifactStore } from "../infrastructure/parallelLaneArtifacts.js";
 import { createPiChildCastRunner } from "../infrastructure/piChildCastRunner.js";
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
@@ -206,11 +205,9 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
 });
 
-const parallelWorkspaceBackend = createJjWorkspaceBackend();
 const parallelLaneArtifacts = createParallelLaneArtifactStore();
 parallelLoopDispatcher = createParallelLoopDispatcher({
   children: createPiChildCastRunner(),
-  workspaces: parallelWorkspaceBackend,
   state: { saveCastState },
   artifacts: {
     appendEvent,

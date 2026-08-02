@@ -43,14 +43,9 @@ export type {
   NormalizedParallelStream,
   ParallelLoopCancellationInput,
   ParallelLoopDispatchInput,
-  ParallelLoopFinalizationInput,
   ParallelLoopReviveInput,
   ParallelLoopReviveResult,
   ParallelLoopDispatcherDependencies,
-  ParallelWorkspaceInspection,
-  ParallelWorkspacePort,
-  ParallelWorkspaceRecord,
-  ParallelWorkspaceRevision,
 } from "./runtime/parallelDispatcher.js";
 
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext, projectMateriaContext } from "./application/promptAssembly.js";

@@ -45,6 +45,19 @@ export function createBaseExecutionScope(castId: string, cwd: string): Execution
   return createExecutionScope({ id: baseExecutionScopeId(castId), cwd });
 }
 
+/** Stable identity for a detached parallel branch cloned from a cast base scope. */
+export function parallelBranchExecutionScopeId(baseScopeId: string, loopId: string, laneId: string): ExecutionScopeId {
+  return `${requireNonEmptyString(baseScopeId, "base scope id")}:branch:${encodeURIComponent(requireNonEmptyString(loopId, "loopId"))}:${encodeURIComponent(requireNonEmptyString(laneId, "laneId"))}`;
+}
+
+/** Clone branch-local state and opaque exports without assuming cwd isolation. */
+export function cloneParallelBranchExecutionScope(baseScope: ExecutionScope, loopId: string, laneId: string): ExecutionScope {
+  return createExecutionScope({
+    ...baseScope,
+    id: parallelBranchExecutionScopeId(baseScope.id, loopId, laneId),
+  });
+}
+
 /**
  * Create a detached, persistence-safe scope snapshot. Scope payloads remain
  * opaque to core execution and must be structured-cloneable.

@@ -29,6 +29,7 @@ export async function runChildCastLaunch(
     spec.request,
     {
       initialData: { ...spec.compiledLoadout.initialData },
+      initialExecutionScope: spec.executionScope,
       startEventDetails: {
         childCast: {
           childCastId: spec.identity.childCastId,
@@ -52,7 +53,7 @@ export async function runChildCastLaunch(
 
 export async function readChildLaunchSpec(file: string): Promise<ChildCastLaunchSpec> {
   const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
-  if (!isRecord(parsed) || parsed.version !== 1 || !validIdentity(parsed.identity) || typeof parsed.request !== "string" || typeof parsed.cwd !== "string" || !isRecord(parsed.compiledLoadout) || !validPaths(parsed.paths) || typeof parsed.attempt !== "number" || !Number.isSafeInteger(parsed.attempt) || parsed.attempt < 1 || (parsed.configPath !== undefined && typeof parsed.configPath !== "string")) {
+  if (!isRecord(parsed) || parsed.version !== 1 || !validIdentity(parsed.identity) || typeof parsed.request !== "string" || typeof parsed.cwd !== "string" || !isRecord(parsed.compiledLoadout) || !validPaths(parsed.paths) || !validExecutionScope(parsed.executionScope) || typeof parsed.attempt !== "number" || !Number.isSafeInteger(parsed.attempt) || parsed.attempt < 1 || (parsed.configPath !== undefined && typeof parsed.configPath !== "string")) {
     throw new Error(`Invalid child launch specification: ${file}`);
   }
   return parsed as unknown as ChildCastLaunchSpec;
@@ -115,6 +116,16 @@ function validIdentity(value: unknown): boolean {
 
 function validPaths(value: unknown): boolean {
   return isRecord(value) && ["sessionPath", "artifactRoot", "runDirectory"].every((key) => typeof value[key] === "string" && value[key].trim().length > 0);
+}
+
+function validExecutionScope(value: unknown): boolean {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && value.id.trim().length > 0
+    && typeof value.cwd === "string"
+    && value.cwd.trim().length > 0
+    && isRecord(value.state)
+    && isRecord(value.exports);
 }
 
 function isResolvedPipeline(value: unknown): value is ResolvedMateriaPipeline {
