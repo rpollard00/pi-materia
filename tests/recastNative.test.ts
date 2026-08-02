@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
 import piMateria from "../src/index.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -58,7 +59,13 @@ function latestState(harness: FakePiHarness): MateriaCastState {
 }
 
 function cloneState(state: MateriaCastState, overrides: Partial<MateriaCastState>): MateriaCastState {
-  return { ...(structuredClone(state) as MateriaCastState), ...overrides, updatedAt: Date.now() };
+  const clone = { ...(structuredClone(state) as MateriaCastState), ...overrides, updatedAt: Date.now() };
+  if ((overrides.castId !== undefined && overrides.castId !== state.castId) || (overrides.cwd !== undefined && overrides.cwd !== state.cwd)) {
+    clone.baseScope = createBaseExecutionScope(clone.castId, clone.cwd);
+    clone.activeScope = cloneExecutionScope(clone.baseScope);
+    clone.branchScopes = {};
+  }
+  return clone;
 }
 
 function makeRevivableState(state: MateriaCastState, options: { key?: string; originalMaxAttempts?: number; effectiveMaxAttempts?: number; reviveCount?: number; extraAllowances?: MateriaCastState["recoveryAllowances"] } = {}): MateriaCastState {

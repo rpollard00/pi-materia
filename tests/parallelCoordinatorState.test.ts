@@ -153,9 +153,9 @@ describe("parallel coordinator durable state", () => {
     const entries: unknown[] = [];
     const pi = { appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }) } as any;
     const ctx = { sessionManager: { getBranch: () => entries } } as any;
-    const withParallel = { castId: "cast-1", updatedAt: 1, parallelRuns: { build: run() } } as MateriaCastState;
+    const withParallel = { castId: "cast-1", version: 1, cwd: "/tmp", runDir: "/tmp/pi-materia-cast-1", updatedAt: 1, parallelRuns: { build: run() } } as unknown as MateriaCastState;
     saveCastState(pi, withParallel);
-    saveCastState(pi, { castId: "old-cast", updatedAt: 2 } as MateriaCastState);
+    saveCastState(pi, { castId: "old-cast", version: 1, cwd: "/tmp", runDir: "/tmp/pi-materia-old-cast", updatedAt: 2 } as unknown as MateriaCastState);
 
     const latest = listLatestCastStates(ctx);
     expect(latest.find((state) => state.castId === "cast-1")?.parallelRuns?.build?.lanes["lane-api"]?.workItemIndexes).toEqual([0, 2]);

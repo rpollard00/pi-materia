@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import piMateria from "../src/index.js";
 import { reactivateQueuedNativeCast, loadCastStateById } from "../src/castRuntime.js";
+import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
 import { FakePiHarness } from "./fakePi.js";
 
 function agentConfig() {
@@ -40,6 +41,7 @@ function utilityConfig() {
 
 function baseCastState(harness: FakePiHarness, castId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   const runDir = path.join(harness.cwd, ".pi", "pi-materia", castId);
+  const baseScope = createBaseExecutionScope(castId, harness.cwd);
   return {
     version: 2,
     active: false,
@@ -48,6 +50,9 @@ function baseCastState(harness: FakePiHarness, castId: string, extra: Record<str
     configSource: ".pi/pi-materia.json",
     configHash: "test",
     cwd: harness.cwd,
+    baseScope,
+    activeScope: cloneExecutionScope(baseScope),
+    branchScopes: {},
     runDir,
     artifactRoot: path.join(harness.cwd, ".pi/pi-materia"),
     phase: "failed",

@@ -4,6 +4,8 @@ import {
   cloneExecutionScope,
   createBaseExecutionScope,
   createExecutionScope,
+  MAX_EXECUTION_SCOPE_EXPORT_BYTES,
+  MAX_EXECUTION_SCOPE_EXPORTS,
 } from "../src/domain/executionScope.js";
 
 describe("execution scopes", () => {
@@ -47,5 +49,28 @@ describe("execution scopes", () => {
       cwd: "/repo",
       exports: { bad: { producer: "utility", value: () => undefined } },
     })).toThrow("must be structured-cloneable");
+  });
+
+  test("preserves export names that are inherited properties on ordinary objects", () => {
+    const exports = Object.fromEntries([
+      ["__proto__", { producer: "utility", value: { opaque: true } }],
+    ]);
+    const scope = createExecutionScope({ id: "scope", cwd: "/repo", exports });
+
+    expect(Object.hasOwn(scope.exports, "__proto__")).toBe(true);
+    expect(scope.exports.__proto__).toEqual({ producer: "utility", value: { opaque: true } });
+  });
+
+  test("bounds producer-owned exports for durable snapshots", () => {
+    const tooMany = Object.fromEntries(Array.from({ length: MAX_EXECUTION_SCOPE_EXPORTS + 1 }, (_, index) => [
+      `export-${index}`,
+      { producer: "utility", value: index },
+    ]));
+    expect(() => createExecutionScope({ id: "scope", cwd: "/repo", exports: tooMany })).toThrow("at most");
+    expect(() => createExecutionScope({
+      id: "scope",
+      cwd: "/repo",
+      exports: { oversized: { producer: "utility", value: "x".repeat(MAX_EXECUTION_SCOPE_EXPORT_BYTES) } },
+    })).toThrow("exceeds");
   });
 });

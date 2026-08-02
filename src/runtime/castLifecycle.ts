@@ -166,7 +166,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     runState.currentSocketId = pipeline.entry.id;
     runState.currentMateria = socketMateriaName(pipeline.entry);
     runState.lastMessage = pipeline.entry.id;
-    await deps.artifacts.initializeRun(runDir, config, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), entries: [] });
+    await deps.artifacts.initializeRun(runDir, config, { castId, request, configSource: loaded.source, sessionFile: ctx.sessionManager.getSessionFile(), executionScopes: "execution-scopes.json", entries: [] });
     await deps.artifacts.writeUsage(runState);
     // Enrich cast_start artifact with resolved per-socket materia names and
     // multiTurn flags so future misconfigurations are diagnosable at a glance.
@@ -183,6 +183,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       cwd: ctx.cwd,
       baseScope,
       activeScope,
+      branchScopes: {},
       runDir,
       artifactRoot,
       phase: pipeline.entry.id,

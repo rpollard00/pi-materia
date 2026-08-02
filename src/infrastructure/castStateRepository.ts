@@ -1,7 +1,12 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { restoreExecutionScopes } from "../domain/executionScope.js";
 import type { MateriaCastState } from "../types.js";
 
 export const MATERIA_CAST_STATE_ENTRY = "pi-materia-cast-state";
+export const MATERIA_EXECUTION_SCOPES_FILE = "execution-scopes.json";
+let scopeSnapshotSequence = 0;
 
 export interface SessionBackedCastStateRepository {
   loadActive(ctx: ExtensionContext): MateriaCastState | undefined;
@@ -38,7 +43,7 @@ export function listLatestCastStates(ctx: ExtensionContext): MateriaCastState[] 
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "custom" || entry.customType !== MATERIA_CAST_STATE_ENTRY || !entry.data) continue;
-    const state = cloneCastState(entry.data as MateriaCastState);
+    const state = restoreCastState(entry.data);
     if (!state.castId || seenCastIds.has(state.castId)) continue;
     seenCastIds.add(state.castId);
     states.push(state);
@@ -61,7 +66,7 @@ export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | u
   for (let i = entries.length - 1; i >= 0; i--) {
     const entry = entries[i];
     if (entry.type !== "custom" || entry.customType !== MATERIA_CAST_STATE_ENTRY || !entry.data) continue;
-    const state = cloneCastState(entry.data as MateriaCastState);
+    const state = restoreCastState(entry.data);
     if (!latest) latest = state;
     if (seenCastIds.has(state.castId)) continue;
     seenCastIds.add(state.castId);
@@ -71,8 +76,45 @@ export function loadActiveCastState(ctx: ExtensionContext): MateriaCastState | u
 }
 
 export function saveCastState(pi: ExtensionAPI, state: MateriaCastState): void {
+  const scopes = restoreExecutionScopes(state);
+  state.version = 2;
+  state.baseScope = scopes.baseScope;
+  state.activeScope = scopes.activeScope;
+  state.branchScopes = scopes.branchScopes;
   state.updatedAt = Date.now();
+  writeExecutionScopeSnapshot(state);
   pi.appendEntry(MATERIA_CAST_STATE_ENTRY, cloneCastState(state));
+}
+
+/** Validate a session DTO and migrate cwd-only version-one casts in memory. */
+export function restoreCastState(value: unknown): MateriaCastState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("persisted cast state must be a plain object.");
+  const raw = value as Partial<MateriaCastState> & { version?: unknown };
+  const scopes = restoreExecutionScopes({
+    castId: raw.castId as string,
+    cwd: raw.cwd as string,
+    version: raw.version,
+    baseScope: raw.baseScope,
+    activeScope: raw.activeScope,
+    branchScopes: raw.branchScopes,
+  });
+  const state = cloneCastState(value as MateriaCastState);
+  state.version = 2;
+  state.baseScope = scopes.baseScope;
+  state.activeScope = scopes.activeScope;
+  state.branchScopes = scopes.branchScopes;
+  return state;
+}
+
+function writeExecutionScopeSnapshot(state: MateriaCastState): void {
+  if (typeof state.runDir !== "string" || state.runDir.trim().length === 0) throw new Error("persisted cast runDir must be a non-empty string.");
+  const file = path.join(state.runDir, MATERIA_EXECUTION_SCOPES_FILE);
+  const temporary = `${file}.${process.pid}.${++scopeSnapshotSequence}.tmp`;
+  const branches = Object.fromEntries(Object.entries(state.branchScopes).sort(([left], [right]) => left.localeCompare(right)));
+  const snapshot = { version: 1, castId: state.castId, baseScope: state.baseScope, activeScope: state.activeScope, branchScopes: branches };
+  mkdirSync(state.runDir, { recursive: true });
+  writeFileSync(temporary, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
+  renameSync(temporary, file);
 }
 
 export function clearCastState(pi: ExtensionAPI, state: MateriaCastState, reason = "aborted"): MateriaCastState {

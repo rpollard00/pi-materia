@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { nativeTestInternals } from "../src/castRuntime.js";
 import { applyEventingEnvOverlay } from "../src/config/config.js";
+import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
 import { EventBus, LocalEventRecordingSink, createEventBus, flushBusOutcomes } from "../src/runtime/eventBus.js";
 import {
   ResultAccumulator,
@@ -57,6 +58,7 @@ async function tempDir(): Promise<string> {
 }
 
 function makeCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
+  const baseScope = createBaseExecutionScope("2026-06-16T22-00-00-000Z", "/tmp/test");
   const base: MateriaCastState = {
     version: 2,
     active: true,
@@ -65,6 +67,9 @@ function makeCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
     configSource: "test",
     configHash: "test-hash",
     cwd: "/tmp/test",
+    baseScope,
+    activeScope: cloneExecutionScope(baseScope),
+    branchScopes: {},
     runDir: "/tmp/test-run",
     artifactRoot: "/tmp/artifacts",
     phase: "Socket-1",

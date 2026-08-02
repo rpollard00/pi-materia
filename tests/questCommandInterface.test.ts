@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import piMateria from "../src/index.js";
 import { loadActiveCastState, listLatestCastStates, listRevivableCastStates } from "../src/castRuntime.js";
+import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
 import { findNextPendingQuest, type Quest, type QuestBoard, type QuestStatus } from "../src/domain/questBoard.js";
 import { renderQuestList, renderQuestStatus, selectQuestList } from "../src/presentation/questBoard.js";
 import { FakePiHarness, type FakePiHarnessOptions } from "./fakePi.js";
@@ -934,6 +935,8 @@ describe("/materia quest command interface", () => {
 });
 
 function makeBaseCastState(castId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const cwd = process.cwd();
+  const baseScope = createBaseExecutionScope(castId, cwd);
   return {
     version: 2,
     active: false,
@@ -941,9 +944,12 @@ function makeBaseCastState(castId: string, extra: Record<string, unknown> = {}):
     request: "test",
     configSource: ".pi/pi-materia.json",
     configHash: "test",
-    cwd: process.cwd(),
-    runDir: path.join(process.cwd(), ".pi/pi-materia", castId),
-    artifactRoot: path.join(process.cwd(), ".pi/pi-materia"),
+    cwd,
+    baseScope,
+    activeScope: cloneExecutionScope(baseScope),
+    branchScopes: {},
+    runDir: path.join(cwd, ".pi/pi-materia", castId),
+    artifactRoot: path.join(cwd, ".pi/pi-materia"),
     phase: "failed",
     socketState: "failed",
     awaitingResponse: false,
@@ -958,7 +964,7 @@ function makeBaseCastState(castId: string, extra: Record<string, unknown> = {}):
     edgeTraversals: {},
     runState: {
       castId,
-      runDir: path.join(process.cwd(), ".pi/pi-materia", castId),
+      runDir: path.join(cwd, ".pi/pi-materia", castId),
       usage: { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, byMateria: {}, bySocket: {}, byTask: {}, byAttempt: {} },
     },
     pipeline: { entry: { id: "Socket-1", socket: { materia: "Build" }, materia: { tools: "readOnly", prompt: "" } }, sockets: {} },

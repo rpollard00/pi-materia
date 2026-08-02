@@ -35,7 +35,7 @@ describe("WebUI active loadout launcher callback", () => {
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     const configuredPath = path.join(cwd, "missing-if-persisted.json");
     const harness = new FakePiHarness(cwd);
-    harness.sessionManager.appendCustom("pi-materia-cast-state", { castId: "cast-123", active: true });
+    harness.sessionManager.appendCustom("pi-materia-cast-state", { version: 1, castId: "cast-123", cwd, runDir: path.join(cwd, "cast-123"), active: true });
     const setActiveLoadout = webUiLauncherTestInternals.createActiveLoadoutSetter(harness.ctx, configuredPath, harness.pi);
 
     const result = await setActiveLoadout?.("Web-Test-B");

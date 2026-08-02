@@ -429,6 +429,8 @@ export interface MateriaCastState {
   baseScope: ExecutionScope;
   /** Explicit scope used by the currently executing cast socket. */
   activeScope: ExecutionScope;
+  /** Durable branch scope snapshots keyed by their stable scope identity. */
+  branchScopes: Record<string, ExecutionScope>;
   runDir: string;
   artifactRoot: string;
   phase: MateriaCastPhase;
@@ -632,6 +634,8 @@ export interface MateriaManifest {
   request: string;
   configSource: string;
   sessionFile?: string;
+  /** Relative path to the latest durable execution-scope snapshot. */
+  executionScopes?: string;
   entries: MateriaManifestEntry[];
 }
 
