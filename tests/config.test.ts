@@ -820,9 +820,12 @@ describe("config loadouts", () => {
     expect(experimental).toMatchObject({ id: "default:parallel-experimental", lockState: "locked" });
     expect(rawDefault.parallelism).toEqual({ maxConcurrency: 2 });
     expect(experimental?.loops?.parallelWork?.parallel).toEqual({});
-    for (const id of ["Parallel-Plan", "Parallel-Integration-Eval", "Parallel-Resolver"]) {
+    for (const id of ["Parallel-Plan", "Integration-Review"]) {
       expect(rawDefault.materia?.[id]?.lockState, id).toBe("locked");
     }
+    expect(rawDefault.materia?.["Parallel-Integration-Eval"]).toBeUndefined();
+    expect(rawDefault.materia?.["Parallel-Resolver"]).toBeUndefined();
+    expect(rawDefault.materia?.["Integration-Review"]).toMatchObject({ type: "agent", tools: "coding", parse: "json" });
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
     for (const id of ["Build", "Auto-Eval", "Parallel-Lane-Checkpoint"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
@@ -854,8 +857,14 @@ describe("config loadouts", () => {
       expect(loaded.config.parallelism).toEqual({ maxConcurrency: 2 });
       expect(pipeline.loops?.parallelWork?.exits).toEqual(expect.arrayContaining([
         expect.objectContaining({ condition: "satisfied", targetSocketId: "Socket-9" }),
-        expect.objectContaining({ condition: "not_satisfied", targetSocketId: "Socket-10" }),
+        expect.objectContaining({ condition: "not_satisfied", targetSocketId: "Socket-9" }),
       ]));
+      expect(pipeline.sockets["Socket-9"].materia).toMatchObject({ type: "agent", tools: "coding" });
+      expect(pipeline.sockets["Socket-9"].socket.edges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ when: "satisfied", to: "Socket-10" }),
+        expect.objectContaining({ when: "not_satisfied", to: "Socket-9" }),
+      ]));
+      expect(pipeline.sockets["Socket-10"].materiaId).toBe("Parallel-Finalize");
       expect(pipeline.sockets["Socket-6"].materia).toMatchObject({ parallelSafe: true });
       expect(pipeline.sockets["Socket-7"].materia).toMatchObject({ parallelSafe: true });
       expect(pipeline.sockets["Socket-8"].materia).toMatchObject({ parallelSafe: true });
@@ -1003,8 +1012,7 @@ describe("config loadouts", () => {
       ["Parallel-Finalize", "json"],
       ["Auto-Architect", "json"],
       ["Parallel-Plan", "json"],
-      ["Parallel-Integration-Eval", "json"],
-      ["Parallel-Resolver", "json"],
+      ["Integration-Review", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],
       ["Auto-Eval", "json"],

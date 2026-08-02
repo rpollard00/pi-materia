@@ -485,14 +485,13 @@ function validateParallelLoopTopology(
     errors.push({
       code: "invalid-loop",
       source: `${loopPath}.exits`,
-      message: `Parallel loop "${loopId}" must define compatible fan-in exits from one terminal boundary: a satisfied clean-join route and a not_satisfied conflict/resolver route.`,
+      message: `Parallel loop "${loopId}" must define compatible fan-in exits from one terminal boundary for both clean and conflicted integration outcomes.`,
     });
   } else {
-    validateParallelFanInTarget(errors, graph, loopId, cleanRoute, loopSet, "clean join");
-    validateParallelFanInTarget(errors, graph, loopId, conflictRoute, loopSet, "conflict resolver");
-    if (cleanRoute.targetSocketId === conflictRoute.targetSocketId) {
-      errors.push({ code: "invalid-loop", source: `${loopPath}.exits`, message: `Parallel loop "${loopId}" routes clean fan-in and conflicted fan-in to the same socket "${cleanRoute.targetSocketId}"; configure distinct join and resolver boundaries.` });
-    }
+    validateParallelFanInTarget(errors, graph, loopId, cleanRoute, loopSet, "clean integration review");
+    validateParallelFanInTarget(errors, graph, loopId, conflictRoute, loopSet, "conflicted integration review");
+    // Both outcomes may intentionally converge on one coding-capable review
+    // agent. Distinct targets remain load-compatible for legacy profiles.
   }
 
   if (exit?.to && exit.to !== "end") {

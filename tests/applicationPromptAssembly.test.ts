@@ -368,6 +368,61 @@ describe("application prompt assembly", () => {
     expect(syntheticFinalization).toContain("Intrinsic parallel planning");
   });
 
+  test("supplies bounded conflict context to the coding agent in an integrated scope", () => {
+    const socket = agentSocket({
+      socket: { materia: "Integration-Review", parse: "json" },
+      materia: { type: "agent", tools: "coding", prompt: defaultMateriaPrompt("Integration-Review") },
+    });
+    const longPath = `src/${"x".repeat(700)}.ts`;
+    const castState = state(socket, {
+      activeScope: {
+        id: "cast:cast-1:integration",
+        cwd: "/tmp/integration-workspace",
+        exports: {},
+        state: {
+          jjWorkspaceIntegration: {
+            version: 1,
+            outcome: "conflict",
+            sourceCount: 3,
+            integrationRevision: { commitId: "abc123", changeId: "change-1" },
+            conflictedPaths: ["src/a.ts", longPath],
+            conflictDetails: [{ path: "src/a.ts", message: "both branches changed this function" }],
+          },
+        },
+      },
+      data: {
+        jjWorkspaceIntegration: { outcome: "conflict", secretUnboundedField: "must-not-leak" },
+      },
+    } as Partial<MateriaCastState>);
+
+    const synthetic = buildSyntheticCastContext(castState);
+    expect(synthetic).toContain("Integrated workspace review context:");
+    expect(synthetic).toContain('"cast:cast-1:integration"');
+    expect(synthetic).toContain('"/tmp/integration-workspace"');
+    expect(synthetic).toContain("materialized conflict workspace integration");
+    expect(synthetic).toContain("src/a.ts: both branches changed this function");
+    expect(synthetic).toContain("Resolve all integration conflicts");
+    expect(synthetic).toContain("satisfied:false");
+    expect(synthetic).not.toContain("secretUnboundedField");
+    expect(synthetic).not.toContain(longPath);
+  });
+
+  test("supplies clean integration spot-check guidance without conflict instructions", () => {
+    const socket = agentSocket({ socket: { materia: "Integration-Review", parse: "json" } });
+    const synthetic = buildSyntheticCastContext(state(socket, {
+      activeScope: {
+        id: "integration-clean",
+        cwd: "/tmp/clean",
+        exports: {},
+        state: { jjWorkspaceIntegration: { outcome: "clean", sourceCount: 1, conflictedPaths: [] } },
+      },
+    } as Partial<MateriaCastState>));
+
+    expect(synthetic).toContain("reports no conflicts");
+    expect(synthetic).toContain("Spot-check the combined work");
+    expect(synthetic).not.toContain("Bounded conflict context");
+  });
+
   test("non-generator JSON sockets keep only concise JSON-only final output guidance", () => {
     const socket = agentSocket({
       socket: { materia: "Check", parse: "json" },

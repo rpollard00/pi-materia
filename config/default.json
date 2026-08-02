@@ -481,16 +481,16 @@
           ],
           "exits": [
             {
-              "id": "parallel-clean-fan-in",
+              "id": "parallel-integration-clean",
               "from": "Socket-8",
               "condition": "satisfied",
               "targetSocketId": "Socket-9"
             },
             {
-              "id": "parallel-conflict-resolver",
+              "id": "parallel-integration-conflict",
               "from": "Socket-8",
               "condition": "not_satisfied",
-              "targetSocketId": "Socket-10"
+              "targetSocketId": "Socket-9"
             }
           ]
         }
@@ -585,42 +585,31 @@
         },
         "Socket-9": {
           "socketKind": "normal",
-          "materia": "Parallel-Integration-Eval",
+          "materia": "Integration-Review",
           "parse": "json",
           "edges": [
             {
               "when": "satisfied",
-              "to": "Socket-11"
+              "to": "Socket-10"
             },
             {
               "when": "not_satisfied",
-              "to": "Socket-10",
+              "to": "Socket-9",
               "maxTraversals": 3
             }
           ]
         },
         "Socket-10": {
           "socketKind": "normal",
-          "materia": "Parallel-Resolver",
-          "parse": "json",
-          "edges": [
-            {
-              "when": "always",
-              "to": "Socket-9"
-            }
-          ]
-        },
-        "Socket-11": {
-          "socketKind": "normal",
           "materia": "Parallel-Finalize",
           "edges": [
             {
               "when": "always",
-              "to": "Socket-12"
+              "to": "Socket-11"
             }
           ]
         },
-        "Socket-12": {
+        "Socket-11": {
           "socketKind": "normal",
           "materia": "Narrate",
           "parse": "text"
@@ -703,27 +692,10 @@
       "parse": "json",
       "parallelSafe": true
     },
-    "Parallel-Integration-Eval": {
-      "type": "agent",
-      "tools": {
-        "type": "custom",
-        "tools": [
-          "read",
-          "grep",
-          "find",
-          "ls",
-          "bash"
-        ]
-      },
-      "prompt": "You are the pi-materia Parallel-Integration-Eval materia materia. Evaluate the single jj integration revision produced by the experimental parallel coordinator after clean fan-in or resolver repair. Inspect the integrated repository state and relevant tests without modifying files. Accept only when the integration is conflict-free and satisfies the original request; explain actionable failures in context. Return compact JSON with satisfied and explanatory context. Do not emit a top-level text field.",
-      "color": "materia-color-yellow",
-      "parse": "json",
-      "lockState": "locked"
-    },
-    "Parallel-Resolver": {
+    "Integration-Review": {
       "type": "agent",
       "tools": "coding",
-      "prompt": "You are the pi-materia Parallel-Resolver materia materia. Repair the conflicted jj integration revision in the parent workspace after every parallel lane has been accepted. Resolve only the reported integration conflicts, preserve the accepted lane heads, inspect the conflict state, and run focused checks when useful. Do not rerun lanes, replan streams, advance the bookmark, or publish changes. Return compact JSON with satisfied and explanatory context; do not emit a top-level text field.",
+      "prompt": "You are the pi-materia Integration-Review materia. Review the materialized workspace integration in the active execution scope for every integration outcome. When conflicts are present, resolve them while preserving the intent of all accepted branches. When the integration is clean, spot-check the combined implementation for cross-branch defects. Run relevant checks and make any corrections needed for acceptance. Do not rerun branches, replan work, publish revisions, advance bookmarks, finalize, or clean workspaces. Return compact JSON with satisfied and explanatory context. Set satisfied true only when conflicts are resolved and the integrated result satisfies the original request; otherwise set satisfied false with actionable context for the ordinary retry route. Do not emit a top-level text field.",
       "color": "materia-color-green",
       "parse": "json",
       "lockState": "locked"

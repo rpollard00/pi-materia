@@ -432,6 +432,10 @@ describe("graph validation foundation", () => {
 
     expect(validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).toEqual({ ok: true, errors: [] });
 
+    const unifiedReview = structuredClone(graph);
+    unifiedReview.loops!.parallelWork!.exits![1]!.targetSocketId = "Socket-4";
+    expect(validatePipelineGraph(unifiedReview, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).toEqual({ ok: true, errors: [] });
+
     const malformedExit = structuredClone(graph);
     (malformedExit.loops!.parallelWork!.exits as unknown as unknown[])[0] = null;
     expect(() => validatePipelineGraph(malformedExit, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).not.toThrow();

@@ -14,6 +14,7 @@ import { effectiveResolvedSocketConfig } from "../runtime/resolvedMateria.js";
 import type { MateriaAgentConfig, MateriaCastState, MateriaJsonOutputValidationKind, ResolvedMateriaAgentSocket, ResolvedMateriaSocket } from "../types.js";
 import { renderReworkFeedbackPromptContext } from "./reworkFeedback.js";
 import { isMateriaDisplayNoise, stripEventSideChannelField, stripRenderableTextField } from "./handoffPromptSanitization.js";
+import { syntheticIntegrationReviewContext } from "./integrationReviewContext.js";
 import { currentItem, getPath, isPlainObject, readObjectField } from "./workflowTransitions.js";
 
 // Central prompt assembly policy for the handoff contract:
@@ -328,6 +329,7 @@ export function buildSyntheticCastContext(state: MateriaCastState): string {
     multiTurnRefining ? multiTurnRefinementGuidance() : undefined,
     syntheticHandoffContractContext(state),
     syntheticEventEmissionContext(state),
+    syntheticIntegrationReviewContext(state.activeScope),
     "",
     `Cast id: ${state.castId}`,
     `Original request: ${state.request}`,
@@ -403,9 +405,14 @@ export function sanitizePreviousOutput(state: MateriaCastState): string | undefi
 }
 
 function promptVisibleCastData(data: Record<string, unknown>): Record<string, unknown> {
-  if (!Object.prototype.hasOwnProperty.call(data, PARALLEL_SCHEDULE_FIELD)) return data;
+  const hidesParallelSchedule = Object.prototype.hasOwnProperty.call(data, PARALLEL_SCHEDULE_FIELD);
+  const hidesIntegrationSummary = Object.prototype.hasOwnProperty.call(data, "jjWorkspaceIntegration");
+  if (!hidesParallelSchedule && !hidesIntegrationSummary) return data;
   const visible = { ...data };
   delete visible[PARALLEL_SCHEDULE_FIELD];
+  // Integration details are exposed through a bounded, purpose-specific
+  // synthetic section rather than duplicated as unrestricted generic state.
+  delete visible.jjWorkspaceIntegration;
   return visible;
 }
 
