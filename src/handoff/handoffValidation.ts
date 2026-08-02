@@ -6,9 +6,10 @@ import {
   HANDOFF_TEXT_FIELD,
   HANDOFF_WORK_ITEMS_FIELD,
 } from "./handoffContract.js";
-import { formatHandoffWorkItemShape, parseHandoffWorkItem } from "../domain/handoff.js";
+import { formatHandoffWorkItemShape, parseHandoffWorkItem, type HandoffWorkItem } from "../domain/handoff.js";
+import { normalizeParallelPlan } from "../handoff/parallelPlan.js";
 import { deriveSocketOutputRequirements, socketConsumesSatisfied, type SocketOutputFieldType, type SocketOutputRequirements } from "./socketOutputRequirements.js";
-import { PARALLEL_SCHEDULE_FIELD, validateParallelSchedule } from "./parallelSchedule.js";
+import { PARALLEL_SCHEDULE_FIELD } from "./parallelSchedule.js";
 import type { MateriaPipelineSocketConfig } from "../types.js";
 
 export interface HandoffValidationOptions {
@@ -143,7 +144,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
   }
 
   if (parallelScheduleAllowed && Object.prototype.hasOwnProperty.call(value, PARALLEL_SCHEDULE_FIELD) && Array.isArray(value.workItems)) {
-    const scheduleResult = validateParallelSchedule(value[PARALLEL_SCHEDULE_FIELD], value.workItems.length);
+    const scheduleResult = normalizeParallelPlan(value.workItems as HandoffWorkItem[], value[PARALLEL_SCHEDULE_FIELD]);
     if (!scheduleResult.ok) {
       for (const issue of scheduleResult.issues) {
         issues.push({

@@ -1,4 +1,5 @@
 import { canonicalGeneratorConfigFor, isParallelGeneratorMateria } from "../graph/generator.js";
+import { normalizeParallelPlan, type NormalizedParallelPlan } from "../handoff/parallelPlan.js";
 import { recordParallelFinalization } from "../domain/parallelRun.js";
 import type { MateriaParallelFinalizationProvenance, MateriaParallelRevisionIdentity } from "../domain/parallelRunTypes.js";
 import {
@@ -8,13 +9,17 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   pickHandoffEnvelopeFields,
 } from "../domain/handoff.js";
-import { PARALLEL_SCHEDULE_FIELD, cloneParallelSchedule, isParallelSchedule } from "../handoff/parallelSchedule.js";
+import { PARALLEL_SCHEDULE_FIELD } from "../handoff/parallelSchedule.js";
 import type { MateriaCastState, ResolvedMateriaSocket } from "../types.js";
 import { isPlainObject } from "./workflowTransitions.js";
 
 export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unknown, socket?: ResolvedMateriaSocket): void {
   if (!isPlainObject(parsed)) return;
 
+  // Compute the complete intrinsic planner commit before touching cast state.
+  // The ordinary socket path already validated this output; keeping this guard
+  // here prevents direct/replay callers from partially adopting a bad plan.
+  const parallelCommit = prepareParallelGeneratorCommit(parsed, socket);
   const finalization = extractParallelFinalization(parsed, socket);
   applyUtilityStatePatch(state, parsed, socket);
   if (finalization) applyParallelFinalization(state, finalization);
@@ -33,19 +38,40 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
   if (Object.keys(envelope).length > 0) state.data.envelope = envelope;
 
   const workItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
-  if (hasOwn(parsed, HANDOFF_WORK_ITEMS_FIELD) && Array.isArray(workItems) && shouldAdoptEnvelopeWorkItems(state, socket)) {
+  if (parallelCommit) {
+    const { parallelSchedule: _obsoleteSchedule, ...retainedData } = state.data;
+    state.data = {
+      ...retainedData,
+      workItems: parallelCommit.workItems,
+      parallelPlan: parallelCommit.plan,
+    };
+  } else if (hasOwn(parsed, HANDOFF_WORK_ITEMS_FIELD) && Array.isArray(workItems) && shouldAdoptEnvelopeWorkItems(state, socket)) {
     state.data.workItems = workItems;
   }
   const context = parsed[HANDOFF_CONTEXT_FIELD];
   if (hasOwn(parsed, HANDOFF_CONTEXT_FIELD) && typeof context === "string") state.data.context = appendAgentContext(state.data.context, context, socket);
+}
 
-  // The sidecar is runtime-owned planner state for the deterministic
-  // normalizer. Keep it in an explicit state slot, never in the generic
-  // handoff envelope/context mirror; prompt assembly redacts this slot from
-  // ordinary downstream agent context.
-  if (isParallelGeneratorMateria(socket?.materia) && isParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD])) {
-    state.data[PARALLEL_SCHEDULE_FIELD] = cloneParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD]);
+interface ParallelGeneratorCommit {
+  workItems: Array<{ title: string; context: string }>;
+  plan: NormalizedParallelPlan;
+}
+
+function prepareParallelGeneratorCommit(parsed: Record<string, unknown>, socket?: ResolvedMateriaSocket): ParallelGeneratorCommit | undefined {
+  if (!isParallelGeneratorMateria(socket?.materia)) return undefined;
+  const rawWorkItems = parsed[HANDOFF_WORK_ITEMS_FIELD];
+  if (!Array.isArray(rawWorkItems)) throw new Error("Parallel generator handoff requires canonical workItems before commit.");
+  const workItems = rawWorkItems.map((item) => {
+    if (!isPlainObject(item) || typeof item.title !== "string" || typeof item.context !== "string") {
+      throw new Error("Parallel generator handoff contains a malformed work item before commit.");
+    }
+    return { title: item.title, context: item.context };
+  });
+  const normalized = normalizeParallelPlan(workItems, parsed[PARALLEL_SCHEDULE_FIELD]);
+  if (!normalized.ok) {
+    throw new Error(`Parallel generator handoff could not be normalized: ${normalized.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
   }
+  return { workItems, plan: normalized.value };
 }
 
 function applyUtilityStatePatch(state: MateriaCastState, parsed: Record<string, unknown>, socket?: ResolvedMateriaSocket): void {

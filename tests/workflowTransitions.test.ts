@@ -85,6 +85,36 @@ describe("workflow transitions", () => {
     expect(cast.data.envelope).toEqual({ context: "Plan created.", workItems });
   });
 
+  test("parallel generator atomically adopts workItems and its intrinsic normalized plan", () => {
+    const cast = state({ data: { workItems: [{ title: "Old", context: "Old." }], parallelSchedule: { stale: true } } });
+    const planner = {
+      id: "Parallel-Planner",
+      socket: { id: "Parallel-Planner", type: "agent", materia: "Planner", parse: "json" },
+      materia: { tools: "readOnly", prompt: "plan", generator: true, parallel: true },
+    } as ResolvedMateriaSocket;
+    const output = {
+      workItems: [{ title: "New", context: "New." }],
+      parallelSchedule: { version: 1, streams: [{ name: "main", workItemIndexes: [0] }] },
+    };
+
+    applyGenericHandoffEnvelope(cast, output, planner);
+
+    expect(cast.data.workItems).toEqual(output.workItems);
+    expect(cast.data.parallelPlan).toMatchObject({
+      version: 1,
+      workItemCount: 1,
+      streams: [{ laneId: "lane-main", name: "main", streamIndex: 0, workItemIndexes: [0] }],
+    });
+    expect(cast.data).not.toHaveProperty("parallelSchedule");
+
+    const beforeInvalidCommit = structuredClone(cast.data);
+    expect(() => applyGenericHandoffEnvelope(cast, {
+      workItems: [{ title: "Broken", context: "Broken." }],
+      parallelSchedule: { version: 1, streams: [] },
+    }, planner)).toThrow(/not assigned/);
+    expect(cast.data).toEqual(beforeInvalidCommit);
+  });
+
   test("sparse evaluator output updates satisfied and context without adopting obsolete evaluator fields", () => {
     const cast = state({
       data: {

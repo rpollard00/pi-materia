@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { HandoffWorkItem } from "../domain/handoff.js";
+import type { NormalizedParallelPlan, NormalizedParallelStream } from "../handoff/parallelPlan.js";
 import type { ParallelFanInResult } from "../domain/parallelFanIn.js";
 import type {
   MateriaCastState,
@@ -11,20 +12,8 @@ import type {
   MateriaParallelWorkspaceOwnership,
 } from "../types.js";
 
-/** The normalized plan consumed by a parallel loop coordinator. */
-export interface NormalizedParallelPlan {
-  version: 1;
-  planId: string;
-  workItemCount: number;
-  streams: readonly NormalizedParallelStream[];
-}
-
-export interface NormalizedParallelStream {
-  laneId: string;
-  name: string;
-  streamIndex: number;
-  workItemIndexes: readonly number[];
-}
+/** Canonical plan DTOs are owned by the intrinsic core normalizer. */
+export type { NormalizedParallelPlan, NormalizedParallelStream } from "../handoff/parallelPlan.js";
 
 /** A small revision DTO shared by the runtime and the jj adapter. */
 export interface ParallelWorkspaceRevision extends MateriaParallelRevisionIdentity {}
