@@ -77,7 +77,10 @@ describe("parallel loop child loadout compiler", () => {
         },
       },
     });
-    expect(result.value.initialData).toEqual({ workItems: [{ title: "A", context: "first" }, { title: "B", context: "second" }] });
+    expect(result.value.initialData).toEqual({
+      workItems: [{ title: "A", context: "first" }, { title: "B", context: "second" }],
+      workItemIndexes: [0, 1],
+    });
     expect(result.value.socketIdRemapping).toEqual([
       { sourceSocketId: "Socket-2", childSocketId: "Socket-1" },
       { sourceSocketId: "Socket-3", childSocketId: "Socket-2" },
@@ -117,7 +120,73 @@ describe("parallel loop child loadout compiler", () => {
       stream: { laneId: "lane-api", name: "api", workItemIndexes: [2, 0] },
     });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.value.initialData.workItems.map((item) => item.title)).toEqual(["two", "zero"]);
+    if (result.ok) {
+      expect(result.value.initialData.workItems.map((item) => item.title)).toEqual(["two", "zero"]);
+      expect(result.value.initialData.workItemIndexes).toEqual([2, 0]);
+    }
+  });
+
+  test("starts at the generator successor, runs the complete prelude, and strips recursive parallel capability", () => {
+    const authored = parallelLoadout();
+    authored.sockets!["Socket-1"]!.edges = [{ when: "always", to: "Socket-4" }];
+    authored.sockets!["Socket-4"] = {
+      materia: "Spawn-Scope",
+      parse: "json",
+      assign: { scope: "$.scope" },
+      foreach: { items: "state.setupItems", as: "setupItem", cursor: "setupItemIndex", done: "Socket-2" },
+      advance: { items: "state.setupItems", cursor: "setupItemIndex", when: "satisfied", done: "Socket-2" },
+      edges: [{ when: "always", to: "Socket-2", maxTraversals: 3 }],
+    };
+    authored.loops!.work!.exits![1]!.targetSocketId = "Socket-10";
+    const resolved: ResolvedMateriaPipeline = {
+      entry: { id: "Socket-1", socket: authored.sockets!["Socket-1"]!, materia: { type: "agent", generator: true, parallel: true, prompt: "plan" } },
+      sockets: {
+        "Socket-1": { id: "Socket-1", socket: authored.sockets!["Socket-1"]!, materia: { type: "agent", generator: true, parallel: true, prompt: "plan" } },
+        "Socket-2": { id: "Socket-2", socket: authored.sockets!["Socket-2"]!, materia: { type: "agent", tools: "readWrite", prompt: "build" } },
+        "Socket-3": { id: "Socket-3", socket: authored.sockets!["Socket-3"]!, materia: { type: "utility", utility: "eval" } },
+        "Socket-4": { id: "Socket-4", socket: authored.sockets!["Socket-4"]!, materia: { type: "utility", utility: "spawn-scope", generator: true, parallel: true } },
+        "Socket-9": { id: "Socket-9", socket: authored.sockets!["Socket-9"]!, materia: { type: "utility", utility: "after" } },
+        "Socket-10": { id: "Socket-10", socket: authored.sockets!["Socket-10"]!, materia: { type: "utility", utility: "join" } },
+        "Socket-11": { id: "Socket-11", socket: authored.sockets!["Socket-11"]!, materia: { type: "utility", utility: "resolve" } },
+      },
+      loops: authored.loops,
+    } as unknown as ResolvedMateriaPipeline;
+
+    const result = compileLoopRegionToChildLoadout({
+      pipeline: resolved,
+      loopId: "work",
+      workItems: [{ title: "zero", context: "0" }, { title: "one", context: "1" }],
+      workItemIndexes: [1],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const child = result.value.loadout as ResolvedMateriaPipeline;
+    expect(result.value.sourceEntrySocketId).toBe("Socket-4");
+    expect(child.entry.id).toBe(result.value.socketIdMap["Socket-4"]);
+    expect(result.value.socketIdRemapping.map(({ sourceSocketId }) => sourceSocketId)).toEqual(["Socket-2", "Socket-3", "Socket-4"]);
+    const prelude = child.sockets[result.value.socketIdMap["Socket-4"]!]!;
+    expect(prelude.socket).toMatchObject({
+      parse: "json",
+      assign: { scope: "$.scope" },
+      foreach: {
+        items: "state.setupItems",
+        as: "setupItem",
+        cursor: "setupItemIndex",
+        done: result.value.socketIdMap["Socket-2"],
+      },
+      advance: {
+        items: "state.setupItems",
+        cursor: "setupItemIndex",
+        when: "satisfied",
+        done: result.value.socketIdMap["Socket-2"],
+      },
+      edges: [{ when: "always", to: result.value.socketIdMap["Socket-2"], maxTraversals: 3 }],
+    });
+    expect(prelude.materia).toMatchObject({ type: "utility", utility: "spawn-scope" });
+    expect((prelude.materia as { parallel?: boolean }).parallel).toBeUndefined();
+    expect(child.loops?.work?.sockets).toEqual([result.value.socketIdMap["Socket-2"], result.value.socketIdMap["Socket-3"]]);
+    expect(result.value.initialData).toEqual({ workItems: [{ title: "one", context: "1" }], workItemIndexes: [1] });
+    expect(child.sockets[result.value.socketIdMap["Socket-1"] ?? "missing"]).toBeUndefined();
   });
 
   test("rejects empty or malformed lane streams before compiling a child", () => {

@@ -2,6 +2,7 @@ import { parseHandoffWorkItem, type HandoffWorkItem } from "../domain/handoff.js
 import { ok, type DomainIssue, type DomainResult } from "../domain/result.js";
 import { TERMINAL_ADVANCE_TARGET } from "../domain/socket.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
+import { deriveParallelBranchRegions } from "./parallelRegions.js";
 import type {
   MateriaLoopConfig,
   MateriaPipelineConfig,
@@ -51,7 +52,7 @@ export interface CompiledLoopChildLoadout<TLoadout extends LoopCompilerPipeline 
   /** Resolved graph form, available when the input was resolved. */
   resolvedLoadout?: ResolvedMateriaPipeline;
   /** The only mutable state a child lane is seeded with. */
-  initialData: { workItems: HandoffWorkItem[] };
+  initialData: { workItems: HandoffWorkItem[]; workItemIndexes: number[] };
   /** Stable source-to-child socket remapping, ordered by child socket identity. */
   socketIdMap: Readonly<Record<string, string>>;
   /** Stable remapping records useful for artifacts and event provenance. */
@@ -120,33 +121,50 @@ export function compileLoopRegionToChildLoadout(
   if (memberIds.length === 0) return { ok: false, issues };
   const memberSet = new Set(memberIds);
 
-  const sourceEntrySocketId = findChildEntry(loop, memberSet, sourceSocketMap, input.loopId, issues);
+  // A capability-derived region includes the acyclic branch prelude. Legacy
+  // callers which compile an ordinary loop still receive the loop-only child.
+  const regionResult = deriveParallelBranchRegions(source);
+  if (!regionResult.ok) return { ok: false, issues: [...issues, ...regionResult.issues] };
+  const region = regionResult.value.find((candidate) => candidate.loopId === input.loopId);
+  const preludeIds = region ? [...region.preludeSocketIds] : [];
+  const selectedIds = [...preludeIds, ...memberIds];
+  const selectedSet = new Set(selectedIds);
+  const sourceEntrySocketId = region?.entrySocketId
+    ?? findChildEntry(loop, memberSet, sourceSocketMap, input.loopId, issues);
   if (!sourceEntrySocketId) return { ok: false, issues };
-  validateReachability(sourceSocketMap, sourceEntrySocketId, memberSet, input.loopId, issues);
+  validateReachability(sourceSocketMap, sourceEntrySocketId, selectedSet, input.loopId, issues);
   validateLoopReferences(loop, memberSet, sourceSocketMap, input.loopId, issues);
   if (issues.length > 0) return { ok: false, issues };
 
   // Numeric canonical socket order is used rather than object insertion order or
   // completion order. The resulting identities are stable across processes.
-  const orderedMembers = [...memberIds].sort(compareSocketIds);
-  const socketIdMap = Object.fromEntries(orderedMembers.map((id, index) => [id, `Socket-${index + 1}`]));
-  const socketIdRemapping = orderedMembers.map((sourceSocketId) => ({ sourceSocketId, childSocketId: socketIdMap[sourceSocketId]! }));
+  const orderedSockets = [...selectedIds].sort(compareSocketIds);
+  const socketIdMap = Object.fromEntries(orderedSockets.map((id, index) => [id, `Socket-${index + 1}`]));
+  const socketIdRemapping = orderedSockets.map((sourceSocketId) => ({ sourceSocketId, childSocketId: socketIdMap[sourceSocketId]! }));
 
   const configSockets: Record<string, MateriaPipelineSocketConfig> = {};
-  for (const sourceSocketId of orderedMembers) {
+  for (const sourceSocketId of orderedSockets) {
     const socket = sourceSocketMap[sourceSocketId]!;
-    configSockets[socketIdMap[sourceSocketId]!] = remapSocketConfig(socket, socketIdMap, memberSet);
+    configSockets[socketIdMap[sourceSocketId]!] = remapSocketConfig(
+      socket,
+      socketIdMap,
+      selectedSet,
+      memberSet.has(sourceSocketId),
+    );
   }
 
   const childLoop = remapChildLoop(loop, socketIdMap, memberSet);
   const childEntrySocketId = socketIdMap[sourceEntrySocketId]!;
   const configLoadout = buildConfigLoadout(source, configSockets, childEntrySocketId, input.loopId, childLoop, socketIdMap);
-  const initialData = { workItems: parsedStream.map(cloneWorkItem) };
+  const initialData = {
+    workItems: parsedStream.map(cloneWorkItem),
+    workItemIndexes: [...resolvedStream.workItemIndexes],
+  };
   const childLoadoutId = childLoadoutIdentity(source, input.loopId, input.laneId ?? resolvedStream.laneId);
 
   if (isResolvedPipeline(source)) {
     const resolvedSockets: Record<string, ResolvedMateriaSocket> = {};
-    for (const sourceSocketId of orderedMembers) {
+    for (const sourceSocketId of orderedSockets) {
       const resolvedSocket = source.sockets[sourceSocketId];
       if (!resolvedSocket) {
         issues.push({ path: `sockets.${sourceSocketId}`, message: "resolved pipeline socket is missing" });
@@ -156,7 +174,13 @@ export function compileLoopRegionToChildLoadout(
       resolvedSockets[childId] = {
         ...cloneValue(resolvedSocket),
         id: childId,
-        socket: remapSocketConfig(resolvedSocket.socket, socketIdMap, memberSet),
+        socket: remapSocketConfig(
+          resolvedSocket.socket,
+          socketIdMap,
+          selectedSet,
+          memberSet.has(sourceSocketId),
+        ),
+        materia: withoutRecursiveParallelGeneration(resolvedSocket.materia),
       } as ResolvedMateriaSocket;
     }
     if (issues.length > 0) return { ok: false, issues };
@@ -227,6 +251,8 @@ function normalizeCompilerInput(
 
 interface ResolvedCompilerStream {
   workItems: HandoffWorkItem[];
+  /** Original positions in the parent generator's canonical workItems array. */
+  workItemIndexes: number[];
   laneId?: string;
 }
 
@@ -263,7 +289,7 @@ function resolveOrderedStream(input: CompileLoopRegionToChildLoadoutInput, issue
       selected.push(canonical[rawIndex]!);
     }
     const parsed = validateStreamItems(selected, issues, "workItems");
-    return parsed ? { workItems: parsed, ...(laneId !== undefined ? { laneId } : {}) } : undefined;
+    return parsed ? { workItems: parsed, workItemIndexes: [...indexes], ...(laneId !== undefined ? { laneId } : {}) } : undefined;
   }
 
   // A normalized stream may carry its selected items directly for callers that
@@ -275,7 +301,11 @@ function resolveOrderedStream(input: CompileLoopRegionToChildLoadoutInput, issue
   const directStream = Array.isArray(stream) ? stream : undefined;
   const items = directStream ?? canonical;
   const parsed = validateStreamItems(items, issues, directStream ? "stream" : "workItems");
-  return parsed ? { workItems: parsed, ...(laneId !== undefined ? { laneId } : {}) } : undefined;
+  return parsed ? {
+    workItems: parsed,
+    workItemIndexes: parsed.map((_, index) => index),
+    ...(laneId !== undefined ? { laneId } : {}),
+  } : undefined;
 }
 
 function validateStreamItems(stream: readonly HandoffWorkItem[] | undefined, issues: DomainIssue[], path: string): HandoffWorkItem[] | undefined {
@@ -468,15 +498,16 @@ function isPlainObject(value: unknown): value is Record<string, any> {
 function remapSocketConfig(
   socket: MateriaPipelineSocketConfig,
   socketIdMap: Record<string, string>,
-  members: Set<string>,
+  selectedSockets: Set<string>,
+  consumesLaneItems: boolean,
 ): MateriaPipelineSocketConfig {
   const next = cloneValue(socket);
-  if (socket.edges) next.edges = socket.edges.map((edge) => ({ ...edge, to: remapInternalTarget(edge.to, socketIdMap, members) }));
-  if (socket.foreach) next.foreach = remapForeach(socket.foreach, socketIdMap, members);
+  if (socket.edges) next.edges = socket.edges.map((edge) => ({ ...edge, to: remapInternalTarget(edge.to, socketIdMap, selectedSockets) }));
+  if (socket.foreach) next.foreach = remapForeach(socket.foreach, socketIdMap, selectedSockets, consumesLaneItems);
   if (socket.advance) next.advance = {
     ...socket.advance,
-    items: childItemsPath(socket.advance.items),
-    ...(socket.advance.done !== undefined ? { done: remapInternalTarget(socket.advance.done, socketIdMap, members) } : {}),
+    items: consumesLaneItems ? childItemsPath(socket.advance.items) : socket.advance.items,
+    ...(socket.advance.done !== undefined ? { done: remapInternalTarget(socket.advance.done, socketIdMap, selectedSockets) } : {}),
   };
   return next;
 }
@@ -484,12 +515,13 @@ function remapSocketConfig(
 function remapForeach(
   foreach: MateriaForeachConfig,
   socketIdMap: Record<string, string>,
-  members: Set<string>,
+  selectedSockets: Set<string>,
+  consumesLaneItems: boolean,
 ): MateriaForeachConfig {
   return {
     ...cloneValue(foreach),
-    items: childItemsPath(foreach.items),
-    ...(foreach.done !== undefined ? { done: remapInternalTarget(foreach.done, socketIdMap, members) } : {}),
+    items: consumesLaneItems ? childItemsPath(foreach.items) : foreach.items,
+    ...(foreach.done !== undefined ? { done: remapInternalTarget(foreach.done, socketIdMap, selectedSockets) } : {}),
   };
 }
 
@@ -579,6 +611,12 @@ function isCompilerInput(value: CompileLoopRegionToChildLoadoutInput | LoopCompi
 function remapInternalTarget(target: string, socketIdMap: Record<string, string>, members: Set<string>): string {
   if (target === TERMINAL_ADVANCE_TARGET) return TERMINAL_ADVANCE_TARGET;
   return members.has(target) ? socketIdMap[target]! : TERMINAL_ADVANCE_TARGET;
+}
+
+function withoutRecursiveParallelGeneration<T>(materia: T): T {
+  const cloned = cloneValue(materia);
+  if (isPlainObject(cloned)) delete cloned.parallel;
+  return cloned;
 }
 
 function childItemsPath(_items: string): string {
