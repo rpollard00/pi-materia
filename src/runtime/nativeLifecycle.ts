@@ -183,6 +183,7 @@ const { commitSocketOutput } = createSocketOutputCommit({
   },
   state: {
     loadConfigFromState,
+    saveCastState,
   },
   eventing: {
     processSocketEvents,

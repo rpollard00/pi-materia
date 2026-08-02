@@ -23,7 +23,7 @@ import { currentItem, getPath, isPlainObject, readObjectField } from "./workflow
 // - plain-text agent sockets receive no JSON-only handoff contract unless their local prompt asks for one.
 export function buildSocketPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
   if (!isAgentResolvedSocket(socket)) throw new Error(`Utility socket "${socket.id}" does not have an agent prompt.`);
-  return materiaPrompt(socket.materia, state, [renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket, state)]);
+  return materiaPrompt(socket.materia, state, [executionScopeInstruction(state), renderReworkFeedbackPromptContext(state, socket.id), socketAdapterContextInstruction(state, socket), multiTurnTurnInstruction(state, socket), singleTurnJsonFormatInstruction(socket, state)]);
 }
 
 export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket: ResolvedMateriaSocket): string {
@@ -33,6 +33,7 @@ export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket
   // every isolated turn, including finalization and recovery re-dispatch paths.
   // Embedding it here would duplicate the ~900-token context block.
   return materiaPrompt(socket.materia, state, [
+    executionScopeInstruction(state),
     renderReworkFeedbackPromptContext(state, socket.id),
     socketAdapterContextInstruction(state, socket),
     "Command-triggered finalization: the user ran /materia continue for this multi-turn socket. This is the only finalization mechanism and this is the finalization turn.",
@@ -43,6 +44,13 @@ export function buildMultiTurnFinalizationPrompt(state: MateriaCastState, socket
 export function multiTurnTurnInstruction(state: MateriaCastState, socket: ResolvedMateriaSocket): string | undefined {
   if (!isMultiTurnResolvedAgentSocket(socket)) return undefined;
   return state.multiTurnFinalizing ? finalFormatInstruction(socket, state) : multiTurnRefinementGuidance();
+}
+
+function executionScopeInstruction(state: MateriaCastState): string | undefined {
+  // Restored runtime casts always carry canonical scopes. Keep pure prompt
+  // helpers tolerant of legacy/minimal state fixtures that predate them.
+  if (!state.activeScope) return undefined;
+  return `Active execution scope: ${JSON.stringify(state.activeScope.id)}. Resolve all relative paths and run all work from ${JSON.stringify(state.activeScope.cwd)}.`;
 }
 
 export function multiTurnRefinementGuidance(): string {

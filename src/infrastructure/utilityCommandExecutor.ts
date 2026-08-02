@@ -11,7 +11,7 @@ export const MAX_UTILITY_ERROR_SUMMARY_LENGTH = 800;
 export async function executeCommandUtility({ state, socket, input }: CommandUtilityRequest): Promise<string> {
   const command = effectiveUtilityConfig(socket).command;  if (!command || command.length === 0) throw new Error(`Utility socket "${socket.id}" has no explicit command configured.`);
 
-  const timeoutMs = effectiveUtilityConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;  const child = spawn(command[0], command.slice(1), { cwd: state.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
+  const timeoutMs = effectiveUtilityConfig(socket).timeoutMs ?? DEFAULT_UTILITY_TIMEOUT_MS;  const child = spawn(command[0], command.slice(1), { cwd: state.activeScope.cwd, stdio: ["pipe", "pipe", "pipe"], env: process.env });
   const stdout = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
   const stderr = createBoundedCapture(MAX_UTILITY_OUTPUT_BYTES);
   let timedOut = false;

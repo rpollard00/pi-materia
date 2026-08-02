@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import {
   executeUtilitySocketWithDeps,
   type CommandUtilityRequest,
+  type UtilitySocketExecutionResult,
 } from "../application/utilityExecution.js";
 import {
   DEFAULT_MAX_NO_ADVANCE_CYCLES,
@@ -432,6 +433,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         const result = await executeUtilitySocket(state, socket);
         await completeSocket(pi, ctx, state, result.output, result.entryId, {
           diagnostics: nextDiagnostics,
+          ...(result.scopeTransition ? { scopeTransition: result.scopeTransition } : {}),
         });
       } catch (error) {
         await deps.eventing.emitLifecycleEvent(state, "lifecycle.socket.failed", {
@@ -495,7 +497,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
   async function executeUtilitySocket(
     state: MateriaCastState,
     socket: ResolvedMateriaUtilitySocket,
-  ): Promise<{ output: string; entryId: string }> {
+  ): Promise<UtilitySocketExecutionResult> {
     return executeUtilitySocketWithDeps(state, socket, {
       executeCommand: deps.utility.executeCommand,
       executeBuiltInUtility: deps.utility.executeBuiltInUtility,

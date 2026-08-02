@@ -1,4 +1,8 @@
 import { currentItem } from "./workflowTransitions.js";
+import {
+  extractUtilityScopeTransition,
+  type UtilityExecutionScopeTransition,
+} from "./executionScopeTransition.js";
 import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
 import { loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { effectiveUtilityConfig, resolvedMateriaDisplayName, resolvedMateriaId, resolvedSocketConfig } from "../runtime/resolvedMateria.js";
@@ -20,7 +24,14 @@ export interface CommandUtilityRequest {
   input: Record<string, unknown>;
 }
 
-export async function executeUtilitySocketWithDeps(state: MateriaCastState, socket: UtilityResolvedSocket, deps: UtilityExecutionDeps): Promise<{ output: string; entryId: string }> {
+export interface UtilitySocketExecutionResult {
+  output: string;
+  entryId: string;
+  /** Typed utility-only sidecar, excluded from ordinary parsed output. */
+  scopeTransition?: UtilityExecutionScopeTransition;
+}
+
+export async function executeUtilitySocketWithDeps(state: MateriaCastState, socket: UtilityResolvedSocket, deps: UtilityExecutionDeps): Promise<UtilitySocketExecutionResult> {
   const visit = socketVisit(state, socket.id);
   const input = buildUtilityInput(state, socket);
   const inputArtifact = await deps.recordUtilityInput(input);
@@ -40,14 +51,21 @@ export async function executeUtilitySocketWithDeps(state: MateriaCastState, sock
     throw new Error(`Unknown utility alias "${utilityConfig.utility}" for utility materia "${resolvedMateriaId(socket)}" on socket "${socket.id}".`);
   }
 
-  return { output, entryId: `utility:${socket.id}:${visit}` };
+  const extracted = effectiveUtilityConfig(socket).parse === "json"
+    ? extractUtilityScopeTransition(output)
+    : { output };
+  return {
+    output: extracted.output,
+    entryId: `utility:${socket.id}:${visit}`,
+    ...(extracted.transition ? { scopeTransition: extracted.transition } : {}),
+  };
 }
 
 export function buildUtilityInput(state: MateriaCastState, socket: UtilityResolvedSocket): Record<string, unknown> {
   const loop = resolvedSocketConfig(socket).foreach ?? loopIteratorForSocket(state.pipeline, socket.id);
   const cursorName = loop?.cursor ?? (loop ? `${socket.id}Index` : undefined);
   return {
-    cwd: state.cwd,
+    cwd: state.activeScope.cwd,
     runDir: state.runDir,
     request: state.request,
     castId: state.castId,

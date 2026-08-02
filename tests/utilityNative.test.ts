@@ -140,6 +140,25 @@ describe("native utility socket execution", () => {
     expect(state.data?.vcs).toEqual(state.lastJson);
   });
 
+  test("activates a utility-produced scope before the next utility executes", async () => {
+    const branch = await mkdtemp(path.join(tmpdir(), "pi-materia-scope-"));
+    const transition = JSON.stringify({ scopeTransition: { kind: "replace", scope: { id: "scope:test-branch", cwd: branch, state: { lane: 1 }, exports: {} } }, value: 7 });
+    const harness = await makeHarness(utilityConfig(
+      { utility: "echo", parse: "json", params: { output: transition }, edges: [{ when: "always", to: "Socket-2" }] },
+      { second: { command: [process.execPath, "-e", "process.stdout.write(process.cwd())"], edges: [{ when: "always", to: "end" }] } },
+    ));
+
+    await harness.runCommand("materia", "cast switch scope");
+
+    const state = harness.appendedEntries.at(-1)?.data as { phase?: string; lastOutput?: string; lastJson?: Record<string, unknown>; activeScope?: { id?: string; cwd?: string }; branchScopes?: Record<string, unknown> };
+    expect(state.phase).toBe("complete");
+    expect(state.lastOutput).toBe(branch);
+    expect(state.activeScope).toMatchObject({ id: "scope:test-branch", cwd: branch });
+    expect(state.branchScopes?.["scope:test-branch"]).toBeDefined();
+    const firstOutput = JSON.parse(await readFile(path.join((state as any).runDir, "sockets", "Socket-1", "1.json"), "utf8"));
+    expect(firstOutput).toEqual({ value: 7 });
+  });
+
   test("runs a single utility socket to completion without an agent turn", async () => {
     const harness = await makeHarness(utilityConfig({ utility: "echo", params: { text: "HELLO WORLD" } }));
 

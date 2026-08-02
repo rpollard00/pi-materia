@@ -3,6 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStartOptions, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
+import { routeAgentToolCallToActiveScope } from "./runtime/activeScopeToolRouting.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
 import { appendMateriaPresentation } from "./presentation/materiaPresentation.js";
 import { registerMateriaRenderer } from "./presentation/renderer.js";
@@ -119,6 +120,11 @@ export default function piMateria(pi: ExtensionAPI) {
     const systemPrompt = await castExecutionUseCases.prepareAgentStart({ pi, session: ctx, systemPrompt: event.systemPrompt });
     if (!systemPrompt) return;
     return { systemPrompt };
+  });
+
+  pi.on("tool_call", (event, ctx) => {
+    activeContext = ctx;
+    routeAgentToolCallToActiveScope(event, adapters.states.loadActive(ctx));
   });
 
   pi.on("tool_execution_end", async (event, ctx) => {

@@ -1,5 +1,9 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { applyGenericHandoffEnvelope } from "../application/handoff.js";
+import {
+  activateUtilityScopeTransition,
+  type UtilityExecutionScopeTransition,
+} from "../application/executionScopeTransition.js";
 import { captureReworkFeedbackForRoute } from "../application/reworkFeedback.js";
 import {
   detectUtilityInfrastructureFailure,
@@ -23,6 +27,7 @@ import {
   validateHandoffJsonOutput,
 } from "../handoff/handoffValidation.js";
 import type { SocketParsedJsonArtifactInput } from "../infrastructure/castArtifacts.js";
+import { assertExecutionScopeCwd } from "../infrastructure/executionScopeCwd.js";
 import { appendMateriaPresentation } from "../presentation/materiaPresentation.js";
 import { formatMateriaNotificationDisplay } from "../presentation/notificationFormatting.js";
 import { buildMateriaTextOutputPresentation } from "../presentation/textOutput.js";
@@ -55,6 +60,8 @@ import {
 export interface SocketOutputCommitOptions {
   finalizedMultiTurn?: boolean;
   diagnostics?: AdvancementLifecycleDiagnostics;
+  /** Utility-only sidecar already removed from ordinary parsed output. */
+  scopeTransition?: UtilityExecutionScopeTransition;
 }
 
 /** The lifecycle action that remains after a socket output has been committed. */
@@ -83,6 +90,7 @@ export interface SocketOutputCommitDependencies {
   };
   state: {
     loadConfigFromState(state: MateriaCastState): Promise<PiMateriaConfig>;
+    saveCastState(pi: ExtensionAPI, state: MateriaCastState): void;
   };
   eventing: {
     processSocketEvents(
@@ -290,13 +298,28 @@ export function createSocketOutputCommit(deps: SocketOutputCommitDependencies) {
 
     // A utility command that exits successfully can still report a handled
     // infrastructure failure. Preserve its diagnostic state patch, then stop
-    // before assignments, cursor advancement, or edge routing can turn the
-    // result into a silent rework loop.
+    // before assignments, scope activation, cursor advancement, or edge
+    // routing can turn the result into a silent rework loop.
     if (utilityInfrastructureFailure) {
       throw new UtilityInfrastructureFailureError(
         utilityInfrastructureFailure.namespace,
         utilityInfrastructureFailure.message,
       );
+    }
+
+    if (options.scopeTransition) {
+      if (!isUtilityResolvedSocket(socket)) throw new Error("Only utility sockets may activate execution scope transitions.");
+      const previousScopeId = state.activeScope.id;
+      assertExecutionScopeCwd(options.scopeTransition.kind === "base" ? state.baseScope.cwd : options.scopeTransition.scope.cwd);
+      const activeScope = activateUtilityScopeTransition(state, options.scopeTransition);
+      deps.state.saveCastState(pi, state);
+      await deps.artifacts.appendEvent(state.runState, "execution_scope_activated", {
+        socket: socket.id,
+        materia: socketMateriaName(socket),
+        previousScopeId,
+        activeScopeId: activeScope.id,
+        cwd: activeScope.cwd,
+      });
     }
 
     emitMateriaTextOutput(pi, state, socket, parsed);

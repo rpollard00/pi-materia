@@ -1,14 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { buildUtilityInput, executeUtilitySocketWithDeps, type UtilityResolvedSocket } from "../src/application/utilityExecution.js";
+import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
 import type { MateriaCastState } from "../src/types.js";
 
 function state(overrides: Partial<MateriaCastState> = {}): MateriaCastState {
+  const baseScope = createBaseExecutionScope("cast-1", "/tmp/project");
   return {
-    version: 1,
+    version: 2,
     active: true,
     castId: "cast-1",
     request: "do utility work",
     cwd: "/tmp/project",
+    baseScope,
+    activeScope: cloneExecutionScope(baseScope),
+    branchScopes: {},
     runDir: "/tmp/project/.pi/pi-materia/cast-1",
     artifactRoot: "/tmp/project/.pi/pi-materia",
     phase: "Socket-1",
@@ -77,6 +82,24 @@ describe("application utility execution", () => {
     });
 
     expect(result.output).toBe("from materia");
+  });
+
+  test("extracts a typed scope transition from JSON utility output", async () => {
+    const result = await executeUtilitySocketWithDeps(state(), utilitySocket({
+      type: "utility",
+      utility: "echo",
+      parse: "json",
+      params: { output: { value: 7, scopeTransition: { kind: "replace", scope: { id: "scope:branch", cwd: "/tmp", state: {}, exports: {} } } } },
+    }), {
+      executeCommand: async () => { throw new Error("command should not run"); },
+      executeBuiltInUtility: () => { throw new Error("built-in should not run"); },
+      hasBuiltInUtility: () => false,
+      recordUtilityInput: async () => "input.json",
+      appendUtilityInputEvent: async () => {},
+    });
+
+    expect(result.output).toBe('{"value":7}');
+    expect(result.scopeTransition).toEqual({ kind: "replace", scope: { id: "scope:branch", cwd: "/tmp", state: {}, exports: {} } });
   });
 
   test("serializes configured object output with deterministic handoff serializer", async () => {
