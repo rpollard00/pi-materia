@@ -9,4 +9,5 @@ export * from "./parallelLaneArtifacts.js";
 export * from "./jjWorkspaceBackend.js";
 export * from "./spawnJjWorkspace.js";
 export * from "./integrateJjWorkspaces.js";
+export * from "./finalizeJjWorkspace.js";
 export * from "./questBoardRepository.js";

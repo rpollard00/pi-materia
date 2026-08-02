@@ -794,6 +794,15 @@
       "parse": "json",
       "utility": "vcs.integrateJjWorkspaces"
     },
+    "Finalize-JJ-Workspace": {
+      "type": "utility",
+      "label": "Finalize-JJ-Workspace",
+      "description": "After explicit agent acceptance, verifies and publishes a conflict-free integrated jj revision, creates an empty base working commit, cleans only ownership-checked workspaces, and returns execution to base scope.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "utility": "vcs.finalizeJjWorkspace"
+    },
     "Blackbelt-GH-PR": {
       "type": "utility",
       "label": "Blackbelt-GH-PR",

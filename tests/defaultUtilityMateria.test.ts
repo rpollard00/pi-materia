@@ -194,6 +194,23 @@ describe("bundled utility materia defaults", () => {
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
 
+  test("Finalize-JJ-Workspace is a reusable acceptance-gated finalization utility materia", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Finalize-JJ-Workspace"];
+
+    expect(materia).toMatchObject({
+      type: "utility",
+      label: "Finalize-JJ-Workspace",
+      group: "Utility",
+      parse: "json",
+      utility: "vcs.finalizeJjWorkspace",
+    });
+    expect(materia?.description).toContain("explicit agent acceptance");
+    expect(materia?.description).toContain("base scope");
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+    expect((materia as { script?: unknown }).script).toBeUndefined();
+  });
+
   test("Blackbelt-Maintain has correct shipped-utility config shape, parse, color, and metadata", async () => {
     const config = await loadDefaultConfig();
     const materia = config.materia?.["Blackbelt-Maintain"];

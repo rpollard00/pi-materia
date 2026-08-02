@@ -6,6 +6,7 @@ import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.
 import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import { spawnJjWorkspaceScope } from "../infrastructure/spawnJjWorkspace.js";
 import { integrateJjWorkspaceExports } from "../infrastructure/integrateJjWorkspaces.js";
+import { finalizeJjWorkspace } from "../infrastructure/finalizeJjWorkspace.js";
 
 export type BuiltInUtilityInput = {
   cwd: string;
@@ -14,6 +15,7 @@ export type BuiltInUtilityInput = {
   castId: string;
   socketId: string;
   executionScope: ExecutionScope;
+  baseScope?: ExecutionScope;
   params: Record<string, unknown>;
   state: unknown;
   item: unknown;
@@ -39,6 +41,7 @@ const registry: Record<string, BuiltInUtility> = {
   "vcs.detect": detectVcs,
   "vcs.spawnJjWorkspace": spawnJjWorkspace,
   "vcs.integrateJjWorkspaces": integrateJjWorkspaces,
+  "vcs.finalizeJjWorkspace": finalizeIntegratedJjWorkspace,
 };
 
 export function hasBuiltInUtility(alias: string | undefined): alias is keyof typeof registry {
@@ -118,6 +121,44 @@ async function integrateJjWorkspaces(input: BuiltInUtilityInput): Promise<string
   });
 }
 
+async function finalizeIntegratedJjWorkspace(input: BuiltInUtilityInput): Promise<string> {
+  const state = isRecord(input.state) ? input.state : {};
+  const bootstrap = isRecord(state.blackbeltBootstrap) ? state.blackbeltBootstrap : undefined;
+  const bookmarkName = bootstrap?.bookmarkName;
+  if (typeof bookmarkName !== "string" || bookmarkName.trim().length === 0) {
+    throw new Error("Finalize-JJ-Workspace requires state.blackbeltBootstrap.bookmarkName.");
+  }
+  const description = input.params.description;
+  if (description !== undefined && (typeof description !== "string" || description.trim().length === 0)) {
+    throw new Error("vcs.finalizeJjWorkspace params.description must be a non-empty string when provided.");
+  }
+  if (!input.baseScope) throw new Error("Finalize-JJ-Workspace requires the cast base execution scope.");
+  const finalized = await finalizeJjWorkspace({
+    cwd: input.cwd,
+    executionScope: createExecutionScope(input.executionScope),
+    baseScope: createExecutionScope(input.baseScope),
+    state: input.state,
+    bookmarkName,
+    ...(typeof description === "string" ? { description } : {}),
+  });
+  const summary = {
+    version: 1,
+    status: "completed",
+    conflictFree: true,
+    integrationRevision: finalized.integrationRevision,
+    baseWorkingRevision: finalized.baseWorkingRevision,
+    bookmarkName: finalized.bookmarkName,
+    cleanedWorkspaceNames: finalized.cleanedWorkspaceNames,
+    description: finalized.description,
+  };
+  return stringifyDeterministicHandoffOutput({
+    satisfied: true,
+    context: `Finalize-JJ-Workspace: published accepted revision ${finalized.integrationRevision.commitId} through ${finalized.bookmarkName}, created an empty base working commit, and cleaned ${finalized.cleanedWorkspaceNames.length} owned workspace(s).`,
+    state: { jjWorkspaceFinalization: summary },
+    scopeTransition: { kind: "replace", scope: finalized.scope },
+  });
+}
+
 async function detectVcs(input: BuiltInUtilityInput): Promise<string> {
   const [jj, git] = await Promise.all([isCommandAvailable("jj"), isCommandAvailable("git")]);
   const markerJjRoot = findUp(input.cwd, ".jj");
@@ -191,6 +232,10 @@ function execFileText(command: string, args: string[], cwd: string): Promise<str
 
 function resolveInsideCwd(cwd: string, inputPath: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.resolve(cwd, inputPath);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function isNotFound(error: unknown): boolean {

@@ -67,6 +67,7 @@ export function buildUtilityInput(state: MateriaCastState, socket: UtilityResolv
   return {
     cwd: state.activeScope.cwd,
     executionScope: state.activeScope,
+    baseScope: state.baseScope,
     runDir: state.runDir,
     request: state.request,
     castId: state.castId,

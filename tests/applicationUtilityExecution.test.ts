@@ -43,7 +43,7 @@ function utilitySocket(materia: UtilityResolvedSocket["materia"], socket: Partia
 describe("application utility execution", () => {
   test("builds stable utility input with canonical socketId", () => {
     const input = buildUtilityInput(state(), utilitySocket({ type: "utility", label: "Utility Label", utility: "echo", params: { answer: 42 } }));
-    expect(input).toMatchObject({ cwd: "/tmp/project", request: "do utility work", castId: "cast-1", socketId: "Socket-1", materiaId: "Utility", materiaLabel: "Utility Label", params: { answer: 42 }, itemKey: "item-a", itemLabel: "Item A", state: { existing: true } });
+    expect(input).toMatchObject({ cwd: "/tmp/project", baseScope: { id: "cast:cast-1:base", cwd: "/tmp/project" }, request: "do utility work", castId: "cast-1", socketId: "Socket-1", materiaId: "Utility", materiaLabel: "Utility Label", params: { answer: 42 }, itemKey: "item-a", itemLabel: "Item A", state: { existing: true } });
   });
 
   test("exposes explicitly assigned renderable text to deterministic utilities as input.state", () => {
