@@ -83,7 +83,7 @@ function createDeferred() {
 function PolicyProbe({ onReload }: { onReload?: (options?: { preserveLoadoutEdits?: boolean; readyStatus?: string }) => void | Promise<void> } = {}) {
   const [materia] = useState<Record<string, MateriaBehaviorConfig>>({
     Build: { type: 'agent', prompt: 'built-in prompt', tools: 'coding' },
-    Project: { type: 'agent', prompt: 'project prompt', tools: 'none' },
+    Project: { type: 'agent', prompt: 'project prompt', tools: 'none', generator: true, parallel: true },
     Locked: { type: 'agent', prompt: 'locked prompt', tools: 'none', lockState: 'locked' },
   });
   const [materiaSources] = useState<Record<string, LoadoutSourceScope>>({ Build: 'default', Project: 'project', Locked: 'user' });
@@ -107,6 +107,8 @@ function PolicyProbe({ onReload }: { onReload?: (options?: { preserveLoadoutEdit
       <output aria-label="editing-id">{controller.form.materiaForm.editingSocketId}</output>
       <output aria-label="prompt">{controller.form.materiaForm.prompt}</output>
       <output aria-label="persist-scope">{controller.form.materiaForm.persistScope}</output>
+      <output aria-label="generator">{String(controller.form.materiaForm.generator)}</output>
+      <output aria-label="parallel-generation">{String(controller.form.materiaForm.parallel)}</output>
       <output aria-label="selected-can-delete">{String(controller.selector.selectedPolicy?.canDelete)}</output>
       <output aria-label="selected-can-save">{String(controller.selector.selectedPolicy?.canSave)}</output>
       <button type="button" onClick={() => controller.form.editMateria('Build')}>edit Build</button>
@@ -291,6 +293,8 @@ describe('useMateriaEditorController', () => {
     expect(screen.getByLabelText('editing-id').textContent).toBe('');
     expect(screen.getByLabelText('name').textContent).toBe('Project Copy');
     expect(screen.getByLabelText('persist-scope').textContent).toBe('user');
+    expect(screen.getByLabelText('generator').textContent).toBe('true');
+    expect(screen.getByLabelText('parallel-generation').textContent).toBe('true');
 
     fireEvent.click(screen.getByText('lock Project'));
     await waitFor(() => expect(calls.some((call) => String(call[1].body) === JSON.stringify({ target: 'project', config: { materia: { Project: { lockState: 'locked' } } } }))).toBe(true));

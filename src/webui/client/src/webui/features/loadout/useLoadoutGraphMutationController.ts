@@ -255,11 +255,11 @@ export function useLoadoutGraphMutationController({
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return false;
     const committed = commitGraphMutation(
-      `${parallel ? 'Enabled' : 'Disabled'} parallel execution for loop ${loopId}.`,
+      `${parallel ? 'Updated' : 'Cleared'} parallel concurrency override for loop ${loopId}.`,
       (loadout) => updateLoopParallelInLoadout(loadout, loopId, parallel, fanInTargets),
       parallel
-        ? `Staged parallel loop ${loopId}; the parent graph remains symbolic and lane sockets are not materialized.`
-        : `Disabled parallel execution for loop ${loopId}; existing region-owned routes were preserved.`,
+        ? `Staged max concurrency ${parallel.maxConcurrency ?? 'from app default'} for parallel generator consumer loop ${loopId}.`
+        : `Cleared the concurrency override for loop ${loopId}; generator capability still determines parallel execution.`,
       (message) => `Cannot update parallel loop ${loopId}: ${message}`,
       { parallel: true },
     );

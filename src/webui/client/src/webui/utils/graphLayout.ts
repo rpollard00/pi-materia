@@ -101,7 +101,7 @@ export function formatIteratorBehavior(socket?: PipelineSocket, definitions?: Ma
   if (generatorOutput) {
     const generatorConfig = canonicalGeneratorConfigFor(definition);
     return definition?.generator === true
-      ? 'Generator: canonical workItems output'
+      ? `${definition.parallel === true ? 'Parallel generator' : 'Generator'}: canonical workItems output`
       : `Generator: obsolete ${generatorOutput}${generatorConfig?.itemType ? ` (${generatorConfig.itemType} list)` : ''}`;
   }
   const foreach = socket?.foreach ?? (referenced ? definitions?.[referenced.materia]?.foreach : undefined);
@@ -183,6 +183,7 @@ export function loopExitEdgeLabel(when?: string): string {
 }
 
 export function iteratorBadgeLabel(details?: string): string {
+  if (details?.startsWith('Parallel generator: canonical')) return 'Parallel';
   if (details?.startsWith('Generator: canonical')) return 'Generator';
   if (details?.startsWith('Generator: obsolete')) {
     const output = details.slice('Generator: obsolete'.length).trim().split(/\s|\(/)[0];

@@ -16,6 +16,7 @@ describe('materia editor form serialization', () => {
       assign: '{"vcs":"$"}',
       outputFormat: 'json' as const,
       generator: true,
+      parallel: true,
       timeoutMs: '5000',
     };
 
@@ -33,9 +34,32 @@ describe('materia editor form serialization', () => {
           timeoutMs: 5000,
           parse: 'json',
           generator: true,
+          parallel: true,
           color: 'materia-color-cyan',
         },
       },
     });
+  });
+
+  it('persists only canonical parallel metadata and clears it with generator on edits', () => {
+    const created = buildMateriaPatch({
+      ...emptyMateriaForm(),
+      name: 'Planner',
+      prompt: 'Plan.',
+      generator: true,
+      parallel: true,
+    });
+    expect(created.materia?.Planner).toMatchObject({ generator: true, parallel: true });
+    expect(created.materia?.Planner).not.toHaveProperty('parallelPlanner');
+
+    const cleared = buildMateriaPatch({
+      ...emptyMateriaForm(),
+      editingSocketId: 'Planner',
+      name: 'Planner',
+      prompt: 'Plan.',
+      generator: false,
+      parallel: true,
+    });
+    expect(cleared.materia?.Planner).toMatchObject({ generator: null, parallel: null });
   });
 });

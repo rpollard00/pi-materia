@@ -181,6 +181,15 @@ describe('filterMateriaCatalog and buildCatalogSearchText', () => {
     expect(ids(filterMateriaCatalog(items, 'locked'))).toEqual(['detectVcs']);
   });
 
+  it('indexes ordinary and parallel generator capabilities', () => {
+    const generators = [
+      item({ id: 'Plan', label: 'Plan', group: '', type: 'agent', description: '', generator: true }),
+      item({ id: 'ParallelPlan', label: 'Parallel Plan', group: '', type: 'agent', description: '', generator: true, parallel: true }),
+    ];
+    expect(ids(filterMateriaCatalog(generators, 'generator'))).toEqual(['Plan', 'ParallelPlan']);
+    expect(ids(filterMateriaCatalog(generators, 'parallel generation'))).toEqual(['ParallelPlan']);
+  });
+
   it('requires every whitespace-separated token to match (AND semantics)', () => {
     expect(ids(filterMateriaCatalog(items, 'utility core'))).toEqual([]);
     expect(ids(filterMateriaCatalog(items, 'detect vcs'))).toEqual(['detectVcs']);

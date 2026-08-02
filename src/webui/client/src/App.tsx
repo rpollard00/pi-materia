@@ -4,6 +4,7 @@ import { LocalSessionRequired } from './webui/components/LocalSessionRequired.js
 import { LoadoutListPanel } from './webui/features/loadout/LoadoutListPanel.js';
 import { MateriaPalettePanel } from './webui/features/loadout/MateriaPalettePanel.js';
 import { StageApplyPanel } from './webui/features/loadout/StageApplyPanel.js';
+import { ParallelismSettingsPanel } from './webui/features/loadout/ParallelismSettingsPanel.js';
 import { LoadoutGraphPanel } from './webui/features/loadout/LoadoutGraphPanel.js';
 import { MateriaEditorPanel } from './webui/features/materia-editor/MateriaEditorPanel.js';
 import { CentralModelPolicyPanel } from './webui/features/central/CentralModelPolicyPanel.js';
@@ -64,6 +65,7 @@ export function App() {
     source,
     status,
     switchEditingLoadoutDraft,
+    updateDraft,
     updateLoadoutDraft,
     updateLoadoutLayout,
   } = useWebuiConfig();
@@ -342,6 +344,11 @@ export function App() {
               selectedMateriaId={selectedMateriaId}
               onDragMateria={dragMateria}
               onSelectMateria={setSelectedMateriaId}
+            />
+
+            <ParallelismSettingsPanel
+              maxConcurrency={draftConfig?.parallelism?.maxConcurrency}
+              onChange={(maxConcurrency) => updateDraft((config) => { config.parallelism = { maxConcurrency }; })}
             />
 
             <StageApplyPanel

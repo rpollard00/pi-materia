@@ -91,6 +91,15 @@ function getLockedBadge(item: MateriaSelectorItem): MateriaSelectorBadge | null 
   };
 }
 
+function getGenerationBadge(item: MateriaSelectorItem): MateriaSelectorBadge | null {
+  if (!item.generator) return null;
+  return {
+    label: item.parallel ? 'Parallel generator' : 'Generator',
+    title: item.parallel ? 'Intrinsic parallel generation enabled' : 'Canonical workItems generator',
+    className: 'materia-selector-badge materia-selector-badge-group',
+  };
+}
+
 function renderBadge(badge: MateriaSelectorBadge | null) {
   if (!badge) return null;
   return <span className={badge.className} title={badge.title}>{badge.label}</span>;
@@ -226,6 +235,7 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
             const groupBadge = getGroupBadge(item);
             const originStatusBadge = getOriginStatusBadge(item);
             const lockedBadge = getLockedBadge(item);
+            const generationBadge = getGenerationBadge(item);
             return (
               <div
                 key={item.id}
@@ -252,6 +262,7 @@ export function MateriaSelectorSidebar({ items, selectedId, onSelect, onNew, onD
                     </span>
                     <span className="materia-selector-row-meta" aria-label="Materia metadata">
                       {renderBadge(groupBadge)}
+                      {renderBadge(generationBadge)}
                       {renderBadge(originStatusBadge)}
                       {renderBadge(lockedBadge)}
                     </span>

@@ -31,6 +31,8 @@ export interface MateriaSelectorItem extends MateriaEditPolicy {
   group: string;
   type: 'agent' | 'utility' | 'unknown';
   description: string;
+  generator?: boolean;
+  parallel?: boolean;
   color: string;
   /**
    * Optional provider/model label projected from the materia definition for
@@ -88,6 +90,8 @@ export function buildMateriaSelectorItems(
         group: String(definition.group ?? ''),
         type,
         description: String(definition.description ?? ''),
+        generator: definition.generator === true,
+        parallel: definition.generator === true && definition.parallel === true,
         color: resolveMateriaColor(id, materia),
         modelLabel: resolveMateriaModelLabel(definition),
       };

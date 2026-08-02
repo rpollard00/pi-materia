@@ -64,7 +64,7 @@ export function buildPaletteSearchText(id: string, socket: PipelineSocket, mater
   const modelLabel = resolveMateriaModelLabel(definition);
   if (modelLabel) parts.push(modelLabel.toLowerCase());
   parts.push(resolvePaletteMateriaType(definition));
-  if (isGeneratorSocket(socket, materia)) parts.push('generator');
+  if (isGeneratorSocket(socket, materia)) parts.push(definition?.parallel === true ? 'generator parallel parallel-generation' : 'generator');
   if (hasIteratorBehavior(socket, materia)) parts.push('iterator');
   return parts.join(' ');
 }

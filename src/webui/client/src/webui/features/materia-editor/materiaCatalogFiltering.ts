@@ -79,6 +79,7 @@ export function buildCatalogSearchText(item: MateriaSelectorItem): string {
   const modelLabel = item.modelLabel?.trim();
   if (modelLabel) parts.push(modelLabel.toLowerCase());
   parts.push(resolveCatalogMateriaType(item));
+  if (item.generator) parts.push(item.parallel ? 'generator parallel parallel-generation' : 'generator');
   parts.push(catalogOriginStatusLabel(item).toLowerCase());
   parts.push(catalogSourceLabel(item.source).toLowerCase());
   if (item.lockState === 'locked') parts.push('locked');

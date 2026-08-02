@@ -299,6 +299,7 @@ export function useMateriaEditorController({ materia, materiaSources, defaultMat
       outputFormat: definition.parse === 'json' ? 'json' : 'text',
       multiTurn: isUtility ? false : Boolean(definition.multiTurn),
       generator,
+      parallel: generator && definition.parallel === true,
       parallelSafe: Boolean(definition.parallelSafe),
       utility: isUtility ? String(definition.utility ?? '') : '',
       command: isUtility ? (definition.command ?? []).join(' ') : '',

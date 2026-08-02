@@ -9,6 +9,7 @@ import {
   isEmptySocket,
   isEntrySocket,
   socketColor,
+  type MateriaConfig,
   type PipelineConfig,
   type PipelineLoop,
   type PipelineSocket,
@@ -219,6 +220,7 @@ export function LoadoutGraphPanel({ viewModel, toolbar, canvasActions, loopActio
         activeLoadout={viewModel.activeLoadout}
         loop={selectedLoop}
         loopId={selectedLoopId}
+        materia={viewModel.materia}
         editPolicy={viewModel.editPolicy}
         closeLoopControls={() => setSelectedLoopId(undefined)}
         breakLoop={loopActions.breakLoop}
@@ -653,6 +655,7 @@ interface LoopControlModalProps {
   activeLoadout?: PipelineConfig;
   loop?: PipelineLoop;
   loopId?: string;
+  materia: NonNullable<MateriaConfig['materia']>;
   editPolicy: LoadoutEditPolicy;
   closeLoopControls: () => void;
   breakLoop: (loopId: string) => void;
@@ -664,43 +667,34 @@ interface LoopControlModalProps {
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
 
-function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopControls, breakLoop, clearLoopExit, updateLoopParallel, parallelError, socketDisplayLabel, socketLabel, updateLoopExit }: LoopControlModalProps) {
+function LoopControlModal({ activeLoadout, loop, loopId, materia, editPolicy, closeLoopControls, breakLoop, clearLoopExit, updateLoopParallel, parallelError, socketDisplayLabel, socketLabel, updateLoopExit }: LoopControlModalProps) {
   const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
   const exit = useMemo(() => loop ? (loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' }) : undefined, [loop]);
-  const [parallelEnabled, setParallelEnabled] = useState(false);
-  const [parallelConfig, setParallelConfig] = useState<MateriaLoopParallelConfig>({});
-  const [cleanFanInTarget, setCleanFanInTarget] = useState('');
-  const [conflictFanInTarget, setConflictFanInTarget] = useState('');
+  const [parallelMaxConcurrency, setParallelMaxConcurrency] = useState('');
   const [parallelFormError, setParallelFormError] = useState('');
 
   useEffect(() => {
     if (!loop) return;
-    const source = loop.exit?.from;
-    const clean = loop.exits?.find((route) => route.from === source && route.condition === 'satisfied');
-    const conflict = loop.exits?.find((route) => route.from === source && route.condition === 'not_satisfied');
-    setParallelEnabled(loop.parallel !== undefined);
-    setParallelConfig(loop.parallel?.maxConcurrency === undefined ? {} : { maxConcurrency: loop.parallel.maxConcurrency });
-    setCleanFanInTarget(clean?.targetSocketId ?? '');
-    setConflictFanInTarget(conflict?.targetSocketId ?? '');
+    setParallelMaxConcurrency(loop.parallel?.maxConcurrency === undefined ? '' : String(loop.parallel.maxConcurrency));
     setParallelFormError('');
-  }, [loopId, loop?.parallel, loop?.exit?.from, loop?.exits]);
+  }, [loopId, loop?.parallel]);
 
   if (!activeLoadout || !loop || !loopId || !exit) return null;
 
   const loopLabel = formatLoopDisplayLabel(activeLoadout, loopId, loop.sockets);
-  const targetSocketIds = Object.keys(activeLoadout.sockets ?? {}).filter((socketId) => !loop.sockets.includes(socketId));
+  const generatorSocket = loop.consumes?.from ? activeLoadout.sockets?.[loop.consumes.from] : undefined;
+  const generatorDefinition = generatorSocket?.materia ? materia[generatorSocket.materia] : undefined;
+  const consumesParallelGenerator = generatorDefinition?.generator === true && generatorDefinition.parallel === true;
   const applyParallel = () => {
     if (!updateLoopParallel || !editPolicy.canEdit) return;
-    if (parallelEnabled && (!cleanFanInTarget || !conflictFanInTarget)) {
-      setParallelFormError('Parallel regions require distinct clean and conflict fan-in targets.');
-      return;
-    }
-    if (parallelEnabled && cleanFanInTarget === conflictFanInTarget) {
-      setParallelFormError('Clean and conflict fan-in targets must be different sockets.');
+    const trimmed = parallelMaxConcurrency.trim();
+    const maxConcurrency = trimmed ? Number(trimmed) : undefined;
+    if (maxConcurrency !== undefined && (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)) {
+      setParallelFormError('Max concurrency must be a positive whole number.');
       return;
     }
     setParallelFormError('');
-    updateLoopParallel(loopId, parallelEnabled ? parallelConfig : undefined, parallelEnabled ? { clean: cleanFanInTarget, conflict: conflictFanInTarget } : undefined);
+    updateLoopParallel(loopId, maxConcurrency === undefined ? undefined : { maxConcurrency });
   };
 
   return (
@@ -717,24 +711,17 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
         </div>
         {!editPolicy.canEdit && <p className="mt-4 rounded-xl border border-amber-300/30 bg-amber-950/30 px-4 py-3 text-sm text-amber-100" role="status">{editPolicy.reason}</p>}
         <p className="mt-4 text-sm text-slate-300">Loop exits are compiled into runtime parse/advance control flow on the exit source; they are not decorative metadata. Validation will block conflicting socket parse, advance, or continuation routes before save/run.</p>
-        <div className="mt-5 rounded-xl border border-cyan-200/20 bg-slate-950/35 p-4" data-testid={`parallel-loop-editor-${loopId}`}>
-          <label className="flex items-center gap-3 text-sm font-bold text-cyan-50">
-            <input data-testid={`parallel-loop-enabled-${loopId}`} type="checkbox" checked={parallelEnabled} disabled={!editPolicy.canEdit || !updateLoopParallel} title={readonlyTitle} onChange={(event) => { setParallelEnabled(event.target.checked); setParallelFormError(''); }} />
-            Enable experimental parallel execution
-          </label>
-          <p className="mt-2 text-xs text-slate-400">The graph stays symbolic: one planner stream becomes one child lane at runtime, while the parent region owns the fork, barrier, and fan-in.</p>
-          {parallelEnabled && <div className="mt-4 grid gap-3" data-testid={`parallel-loop-fields-${loopId}`}>
-            <label className="graph-field">Max concurrency override (optional)<input data-testid={`parallel-max-concurrency-${loopId}`} type="number" min="1" step="1" value={parallelConfig.maxConcurrency ?? ''} placeholder="Use app default" disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig(event.target.value === '' ? {} : { maxConcurrency: Number(event.target.value) })} /></label>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="graph-field">Clean fan-in target<select data-testid={`parallel-clean-target-${loopId}`} value={cleanFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setCleanFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
-              <label className="graph-field">Conflict resolver target<select data-testid={`parallel-conflict-target-${loopId}`} value={conflictFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setConflictFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
-            </div>
+        {consumesParallelGenerator && <div className="mt-5 rounded-xl border border-cyan-200/20 bg-slate-950/35 p-4" data-testid={`parallel-loop-editor-${loopId}`}>
+          <p className="text-sm font-bold text-cyan-50">Parallel generation concurrency</p>
+          <p className="mt-2 text-xs text-slate-400">Parallel execution is derived from the consuming generator. This loop may only override the app-level concurrency bound.</p>
+          <div className="mt-4 grid gap-3" data-testid={`parallel-loop-fields-${loopId}`}>
+            <label className="graph-field">Max concurrency override (optional)<input data-testid={`parallel-max-concurrency-${loopId}`} type="number" min="1" step="1" value={parallelMaxConcurrency} placeholder="Use app default" disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => { setParallelMaxConcurrency(event.target.value); setParallelFormError(''); }} /></label>
             {(parallelFormError || parallelError) && <p className="socket-property-error" role="alert" data-testid={`parallel-loop-error-${loopId}`}>{parallelFormError || parallelError}</p>}
-          </div>}
-          <div className="mt-4 flex flex-wrap gap-3">
-            <button type="button" className="materia-button" data-testid={`parallel-loop-apply-${loopId}`} disabled={!editPolicy.canEdit || !updateLoopParallel} title={readonlyTitle} onClick={applyParallel}>{parallelEnabled ? 'Apply parallel configuration' : 'Disable parallel execution'}</button>
           </div>
-        </div>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button type="button" className="materia-button" data-testid={`parallel-loop-apply-${loopId}`} disabled={!editPolicy.canEdit || !updateLoopParallel} title={readonlyTitle} onClick={applyParallel}>Apply concurrency override</button>
+          </div>
+        </div>}
         <div className="mt-5 grid gap-4" data-testid={`loop-editor-${loopId}`}>
           <div className="grid gap-3 sm:grid-cols-3">
             <label className="graph-field">Exit source<select data-testid={`loop-exit-source-${loopId}`} value={exit.from} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => updateLoopExit(loopId, { from: event.target.value })}>{loop.sockets.map((socketId) => <option key={socketId} value={socketId}>{socketDisplayLabel(socketId)}</option>)}</select></label>

@@ -167,6 +167,7 @@ export interface MateriaBehaviorConfig {
 }
 
 export interface MateriaConfig {
+  parallelism?: { maxConcurrency: number };
   activeLoadoutId?: string;
   activeLoadout?: string;
   loadouts?: Record<string, PipelineConfig>;

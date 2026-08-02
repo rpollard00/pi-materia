@@ -193,7 +193,10 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
                 <input data-testid="materia-multiturn" type="checkbox" checked={materiaForm.multiTurn} onChange={(event) => setMateriaForm({ ...materiaForm, multiTurn: event.target.checked })} />
               </label>
               <label className="graph-field graph-field-inline text-sm" title="Generator materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
-                <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
+                <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked, parallel: event.target.checked ? materiaForm.parallel : false })} />
+              </label>
+              <label className="graph-field graph-field-inline text-sm" title="Generate an intrinsic parallel schedule for this generator's single consuming loop.">Parallel generation
+                <input data-testid="materia-parallel" type="checkbox" checked={materiaForm.parallel} disabled={!materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, parallel: event.target.checked })} />
               </label>
               <label className="graph-field graph-field-inline text-sm" title="Allow concurrent child execution. This is trusted permission, not a sandbox or cwd-isolation guarantee; multiple scopes may share one cwd.">Parallel-safe child
                 <input data-testid="materia-parallel-safe" type="checkbox" checked={materiaForm.parallelSafe} onChange={(event) => setMateriaForm({ ...materiaForm, parallelSafe: event.target.checked })} />
@@ -210,7 +213,10 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
               <label className="graph-field">Timeout ms<input data-testid="materia-timeout" value={materiaForm.timeoutMs} onChange={(event) => setMateriaForm({ ...materiaForm, timeoutMs: event.target.value })} placeholder="60000" /></label>
               <ColorPickerField form={form} colorPicker={colorPicker} />
               <label className="graph-field graph-field-inline text-sm" title="Generator utility materia parse JSON and produce the canonical workItems envelope for downstream loops or generator pipeline stages.">Generator
-                <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked })} />
+                <input data-testid="materia-generator" type="checkbox" checked={materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, generator: event.target.checked, parallel: event.target.checked ? materiaForm.parallel : false })} />
+              </label>
+              <label className="graph-field graph-field-inline text-sm" title="Generate an intrinsic parallel schedule for this generator's single consuming loop.">Parallel generation
+                <input data-testid="materia-parallel" type="checkbox" checked={materiaForm.parallel} disabled={!materiaForm.generator} onChange={(event) => setMateriaForm({ ...materiaForm, parallel: event.target.checked })} />
               </label>
               <label className="graph-field graph-field-inline text-sm" title="Allow concurrent child execution. This is trusted permission, not a sandbox or cwd-isolation guarantee; multiple scopes may share one cwd.">Parallel-safe child
                 <input data-testid="materia-parallel-safe" type="checkbox" checked={materiaForm.parallelSafe} onChange={(event) => setMateriaForm({ ...materiaForm, parallelSafe: event.target.checked })} />

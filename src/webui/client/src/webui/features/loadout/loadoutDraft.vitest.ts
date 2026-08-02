@@ -130,6 +130,11 @@ describe('loadout draft mutations', () => {
     expect(config.loadouts.Beta).toMatchObject({ entry: 'Socket-1' });
   });
 
+  it('persists the workspace-neutral app concurrency bound', () => {
+    const payload = buildConfigToSave({ ...config, parallelism: { maxConcurrency: 4 } }, []);
+    expect(payload.parallelism).toEqual({ maxConcurrency: 4 });
+  });
+
   it('omits source-less shipped defaults and their deletion markers using loadoutSources', () => {
     const frozen = deepFreeze({
       ...config,

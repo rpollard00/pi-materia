@@ -120,6 +120,16 @@ describe('filterMateriaPalette and buildPaletteSearchText', () => {
     expect(ids(filterMateriaPalette(rows, materia, 'satisfaction'))).toEqual(['AutoEval']);
   });
 
+  it('indexes parallel generators distinctly from ordinary generators', () => {
+    const definitions: Materia = {
+      planner: { generator: true },
+      parallelPlanner: { generator: true, parallel: true },
+    };
+    const rows = entriesOf(definitions);
+    expect(ids(filterMateriaPalette(rows, definitions, 'generator'))).toEqual(['planner', 'parallelPlanner']);
+    expect(ids(filterMateriaPalette(rows, definitions, 'parallel generation'))).toEqual(['parallelPlanner']);
+  });
+
   it('requires every whitespace-separated token to match (AND semantics)', () => {
     const rows = entriesOf(materia);
     expect(ids(filterMateriaPalette(rows, materia, 'utility core'))).toEqual([]);
