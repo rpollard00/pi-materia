@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
+import { validateParallelismConfig } from "../domain/parallelLoop.js";
 import { isShippedUtilityScriptRef, resolveShippedUtilityScriptPath, syncShippedUtilityScripts } from "./shippedUtilities.js";
 import { normalizeMateriaCatalog, validateLoadoutMateriaReferences } from "../domain/materia.js";
 import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graphValidation.js";
@@ -625,6 +626,10 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   config.materia = normalizeMateriaParallelCapabilities(config.materia as unknown as Record<string, unknown>) as PiMateriaConfig["materia"];
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
+  const parallelismIssues = validateParallelismConfig(config.parallelism);
+  if (parallelismIssues.length > 0) {
+    throw new Error(parallelismIssues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
+  }
   validateFinalizationConfig(config.finalization);
   config = normalizeConfigRuntimeSockets(config);
   config = normalizeConfigLoadoutsForLoad(config);
@@ -649,6 +654,7 @@ function mergeConfigPatch(base: Partial<PiMateriaConfig>, patch: MateriaConfigPa
     budget: patch.budget ? { ...(base.budget ?? {}), ...patch.budget } : base.budget,
     limits: patch.limits ? { ...(base.limits ?? {}), ...patch.limits } : base.limits,
     compaction: patch.compaction ? { ...(base.compaction ?? {}), ...patch.compaction } : base.compaction,
+    parallelism: patch.parallelism ? { ...(base.parallelism ?? {}), ...patch.parallelism } as PiMateriaConfig["parallelism"] : base.parallelism,
     finalization: patch.finalization === null ? undefined : mergeFinalization(base.finalization, patch.finalization),
     loadouts: mergeLoadouts(base.loadouts, patch.loadouts, new Set<string>(), true),
     activeLoadout: patch.activeLoadout ?? base.activeLoadout,
@@ -747,6 +753,7 @@ function mergeConfig(base: PiMateriaConfig, parsed: Partial<PiMateriaConfig>, pr
     budget: { ...base.budget, ...(parsed.budget ?? {}) },
     limits: { ...base.limits, ...(parsed.limits ?? {}) },
     compaction: { ...base.compaction, ...(parsed.compaction ?? {}) },
+    parallelism: { ...base.parallelism, ...(parsed.parallelism ?? {}) } as PiMateriaConfig["parallelism"],
     finalization: mergeFinalization(base.finalization, parsed.finalization),
     loadouts: mergeLoadouts(base.loadouts, parsed.loadouts, protectedLoadoutNames),
     activeLoadout: parsed.activeLoadout ?? base.activeLoadout,

@@ -394,10 +394,10 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(parallelResult.errors)).toContain("must consume workItems");
 
     const unsupported = structuredClone(parallel);
-    (unsupported.loops!.work!.parallel as unknown as { workspaceMode: string }).workspaceMode = "git";
+    unsupported.loops!.work!.parallel!.maxConcurrency = 0;
     const result = validatePipelineGraph(unsupported);
     expect(result.ok).toBe(false);
-    expect(formatGraphValidationErrors(result.errors)).toContain("unsupported parallel workspace mode");
+    expect(formatGraphValidationErrors(result.errors)).toContain("positive safe integer");
   });
 
   test("validates deterministic parallel entry, child topology, and clean/conflict fan-in exits", () => {

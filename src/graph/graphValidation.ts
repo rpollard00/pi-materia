@@ -344,14 +344,6 @@ function validateParallelLoopTopology(
     });
   }
 
-  if (!isNormalizedPlanInput(parallel.planInput)) {
-    errors.push({
-      code: "invalid-loop",
-      source: `${loopPath}.parallel.planInput`,
-      message: `Parallel loop "${loopId}" requires parallel.planInput to be a normalized-plan state path starting with "state."; received ${JSON.stringify(parallel.planInput)}.`,
-    });
-  }
-
   if (!consumes) {
     errors.push({
       code: "invalid-loop",

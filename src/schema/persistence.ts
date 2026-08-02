@@ -15,6 +15,7 @@ export interface CurrentPersistedConfig {
   budget?: PiMateriaConfig["budget"];
   limits?: PiMateriaConfig["limits"];
   compaction?: PiMateriaConfig["compaction"];
+  parallelism?: PiMateriaConfig["parallelism"];
   finalization?: MateriaFinalizationConfig | null;
   loadouts?: Record<string, CurrentPersistedLoadout | null>;
   activeLoadoutId?: string;
@@ -158,6 +159,7 @@ export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Par
     ...(budget !== undefined ? { budget } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.parallelism !== undefined ? { parallelism: cloneRecord(config.parallelism) } : {}),
     ...(config.finalization !== undefined ? { finalization: config.finalization === null ? undefined : cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
@@ -174,6 +176,7 @@ export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>
     ...(budget !== undefined ? { budget } : {}),
     ...(config.limits !== undefined ? { limits: cloneRecord(config.limits) } : {}),
     ...(config.compaction !== undefined ? { compaction: cloneRecord(config.compaction) } : {}),
+    ...(config.parallelism !== undefined ? { parallelism: cloneRecord(config.parallelism) } : {}),
     ...(config.finalization !== undefined ? { finalization: cloneRecord(config.finalization) as MateriaFinalizationConfig } : {}),
     ...(config.loadouts !== undefined ? { loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, MateriaPipelineConfig | null>).map(([name, loadout]) => [name, loadout === null ? null : serializePipelineLoadout(loadout)])) } : {}),
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
@@ -249,7 +252,7 @@ function serializePipelineLoop(loop: MateriaLoopConfig): CurrentPersistedLoop {
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
     ...(loop.exit ? { exit: { ...loop.exit } } : {}),
-    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
+    ...(loop.parallel ? { parallel: canonicalLoopParallel(loop.parallel) as MateriaLoopConfig["parallel"] } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -296,7 +299,7 @@ function parseLoop(value: unknown, path: string, issues: DomainIssue[]): Loadout
     sockets: Array.isArray(rawSockets) ? rawSockets.filter((item): item is string => typeof item === "string") : [],
     ...(isPlainObject(value.consumes) ? { consumes: { ...value.consumes } as unknown as LoadoutLoop["consumes"] } : {}),
     ...(isPlainObject(value.iterator) ? { iterator: { ...value.iterator } as unknown as LoadoutLoop["iterator"] } : {}),
-    ...(value.parallel !== undefined ? { parallel: cloneRecord(value.parallel) as LoadoutLoop["parallel"] } : {}),
+    ...(value.parallel !== undefined ? { parallel: canonicalLoopParallel(value.parallel) as LoadoutLoop["parallel"] } : {}),
     ...(Array.isArray(value.exits) ? { exits: value.exits.map((exit) => ({ ...(isPlainObject(exit) ? exit : {}) })) as unknown as LoadoutLoop["exits"] } : {}),
   };
 }
@@ -306,7 +309,7 @@ function serializeLoop(loop: LoadoutLoop): PersistedLoopSchema {
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
-    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
+    ...(loop.parallel ? { parallel: canonicalLoopParallel(loop.parallel) as LoadoutLoop["parallel"] } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -316,7 +319,7 @@ function pipelineLoopToDomain(loop: MateriaLoopConfig): LoadoutLoop {
     sockets: [...(loop.sockets ?? [])],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
-    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
+    ...(loop.parallel ? { parallel: canonicalLoopParallel(loop.parallel) as LoadoutLoop["parallel"] } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -326,7 +329,7 @@ function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
     sockets: [...loop.sockets],
     ...(loop.consumes ? { consumes: { ...loop.consumes } } : {}),
     ...(loop.iterator ? { iterator: { ...loop.iterator } } : {}),
-    ...(loop.parallel ? { parallel: { ...loop.parallel } } : {}),
+    ...(loop.parallel ? { parallel: canonicalLoopParallel(loop.parallel) as MateriaLoopConfig["parallel"] } : {}),
     ...(loop.exits ? { exits: loop.exits.map((exit) => ({ ...exit })) } : {}),
   };
 }
@@ -334,7 +337,17 @@ function domainLoopToPipeline(loop: LoadoutLoop): MateriaLoopConfig {
 function normalizeLoopForApplication(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const { sockets: _sockets, ...rest } = value;
-  return { ...rest, ...(Array.isArray(value.sockets) ? { sockets: [...value.sockets] } : {}) };
+  return {
+    ...rest,
+    ...(value.parallel !== undefined ? { parallel: canonicalLoopParallel(value.parallel) } : {}),
+    ...(Array.isArray(value.sockets) ? { sockets: [...value.sockets] } : {}),
+  };
+}
+
+/** Drop legacy coordinator concerns at the persistence boundary. */
+function canonicalLoopParallel(value: unknown): unknown {
+  if (!isPlainObject(value)) return value;
+  return value.maxConcurrency === undefined ? {} : { maxConcurrency: value.maxConcurrency };
 }
 
 function cloneRecord<T>(value: T): T {

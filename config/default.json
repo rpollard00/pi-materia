@@ -3,6 +3,9 @@
   "limits": {
     "maxNoAdvanceCycles": 3
   },
+  "parallelism": {
+    "maxConcurrency": 2
+  },
   "budget": {
     "maxTokens": 10000000,
     "maxCostUsd": 20,
@@ -470,13 +473,7 @@
             "when": "satisfied",
             "to": "end"
           },
-          "parallel": {
-            "planInput": "state.parallelPlan",
-            "maxConcurrency": 2,
-            "workspaceMode": "jj",
-            "failurePolicy": "all_terminal",
-            "fanIn": "ordered"
-          },
+          "parallel": {},
           "sockets": [
             "Socket-6",
             "Socket-7",

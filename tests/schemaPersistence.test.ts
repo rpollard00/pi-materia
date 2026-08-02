@@ -77,13 +77,7 @@ describe("schema/persistence adapters", () => {
   });
 
   test("round-trips opt-in parallel loop metadata without changing sequential loop shape", () => {
-    const parallel = {
-      planInput: "state.parallelPlan",
-      maxConcurrency: 2,
-      workspaceMode: "jj",
-      failurePolicy: "all_terminal",
-      fanIn: "ordered",
-    } as const;
+    const parallel = { maxConcurrency: 2 } as const;
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",
       sockets: { "Socket-1": { materia: "Build" } },
@@ -103,7 +97,7 @@ describe("schema/persistence adapters", () => {
     expect(pipeline.loops?.parallel?.parallel).toEqual(parallel);
   });
 
-  test("rejects unsupported parallel workspace and policy values clearly", () => {
+  test("migrates legacy coordinator fields and rejects invalid concurrency bounds", () => {
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",
       sockets: { "Socket-1": { materia: "Build" } },
@@ -112,7 +106,7 @@ describe("schema/persistence adapters", () => {
           sockets: ["Socket-1"],
           parallel: {
             planInput: "state.parallelPlan",
-            maxConcurrency: 2,
+            maxConcurrency: 0,
             workspaceMode: "git",
             failurePolicy: "fail_fast",
             fanIn: "completion_order",
@@ -123,13 +117,8 @@ describe("schema/persistence adapters", () => {
 
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
-    expect(parsed.issues.map((issue) => issue.path)).toEqual(expect.arrayContaining([
-      "loadout.loops.work.parallel.workspaceMode",
-      "loadout.loops.work.parallel.failurePolicy",
-      "loadout.loops.work.parallel.fanIn",
-    ]));
-    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("unsupported parallel workspace mode");
-    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("unsupported parallel failure policy");
+    expect(parsed.issues.map((issue) => issue.path)).toContain("loadout.loops.work.parallel.maxConcurrency");
+    expect(parsed.issues.map((issue) => issue.message).join("\n")).toContain("positive safe integer");
   });
 
   test("reports malformed loadout data and missing optional fields remain optional", () => {

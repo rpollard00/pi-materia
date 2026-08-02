@@ -86,7 +86,7 @@ describe('parallel loop symbolic visuals', () => {
           sockets: ['Socket-2', 'Socket-3'],
           consumes: { from: 'Socket-1', output: 'workItems' },
           exit: { from: 'Socket-3', when: 'satisfied', to: 'end' },
-          parallel: { planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' },
+          parallel: { maxConcurrency: 2 },
           exits: [
             { id: 'exit:Socket-3:satisfied', from: 'Socket-3', condition: 'satisfied', targetSocketId: 'Socket-4' },
             { id: 'exit:Socket-3:not_satisfied', from: 'Socket-3', condition: 'not_satisfied', targetSocketId: 'Socket-5' },

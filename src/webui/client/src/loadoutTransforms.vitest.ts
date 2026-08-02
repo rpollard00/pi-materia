@@ -139,15 +139,11 @@ describe('immutable loadout transforms', () => {
       },
     } as PipelineConfig);
     const next = updateLoopParallelInLoadout(previous, 'work', {
-      planInput: 'state.parallelPlan',
       maxConcurrency: 2,
-      workspaceMode: 'jj',
-      failurePolicy: 'all_terminal',
-      fanIn: 'ordered',
     }, { clean: 'Socket-5', conflict: 'Socket-6' });
 
     expect(next).not.toBe(previous);
-    expect(next.loops?.work.parallel).toEqual({ planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' });
+    expect(next.loops?.work.parallel).toEqual({ maxConcurrency: 2 });
     expect(next.loops?.work.exits).toEqual([
       { id: 'exit:Socket-4:always', from: 'Socket-4', condition: 'always', targetSocketId: 'Socket-2' },
       { id: 'exit:Socket-4:satisfied', from: 'Socket-4', condition: 'satisfied', targetSocketId: 'Socket-5' },

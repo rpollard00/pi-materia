@@ -647,7 +647,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.sockets?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to])}` : undefined;
     const parallel = loop.parallel !== undefined;
     const parallelSummary = parallel
-      ? `Parallel: ${loop.parallel?.maxConcurrency ?? 'invalid'} lanes • ${loop.parallel?.workspaceMode ?? 'unconfigured'} workspace • ${loop.parallel?.fanIn ?? 'unconfigured'} fan-in`
+      ? `Parallel: ${loop.parallel?.maxConcurrency ?? 'app default'} concurrent streams`
       : undefined;
     const summary = [consumer, exit, parallelSummary].filter(Boolean).join(' • ');
     const label = formatLoopDisplayLabel(loadout, id, loop.sockets);

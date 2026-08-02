@@ -299,7 +299,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
         ctx,
         state,
         loopId,
-        config,
+        config: { maxConcurrency: parallelCandidates[0]![1].maxConcurrency },
         onPrepared: async () => {
           const persistedLoadoutIdentity = await deps.state.resolvePersistedCastLoadoutIdentity(state);
           state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;

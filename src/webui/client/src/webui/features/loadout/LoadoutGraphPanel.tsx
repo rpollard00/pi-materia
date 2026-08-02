@@ -668,7 +668,7 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
   const readonlyTitle = !editPolicy.canEdit ? editPolicy.reason : undefined;
   const exit = useMemo(() => loop ? (loop.exit ?? { from: loop.sockets[loop.sockets.length - 1] ?? '', when: 'satisfied' as MateriaEdgeCondition, to: 'end' }) : undefined, [loop]);
   const [parallelEnabled, setParallelEnabled] = useState(false);
-  const [parallelConfig, setParallelConfig] = useState<MateriaLoopParallelConfig>({ planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj', failurePolicy: 'all_terminal', fanIn: 'ordered' });
+  const [parallelConfig, setParallelConfig] = useState<MateriaLoopParallelConfig>({});
   const [cleanFanInTarget, setCleanFanInTarget] = useState('');
   const [conflictFanInTarget, setConflictFanInTarget] = useState('');
   const [parallelFormError, setParallelFormError] = useState('');
@@ -679,13 +679,7 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
     const clean = loop.exits?.find((route) => route.from === source && route.condition === 'satisfied');
     const conflict = loop.exits?.find((route) => route.from === source && route.condition === 'not_satisfied');
     setParallelEnabled(loop.parallel !== undefined);
-    setParallelConfig({
-      planInput: loop.parallel?.planInput ?? 'state.parallelPlan',
-      maxConcurrency: loop.parallel?.maxConcurrency ?? 2,
-      workspaceMode: loop.parallel?.workspaceMode ?? 'jj',
-      failurePolicy: loop.parallel?.failurePolicy ?? 'all_terminal',
-      fanIn: loop.parallel?.fanIn ?? 'ordered',
-    });
+    setParallelConfig(loop.parallel?.maxConcurrency === undefined ? {} : { maxConcurrency: loop.parallel.maxConcurrency });
     setCleanFanInTarget(clean?.targetSocketId ?? '');
     setConflictFanInTarget(conflict?.targetSocketId ?? '');
     setParallelFormError('');
@@ -730,15 +724,7 @@ function LoopControlModal({ activeLoadout, loop, loopId, editPolicy, closeLoopCo
           </label>
           <p className="mt-2 text-xs text-slate-400">The graph stays symbolic: one planner stream becomes one child lane at runtime, while the parent region owns the fork, barrier, and fan-in.</p>
           {parallelEnabled && <div className="mt-4 grid gap-3" data-testid={`parallel-loop-fields-${loopId}`}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="graph-field">Normalized plan input<input data-testid={`parallel-plan-input-${loopId}`} value={parallelConfig.planInput} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, planInput: event.target.value })} /></label>
-              <label className="graph-field">Max concurrency<input data-testid={`parallel-max-concurrency-${loopId}`} type="number" min="1" step="1" value={parallelConfig.maxConcurrency} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, maxConcurrency: Number(event.target.value) })} /></label>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <label className="graph-field">Workspace mode<select data-testid={`parallel-workspace-mode-${loopId}`} value={parallelConfig.workspaceMode} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, workspaceMode: event.target.value as MateriaLoopParallelConfig['workspaceMode'] })}><option value="jj">jj workspace</option></select></label>
-              <label className="graph-field">Failure policy<select data-testid={`parallel-failure-policy-${loopId}`} value={parallelConfig.failurePolicy} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, failurePolicy: event.target.value as MateriaLoopParallelConfig['failurePolicy'] })}><option value="all_terminal">All lanes terminal</option></select></label>
-              <label className="graph-field">Fan-in order<select data-testid={`parallel-fan-in-${loopId}`} value={parallelConfig.fanIn} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig({ ...parallelConfig, fanIn: event.target.value as MateriaLoopParallelConfig['fanIn'] })}><option value="ordered">Stream order</option></select></label>
-            </div>
+            <label className="graph-field">Max concurrency override (optional)<input data-testid={`parallel-max-concurrency-${loopId}`} type="number" min="1" step="1" value={parallelConfig.maxConcurrency ?? ''} placeholder="Use app default" disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setParallelConfig(event.target.value === '' ? {} : { maxConcurrency: Number(event.target.value) })} /></label>
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="graph-field">Clean fan-in target<select data-testid={`parallel-clean-target-${loopId}`} value={cleanFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setCleanFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>
               <label className="graph-field">Conflict resolver target<select data-testid={`parallel-conflict-target-${loopId}`} value={conflictFanInTarget} disabled={!editPolicy.canEdit} title={readonlyTitle} onChange={(event) => setConflictFanInTarget(event.target.value)}><option value="">choose socket…</option>{targetSocketIds.map((socketId) => <option key={socketId} value={socketId}>{socketLabel(socketId)}</option>)}</select></label>

@@ -2,6 +2,7 @@ import type { ToolScopeSpec } from "./domain/toolScope.js";
 import type { CatalogDriftInfo, CatalogOriginProvenance } from "./domain/catalogProvenance.js";
 import type { MateriaThinkingLevel } from "./domain/thinking.js";
 import type { ScopePath } from "./domain/scope.js";
+import type { LoopParallelismConfig, ParallelismConfig } from "./domain/parallelLoop.js";
 import type {
   MateriaParallelFanInBehavior,
   MateriaParallelFailurePolicy,
@@ -39,6 +40,8 @@ export interface PiMateriaConfig {
   budget?: MateriaBudgetConfig;
   limits?: MateriaLimitsConfig;
   compaction?: MateriaCompactionConfig;
+  /** App-level default bound for concurrently running generated streams. */
+  parallelism?: ParallelismConfig;
   /** Producer-aware finalization rollout policy. Omitted keeps validated direct JSON. */
   finalization?: MateriaFinalizationConfig;
   /** Named graph configs that share the top-level materia, limits, budget, and artifactDir. */
@@ -760,26 +763,8 @@ export interface MateriaAdvanceConfig {
   when?: string;
 }
 
-/**
- * Opt-in execution metadata for an existing loop region.
- *
- * The presence of `parallel` on a loop is the opt-in switch. The values are
- * deliberately closed for this experimental MVP: only normalized plans,
- * jj-backed workspaces, all-terminal failure handling, and stream-ordered
- * fan-in are supported.
- */
-export interface MateriaLoopParallelConfig {
-  /** State/input path containing the deterministic normalized parallel plan. */
-  planInput: string;
-  /** Maximum number of live child lanes. Must be a positive safe integer. */
-  maxConcurrency: number;
-  /** Workspace backend/mode used for lane isolation. */
-  workspaceMode: MateriaParallelWorkspaceMode;
-  /** Failure aggregation policy applied after every lane is terminal. */
-  failurePolicy: MateriaParallelFailurePolicy;
-  /** Deterministic fan-in behavior for accepted lane heads. */
-  fanIn: MateriaParallelFanInBehavior;
-}
+/** Workspace-neutral optional override of the app-level parallelism bound. */
+export interface MateriaLoopParallelConfig extends LoopParallelismConfig {}
 
 export interface MateriaLoopConfig {
   /** Socket ids contained by this loop region. */

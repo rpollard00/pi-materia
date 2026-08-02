@@ -17,6 +17,7 @@ import type {
   MateriaModelSettings,
 } from "../config/modelSettings.js";
 import { parallelFanInHandoff } from "../domain/parallelFanIn.js";
+import { resolveParallelMaxConcurrency } from "../domain/parallelLoop.js";
 import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
 import { getResolvedPipelineSocket, loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
@@ -260,13 +261,15 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
         return;
       }
       try {
+        const config = await deps.state.loadConfigFromState(state);
+        if (!config.parallelism) throw new Error("App-level parallelism configuration is unavailable.");
         if (await deps.parallel.dispatch({
           pi,
           ctx,
           state,
           socket,
           loopId: parallelRegion.loopId,
-          config: parallelRegion.config,
+          config: { maxConcurrency: resolveParallelMaxConcurrency(config.parallelism, parallelRegion.config) },
           onFanIn: async ({ loopId, result }) => {
             const loopConfig = state.pipeline.loops?.[loopId];
             const routeSource = loopConfig?.exit?.from ?? loopConfig?.exits?.[0]?.from;

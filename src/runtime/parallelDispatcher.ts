@@ -76,13 +76,17 @@ export interface ParallelRunFailureInput {
   reason: string;
 }
 
+export interface EffectiveParallelConcurrencyConfig {
+  maxConcurrency: number;
+}
+
 export interface ParallelLoopDispatchInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
   state: MateriaCastState;
   socket: ResolvedMateriaSocket;
   loopId: string;
-  config: MateriaLoopParallelConfig;
+  config: EffectiveParallelConcurrencyConfig;
   /** Parent-session continuation at the symbolic fan-in barrier. */
   onFanIn?: (input: ParallelFanInCompletionInput) => Promise<void>;
   /** Turn an all-terminal coordinator failure into a parent cast failure. */
@@ -113,7 +117,7 @@ export interface ParallelLoopReviveInput {
   ctx: ExtensionContext;
   state: MateriaCastState;
   loopId: string;
-  config: MateriaLoopParallelConfig;
+  config: EffectiveParallelConcurrencyConfig;
   /** Reinstall parent eventing/UI services before child callbacks can route. */
   onPrepared?: () => Promise<void>;
   /** Continue at the symbolic fan-in barrier after all revived lanes succeed. */
@@ -312,7 +316,7 @@ export class ParallelLoopDispatcher {
       // parallel entry must preserve that invariant before creating workspaces.
       await this.#deps.budget?.assertBudget?.(input.state, input.ctx);
 
-      const plan = readNormalizedPlan(input.state, input.config.planInput);
+      const plan = readNormalizedPlan(input.state, "state.parallelPlan");
       const workItems = readWorkItems(input.state);
       if (plan.workItemCount !== workItems.length) {
         throw new Error(`Parallel loop ${JSON.stringify(input.loopId)} plan workItemCount ${plan.workItemCount} does not match state.workItems length ${workItems.length}.`);
@@ -352,11 +356,11 @@ export class ParallelLoopDispatcher {
         configIdentity: {
           configHash: input.state.configHash,
           loopId: input.loopId,
-          planInput: input.config.planInput,
+          planInput: "state.parallelPlan",
           maxConcurrency: input.config.maxConcurrency,
-          workspaceMode: input.config.workspaceMode,
-          failurePolicy: input.config.failurePolicy,
-          fanIn: input.config.fanIn,
+          workspaceMode: "jj",
+          failurePolicy: "all_terminal",
+          fanIn: "ordered",
         },
         baseline: baseline.baseline,
         queue,
@@ -431,9 +435,9 @@ export class ParallelLoopDispatcher {
 
     let plan: NormalizedParallelPlan | undefined;
     try {
-      plan = readNormalizedPlan(input.state, input.config.planInput);
+      plan = readNormalizedPlan(input.state, "state.parallelPlan");
     } catch (error) {
-      issues.push({ code: "plan_invalid", path: input.config.planInput, message: boundedFailureReason(errorMessage(error)) });
+      issues.push({ code: "plan_invalid", path: "state.parallelPlan", message: boundedFailureReason(errorMessage(error)) });
     }
 
     let baseline: ParallelWorkspaceRevision | undefined;
@@ -448,7 +452,13 @@ export class ParallelLoopDispatcher {
         parentCastId: input.state.castId,
         loopId: input.loopId,
         configHash: input.state.configHash,
-        config: input.config,
+        config: {
+          planInput: "state.parallelPlan",
+          maxConcurrency: input.config.maxConcurrency,
+          workspaceMode: "jj",
+          failurePolicy: "all_terminal",
+          fanIn: "ordered",
+        },
         plan: plan as ParallelRecoveryPlan,
         baseline,
         run,
@@ -478,7 +488,7 @@ export class ParallelLoopDispatcher {
 
     const originalRun = input.state.parallelRuns?.[input.loopId];
     if (!originalRun) throw new Error(`No parallel run exists for loop ${JSON.stringify(input.loopId)}.`);
-    const plan = readNormalizedPlan(input.state, input.config.planInput);
+    const plan = readNormalizedPlan(input.state, "state.parallelPlan");
     const baseline = await this.#deps.workspaces.pinBaseline(input.state.cwd);
     const workItems = readWorkItems(input.state);
     if (plan.workItemCount !== workItems.length) {
@@ -846,21 +856,9 @@ export class ParallelLoopDispatcher {
     }
     if (!this.#input || this.#input.state.castId !== input.state.castId || this.#input.loopId !== loopId) {
       const run = this.#run;
-      const config: MateriaLoopParallelConfig = run
-        ? {
-            planInput: run.configIdentity.planInput,
-            maxConcurrency: run.configIdentity.maxConcurrency,
-            workspaceMode: run.configIdentity.workspaceMode,
-            failurePolicy: run.configIdentity.failurePolicy,
-            fanIn: run.configIdentity.fanIn,
-          }
-        : {
-            planInput: "state.parallelPlan",
-            maxConcurrency: 1,
-            workspaceMode: "jj",
-            failurePolicy: "all_terminal",
-            fanIn: "ordered",
-          };
+      const config: EffectiveParallelConcurrencyConfig = {
+        maxConcurrency: run?.configIdentity.maxConcurrency ?? 1,
+      };
       this.#input = {
         pi: input.pi,
         ctx: input.ctx ?? this.#input?.ctx ?? {} as ExtensionContext,
@@ -2108,13 +2106,10 @@ function isParallelLoopMember(state: MateriaCastState, loopId: string, socketId:
   return Array.isArray(members) && members.includes(socketId);
 }
 
-function validateDispatchConfig(config: MateriaLoopParallelConfig): void {
+function validateDispatchConfig(config: EffectiveParallelConcurrencyConfig): void {
   if (!Number.isSafeInteger(config.maxConcurrency) || config.maxConcurrency < 1) {
-    throw new Error("Parallel loop maxConcurrency must be a positive safe integer.");
+    throw new Error("Parallel maxConcurrency must be a positive safe integer.");
   }
-  if (config.workspaceMode !== "jj") throw new Error(`Unsupported parallel workspace mode ${JSON.stringify(config.workspaceMode)}; only jj is available.`);
-  if (config.failurePolicy !== "all_terminal") throw new Error(`Unsupported parallel failure policy ${JSON.stringify(config.failurePolicy)}; only all_terminal is available.`);
-  if (config.fanIn !== "ordered") throw new Error(`Unsupported parallel fan-in behavior ${JSON.stringify(config.fanIn)}; only ordered is available.`);
 }
 
 /** Find the opt-in loop owning a socket, without inferring graph routes. */

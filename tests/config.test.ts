@@ -818,13 +818,8 @@ describe("config loadouts", () => {
     const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
     expect(rawDefault.activeLoadout).toBe("Full-Auto");
     expect(experimental).toMatchObject({ id: "default:parallel-experimental", lockState: "locked" });
-    expect(experimental?.loops?.parallelWork?.parallel).toEqual({
-      planInput: "state.parallelPlan",
-      maxConcurrency: 2,
-      workspaceMode: "jj",
-      failurePolicy: "all_terminal",
-      fanIn: "ordered",
-    });
+    expect(rawDefault.parallelism).toEqual({ maxConcurrency: 2 });
+    expect(experimental?.loops?.parallelWork?.parallel).toEqual({});
     for (const id of ["Parallel-Plan", "Parallel-Integration-Eval", "Parallel-Resolver"]) {
       expect(rawDefault.materia?.[id]?.lockState, id).toBe("locked");
     }
@@ -855,7 +850,8 @@ describe("config loadouts", () => {
       expect(pipeline.entry.id).toBe("Socket-1");
       expect(pipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallel: true });
       expect(pipeline.sockets["Socket-5"].materiaId).toBe("Normalize-Parallel-Streams");
-      expect(pipeline.loops?.parallelWork?.parallel).toMatchObject({ planInput: "state.parallelPlan", maxConcurrency: 2, workspaceMode: "jj" });
+      expect(pipeline.loops?.parallelWork?.parallel).toEqual({});
+      expect(loaded.config.parallelism).toEqual({ maxConcurrency: 2 });
       expect(pipeline.loops?.parallelWork?.exits).toEqual(expect.arrayContaining([
         expect.objectContaining({ condition: "satisfied", targetSocketId: "Socket-9" }),
         expect.objectContaining({ condition: "not_satisfied", targetSocketId: "Socket-10" }),

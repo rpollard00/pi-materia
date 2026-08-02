@@ -101,11 +101,8 @@ export interface AdvanceConfig {
 }
 
 export interface LoadoutLoopParallelConfig {
-  planInput: string;
-  maxConcurrency: number;
-  workspaceMode: "jj";
-  failurePolicy: "all_terminal";
-  fanIn: "ordered";
+  /** Optional override; omitted uses the app-level parallelism bound. */
+  maxConcurrency?: number;
 }
 
 export interface LoadoutLoop {
