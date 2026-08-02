@@ -80,6 +80,8 @@ export interface ChildCastTerminalResult {
   output?: unknown;
   /** Aggregate child usage at terminal time, when the adapter reports it. */
   usage?: ChildCastUsage;
+  /** Validated scope active when the child became terminal. */
+  executionScope?: ExecutionScope;
   /** Set when the terminal state was caused by an abort request. */
   abortReason?: string;
 }

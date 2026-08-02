@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { rename, writeFile } from "node:fs/promises";
+import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import {
   type ChildCastCompiledLoadout,
   type ChildCastTerminalResult,
@@ -138,6 +139,11 @@ export function terminalFromEvent(event: Record<string, unknown>, now: () => num
   if (!candidate) return undefined;
   const status = candidate.status;
   if (status !== "succeeded" && status !== "failed" && status !== "interrupted") return undefined;
+  const executionScope = terminalExecutionScope(candidate);
+  // A present scope is part of the terminal acceptance protocol. Never
+  // silently fall back to the launch scope when that terminal snapshot is
+  // malformed; ignoring the marker leaves the child unaccepted on exit.
+  if (Object.hasOwn(candidate, "executionScope") && !executionScope) return undefined;
   return {
     status,
     accepted: candidate.accepted === true && status === "succeeded",
@@ -146,8 +152,29 @@ export function terminalFromEvent(event: Record<string, unknown>, now: () => num
     ...(typeof candidate.error === "string" ? { error: candidate.error } : {}),
     ...(Object.prototype.hasOwnProperty.call(candidate, "output") ? { output: clone(candidate.output) } : {}),
     ...(childUsage(candidate.usage) ? { usage: childUsage(candidate.usage) } : {}),
+    ...(executionScope ? { executionScope } : {}),
     ...(typeof candidate.abortReason === "string" ? { abortReason: candidate.abortReason } : {}),
   };
+}
+
+function terminalExecutionScope(candidate: Record<string, unknown>): ExecutionScope | undefined {
+  if (!Object.hasOwn(candidate, "executionScope")) return undefined;
+  const value = candidate.executionScope;
+  if (!isRecord(value)
+    || !Object.hasOwn(value, "state")
+    || !Object.hasOwn(value, "exports")
+    || !isRecord(value.state)
+    || !isRecord(value.exports)) return undefined;
+  try {
+    return createExecutionScope({
+      id: value.id as string,
+      cwd: value.cwd as string,
+      state: value.state as Record<string, unknown>,
+      exports: value.exports as ExecutionScope["exports"],
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 export function extractEventOutput(event: Record<string, unknown>): unknown {

@@ -1,3 +1,4 @@
+import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import {
   EMPTY_CHILD_CAST_USAGE,
   type ChildCastAbortInput,
@@ -37,6 +38,7 @@ export interface CompleteChildCastInput {
   message?: string;
   output?: unknown;
   usage?: ChildCastUsage;
+  executionScope?: ExecutionScope;
   occurredAt?: number;
 }
 
@@ -223,6 +225,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       ...(input.message !== undefined ? { message: input.message } : {}),
       ...(input.output !== undefined ? { output: clone(input.output) } : {}),
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
+      ...(input.executionScope !== undefined ? { executionScope: cloneExecutionScope(input.executionScope) } : {}),
     });
   }
 
@@ -273,6 +276,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       accepted: result.accepted,
       updatedAt: timestamp,
       ...(usage ? { usage: clone(usage) } : {}),
+      ...(result.executionScope ? { executionScope: cloneExecutionScope(result.executionScope) } : {}),
       terminalResult: clone({ ...terminalResult, ...(usage ? { usage } : {}) }),
     });
     this.emit(childCastId, { type: "terminal", payload: terminalResult, ...(usage ? { usage } : {}), occurredAt: timestamp });

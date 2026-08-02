@@ -50,6 +50,8 @@ export type {
 
 export { activeMateriaSystemPrompt, buildIsolatedMateriaContext, projectMateriaContext } from "./application/promptAssembly.js";
 export { summarizeParallelRun, summarizeParallelRuns } from "./application/parallelMonitoring.js";
+export { collectAcceptedParallelBranches, intrinsicParallelFanInHandoff } from "./domain/parallelFanIn.js";
+export type { IntrinsicParallelFanInResult, OrderedParallelBranchResult } from "./domain/parallelFanIn.js";
 export type { ParallelLaneMonitorSummary, ParallelRunMonitorCounts, ParallelRunMonitorSummary } from "./application/parallelMonitoring.js";
 export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameSocketRecoveryAllowanceForRevive } from "./application/recoveryPolicy.js";
 export { defaultProactiveCompactionThresholdPercent } from "./runtime/compaction.js";

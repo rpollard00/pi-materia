@@ -7,7 +7,7 @@ import {
 } from "../application/recoveryPolicy.js";
 import { resolveArtifactRoot } from "../config/config.js";
 import { cloneExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
-import { parallelFanInHandoff } from "../domain/parallelFanIn.js";
+import { intrinsicParallelFanInHandoff } from "../domain/parallelFanIn.js";
 import { isParallelLaneRevivalCandidate } from "../domain/parallelRecovery.js";
 import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
@@ -344,7 +344,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
           const routeSource = completedLoop?.exit?.from ?? completedLoop?.exits?.[0]?.from;
           const route = resolveLoopExitRoute(completedLoop, { from: routeSource, satisfied: result.satisfied });
           if (!route) throw new Error(`Parallel loop ${JSON.stringify(completedLoopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
-          const handoff = parallelFanInHandoff(result);
+          const handoff = intrinsicParallelFanInHandoff(result);
           const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
             ? state.data.envelope as Record<string, unknown>
             : {};

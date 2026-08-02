@@ -17,7 +17,7 @@ import type {
   AppliedMateriaModelSettings,
   MateriaModelSettings,
 } from "../config/modelSettings.js";
-import { parallelFanInHandoff } from "../domain/parallelFanIn.js";
+import { intrinsicParallelFanInHandoff } from "../domain/parallelFanIn.js";
 import { resolveParallelMaxConcurrency } from "../domain/parallelLoop.js";
 import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
@@ -278,7 +278,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
             if (!route) {
               throw new Error(`Parallel loop ${JSON.stringify(loopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
             }
-            const handoff = parallelFanInHandoff(result);
+            const handoff = intrinsicParallelFanInHandoff(result);
             const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
               ? state.data.envelope as Record<string, unknown>
               : {};

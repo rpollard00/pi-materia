@@ -75,13 +75,19 @@ describe("Pi child cast runner", () => {
 
     child.stdout.write('{"type":"message_start"');
     child.stdout.write(',"payload":{"text":"partial"}}\n{"type":"pi_materia_child_terminal","result":');
-    child.stdout.write('{"status":"succeeded","accepted":true,"endedAt":101}}\n');
+    child.stdout.write('{"status":"succeeded","accepted":true,"endedAt":101,"executionScope":{"id":"scope-workspace","cwd":"/tmp/workspace","state":{"bookmark":"lane-a"},"exports":{"workspace":{"producer":"spawn","value":{"name":"ws-a"}}}}}}\n');
     child.finish();
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     const observed = await runner.observe({ childCastId: started.childCastId, afterSequence: 1 });
     expect(observed?.events.map((event) => event.type)).toContain("message_start");
     expect(observed?.snapshot.terminalResult).toMatchObject({ status: "succeeded", accepted: true });
+    expect(observed?.snapshot.executionScope).toEqual({
+      id: "scope-workspace",
+      cwd: "/tmp/workspace",
+      state: { bookmark: "lane-a" },
+      exports: { workspace: { producer: "spawn", value: { name: "ws-a" } } },
+    });
   });
 
   test("bounds stderr and terminates the process tree on abort", async () => {

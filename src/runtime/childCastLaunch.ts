@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ChildCastLaunchSpec } from "../application/childCastRunner.js";
+import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import type { MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 import type { MateriaPluginAdapters } from "./pluginAdapters.js";
 
@@ -67,6 +68,7 @@ interface ChildTerminalPayload {
   error?: string;
   output?: unknown;
   usage?: unknown;
+  executionScope?: ExecutionScope;
 }
 
 function terminalResult(state: MateriaCastState | undefined): ChildTerminalPayload {
@@ -81,6 +83,7 @@ function terminalResult(state: MateriaCastState | undefined): ChildTerminalPaylo
       endedAt: Date.now(),
       error: "Child cast remained active after Pi became idle.",
       usage: { tokens: usage.tokens, cost: usage.cost },
+      executionScope: cloneExecutionScope(state.activeScope),
     };
   }
   if (state.phase === "complete" && state.socketState === "complete" && !state.failedReason) {
@@ -91,6 +94,7 @@ function terminalResult(state: MateriaCastState | undefined): ChildTerminalPaylo
       message: state.runState.lastMessage,
       ...(state.lastJson !== undefined ? { output: state.lastJson } : state.lastOutput !== undefined ? { output: state.lastOutput } : {}),
       usage: { tokens: usage.tokens, cost: usage.cost },
+      executionScope: cloneExecutionScope(state.activeScope),
     };
   }
   return {
@@ -100,6 +104,7 @@ function terminalResult(state: MateriaCastState | undefined): ChildTerminalPaylo
     error: state.failedReason ?? "Child cast ended without an accepted terminal state.",
     ...(state.lastJson !== undefined ? { output: state.lastJson } : state.lastOutput !== undefined ? { output: state.lastOutput } : {}),
     usage: { tokens: usage.tokens, cost: usage.cost },
+    executionScope: cloneExecutionScope(state.activeScope),
   };
 }
 

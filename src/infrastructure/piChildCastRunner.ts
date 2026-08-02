@@ -2,6 +2,7 @@ import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process"
 import { fileURLToPath } from "node:url";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { cloneExecutionScope } from "../domain/executionScope.js";
 import {
   EMPTY_CHILD_CAST_USAGE,
   type ChildCastAbortInput,
@@ -599,6 +600,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     if (record.snapshot.terminalResult) return;
     record.snapshot.status = result.status;
     record.snapshot.accepted = result.accepted;
+    if (result.executionScope) record.snapshot.executionScope = cloneExecutionScope(result.executionScope);
     record.snapshot.terminalResult = clone(result);
     record.snapshot.updatedAt = result.endedAt;
     if (record.snapshot.abort && result.abortReason) record.snapshot.abort.completedAt = result.endedAt;

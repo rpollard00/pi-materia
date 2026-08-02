@@ -74,13 +74,31 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(state.parallelRuns?.build?.lanes["lane-a"]?.workspace).toBeUndefined();
   });
 
-  test("queues in stream order and accepts opaque outputs without revision heads", async () => {
+  test("fans in once with outputs and scope exports in stream order", async () => {
     const state = makeState();
     const events: Array<{ type: string; data: any }> = [];
+    const fanIns: any[] = [];
     const { childRunner, dispatcher: subject } = dispatcher(undefined, { artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => events.push({ type, data }) } });
-    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 2 } });
+    await subject.dispatch({
+      pi: {} as any,
+      ctx: {} as any,
+      state,
+      socket: {} as any,
+      loopId: "build",
+      config: { maxConcurrency: 2 },
+      onFanIn: async (input) => { fanIns.push(input); },
+    });
     const laneA = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-a")!;
-    childRunner.complete(laneA.identity.childCastId, { output: { satisfied: true, result: "A" } });
+    const replacementScope = createExecutionScope({
+      id: `${laneA.executionScope.id}:workspace`,
+      cwd: "/tmp/lane-a-workspace",
+      state: { bookmark: "lane-a" },
+      exports: { workspace: { producer: "spawn-jj-workspace", value: { name: "lane-a-workspace" } } },
+    });
+    childRunner.complete(laneA.identity.childCastId, {
+      output: { satisfied: true, result: "A" },
+      executionScope: replacementScope,
+    });
     await flush(childRunner);
 
     expect(childRunner.listSnapshots().map((child) => child.identity.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
@@ -90,11 +108,48 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     await flush(childRunner);
 
     const run = state.parallelRuns!.build!;
-    expect(run.phase).toBe("fan_in");
-    expect(run.fanInPhase).toBe("ready");
+    expect(run.phase).toBe("completed");
+    expect(run.fanInPhase).toBe("accepted");
     expect(run.lanes["lane-a"]?.acceptedHead).toBeUndefined();
     expect(run.lanes["lane-a"]?.terminalOutput).toEqual({ satisfied: true, result: "A" });
+    expect(fanIns).toHaveLength(1);
+    expect(fanIns[0].result.orderedBranches.map((branch: any) => branch.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
+    expect(fanIns[0].result.orderedBranches[0]).toMatchObject({
+      terminalOutput: { satisfied: true, result: "A" },
+      scope: { id: "cast:cast-1:base:branch:build:lane-a:workspace", cwd: "/tmp/lane-a-workspace" },
+      scopeExports: { workspace: { producer: "spawn-jj-workspace", value: { name: "lane-a-workspace" } } },
+    });
+    expect(fanIns[0].result.orderedBranches[0].state).toBeUndefined();
+    expect(state.branchScopes[replacementScope.id]).toEqual(replacementScope);
     expect(events.find((event) => event.type === "parallel_branches_terminal")?.data.orderedBranches.map((branch: any) => branch.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
+  });
+
+  test("waits for all terminal branches and fails instead of invoking fan-in", async () => {
+    const state = makeState();
+    const failures: any[] = [];
+    const fanIns: any[] = [];
+    const { childRunner, dispatcher: subject } = dispatcher();
+    await subject.dispatch({
+      pi: {} as any,
+      ctx: {} as any,
+      state,
+      socket: {} as any,
+      loopId: "build",
+      config: { maxConcurrency: 3 },
+      onFanIn: async (input) => { fanIns.push(input); },
+      onFailure: async (input) => { failures.push(input); },
+    });
+    const children = childRunner.listSnapshots();
+    childRunner.fail(children[0]!.identity.childCastId, { error: "branch failed" });
+    await flush(childRunner);
+    expect(failures).toHaveLength(0);
+    for (const child of children.slice(1)) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    expect(fanIns).toHaveLength(0);
+    expect(failures).toHaveLength(1);
+    expect(failures[0].reason).toContain("lane-a (failed: branch failed)");
+    expect(state.parallelRuns?.build?.phase).toBe("failed");
   });
 
   test("aggregates usage and preserves event forwarding", async () => {

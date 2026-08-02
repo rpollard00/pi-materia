@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ParallelFanInResult } from "../domain/parallelFanIn.js";
+import { collectAcceptedParallelBranches, type IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
 import { parallelBranchRegionForEntry } from "../graph/parallelRegions.js";
 import type {
   ChildCastRunnerPort,
@@ -17,7 +17,7 @@ import type {
   ParallelLaneEventArtifact,
 } from "../application/parallelArtifacts.js";
 import { addUsage } from "../telemetry/usage.js";
-import { cloneParallelBranchExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
+import { cloneExecutionScope, cloneParallelBranchExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
 import {
   applyParallelRunPhaseTransition,
@@ -60,8 +60,7 @@ export type { NormalizedParallelPlan, NormalizedParallelStream } from "./paralle
 export interface ParallelFanInCompletionInput {
   loopId: string;
   runId: string;
-  /** Compatibility shape until intrinsic ordered fan-in owns this callback. */
-  result: ParallelFanInResult;
+  result: IntrinsicParallelFanInResult;
 }
 
 export interface ParallelRunFailureInput { loopId: string; runId: string; reason: string }
@@ -410,10 +409,15 @@ export class ParallelLoopDispatcher {
     if (this.#budgetFailure) return;
     const accepted = result.status === "succeeded" && result.accepted;
     const reason = result.error ?? (accepted ? undefined : "Child lane did not complete with an accepted result.");
+    const terminalScope = accepted
+      ? cloneExecutionScope(observation?.snapshot.executionScope ?? this.#run!.lanes[stream.laneId]!.executionScope!)
+      : undefined;
+    if (terminalScope) state.branchScopes = { ...(state.branchScopes ?? {}), [terminalScope.id]: terminalScope };
     this.#applyLaneTransition(input, state, {
       laneId: stream.laneId, attempt: active.attempt, childCastId: active.childCastId,
       status: accepted ? "accepted" : result.status === "interrupted" ? "interrupted" : "failed",
       accepted,
+      ...(terminalScope ? { executionScope: terminalScope } : {}),
       ...(accepted && result.output !== undefined ? { terminalOutput: result.output } : {}),
       ...(usage ? { usage } : {}),
       ...(reason ? { failureReason: boundedFailureReason(reason), diagnostic: { code: "parallel_lane_terminal", message: boundedFailureReason(reason), severity: "error", occurredAt: result.endedAt } } : { failureReason: undefined }),
@@ -443,15 +447,22 @@ export class ParallelLoopDispatcher {
       await this.#notifyRunFailure(input, state, run.runId, reason);
       return;
     }
-    this.#transitionRun(input, state, "fan_in", "ready");
+    const result = collectAcceptedParallelBranches(run);
+    // Persist the accepted barrier before invoking parent advancement. This is
+    // the exactly-once guard against duplicate terminal callbacks.
+    this.#transitionRun(input, state, "completed", "accepted");
     await this.#appendEvent(state, "parallel_branches_terminal", {
       loopId: input.loopId,
       runId: run.runId,
-      orderedBranches: run.queueOrder.map((laneId) => {
-        const lane = this.#run!.lanes[laneId]!;
-        return { laneId, streamIndex: lane.streamIndex, executionScope: lane.executionScope, ...(lane.terminalOutput !== undefined ? { output: lane.terminalOutput } : {}) };
-      }),
+      orderedBranches: result.orderedBranches,
     });
+    if (!input.onFanIn) return;
+    try {
+      await input.onFanIn({ loopId: input.loopId, runId: run.runId, result });
+    } catch (error) {
+      const reason = boundedFailureReason(`Parallel barrier advancement failed: ${parallelErrorMessage(error)}`);
+      await this.#notifyRunFailure(input, state, run.runId, reason);
+    }
   }
 
   async #cancelInternal(input: ParallelLoopCancellationInput): Promise<void> {
