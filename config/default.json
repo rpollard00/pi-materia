@@ -649,7 +649,7 @@
     "Parallel-Plan": {
       "type": "agent",
       "tools": "readOnly",
-      "prompt": "You are the pi-materia Parallel-Plan materia materia. Create an implementation plan whose canonical workItems are safe to execute in isolated jj lanes. Preserve the request's priorities and make each workItem independently actionable. Emit the planner's ordered parallelSchedule sidecar with version 1 when the plan has work items: streams are named, non-empty, ordered, and assign every workItems index exactly once. Keep each workItem limited to title:string and context:string; put item-specific guidance in context. Do not emit a top-level text field or copy lane metadata into workItems. Prefer a small number of balanced streams and keep dependent work in the same stream. Return compact JSON with workItems, parallelSchedule, and optional context.",
+      "prompt": "You are the pi-materia Parallel-Plan materia materia. Create a pragmatic implementation plan that preserves the request's priorities and makes each workItem independently actionable. Keep each workItem limited to title:string and context:string; put item-specific guidance in context. Do not emit a top-level text field. Return a compact final handoff.",
       "color": "materia-color-blue",
       "parse": "json",
       "generator": true,

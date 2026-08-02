@@ -295,6 +295,79 @@ describe("application prompt assembly", () => {
     expectSocketPromptOmitsRedundantContractBoilerplate(prompt);
   });
 
+  test("parallel generator guidance is synthesized from capability metadata, not the reusable planner prompt", () => {
+    const socket = agentSocket({
+      socket: { materia: "Parallel-Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Parallel-Plan"), generator: true, parallel: true },
+    });
+    const reusablePrompt = defaultMateriaPrompt("Parallel-Plan");
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(reusablePrompt).not.toContain("parallelSchedule");
+    expect(reusablePrompt).not.toContain("stream");
+    expect(reusablePrompt).not.toContain("lane");
+    expect(prompt).toContain("Intrinsic parallel planning is enabled for this generator");
+    expect(prompt).toContain("small number of balanced, ordered streams");
+    expect(prompt).toContain("Keep dependent or order-sensitive items in the same stream");
+    expect(prompt).toContain("Emit the required top-level parallelSchedule sidecar");
+    expect(prompt).toContain('"parallelSchedule" at $.parallelSchedule: object');
+  });
+
+  test("ordinary generators do not receive parallel scheduling guidance", () => {
+    const socket = agentSocket({
+      socket: { materia: "Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: "Plan work.", generator: true },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).not.toContain("Intrinsic parallel planning");
+    expect(prompt).not.toContain("parallelSchedule");
+    expect(prompt).not.toContain("ordered streams");
+  });
+
+  test("tool-backed parallel generators receive schedule tool guidance instead of textual sidecar instructions", () => {
+    const socket = agentSocket({
+      socket: { materia: "Parallel-Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Parallel-Plan"), generator: true, parallel: true },
+    });
+    const castState = state(socket, {
+      agentFinalization: {
+        strategy: "tool_backed",
+        configuredStrategy: "tool_backed",
+        reason: "qualified_tool_model",
+        phase: "active",
+        socketId: socket.id,
+        socketVisit: 1,
+        finalizationAttempt: 1,
+      },
+    });
+    const prompt = buildSocketPrompt(castState, socket);
+    const synthetic = buildSyntheticCastContext(castState);
+
+    for (const text of [prompt, synthetic]) {
+      expect(text).toContain("materia_handoff_set_parallel_schedule");
+      expect(text).toContain("Cover every final work-item index exactly once");
+      expect(text).not.toContain("Emit the required top-level parallelSchedule sidecar");
+    }
+    expect(prompt).toContain("tool-backed materia handoff submission is active");
+  });
+
+  test("parallel guidance remains hidden during multi-turn refinement and appears on finalization", () => {
+    const socket = agentSocket({
+      socket: { materia: "Parallel-Plan", parse: "json" },
+      materia: { tools: "readOnly", prompt: defaultMateriaPrompt("Parallel-Plan"), generator: true, parallel: true, multiTurn: true },
+    });
+    const refinement = buildSocketPrompt(state(socket), socket);
+    const finalization = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true }), socket);
+    const syntheticFinalization = buildSyntheticCastContext(state(socket, { multiTurnFinalizing: true }));
+
+    expect(refinement).not.toContain("parallelSchedule");
+    expect(refinement).not.toContain("Intrinsic parallel planning");
+    expect(finalization).toContain("parallelSchedule");
+    expect(finalization).toContain("Intrinsic parallel planning");
+    expect(syntheticFinalization).toContain("Intrinsic parallel planning");
+  });
+
   test("non-generator JSON sockets keep only concise JSON-only final output guidance", () => {
     const socket = agentSocket({
       socket: { materia: "Check", parse: "json" },

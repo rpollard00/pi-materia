@@ -190,7 +190,7 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
       ? `Call ${AGENT_HANDOFF_TOOL_NAMES.addWorkItem} once per final work item in order; do not place generated units in textual JSON or other fields.`
       : `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
     "Each generated work item must contain only title:string and context:string; put all item-specific guidance in the workItem.context text string.",
-    parallel ? "Parallel planning is enabled for this socket: also emit the required top-level parallelSchedule sidecar with version 1 and ordered streams of workItemIndexes. Stream indexes must cover every work item exactly once; do not copy lane metadata into workItems." : undefined,
+    parallelPlanningGuidance(parallel, toolBacked),
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
     "If upstream workItems are present, consume them as input context and transform/refine them into a new top-level workItems array.",
   ].filter(Boolean).join("\n");
@@ -415,25 +415,39 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
 
   const activeMultiTurn = isActiveMultiTurnSocket(state);
   if (activeMultiTurn && state.multiTurnFinalizing !== true) return undefined;
-  if (isToolBackedFinalizationActive(state, socket)) {
+  const toolBacked = isToolBackedFinalizationActive(state, socket);
+  const parallel = isParallelGeneratorMateria(socket.materia);
+  if (toolBacked) {
     return [
       "Canonical handoff contract context:",
       "The active materia_handoff tools expose only fields consumed by this socket. Submit exact semantic values through those tools and finish with materia_handoff_commit; runtime validation remains authoritative.",
-    ].join("\n\n");
+      parallelPlanningGuidance(parallel, true),
+    ].filter(Boolean).join("\n\n");
   }
 
   const requirements = deriveSocketOutputRequirements({
     socket: effectiveResolvedSocketConfig(socket),
     socketId: socket.id,
     workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
-    parallel: isParallelGeneratorMateria(socket.materia),
+    parallel,
   });
   const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON sockets";
   return [
     "Canonical handoff contract context:",
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
     formatHandoffContractDocText({ renderableTextIntent: requirements.renderableTextIntent, parallel: requirements.parallelScheduleProducer }),
-  ].join("\n\n");
+    parallelPlanningGuidance(parallel, false),
+  ].filter(Boolean).join("\n\n");
+}
+
+function parallelPlanningGuidance(parallel: boolean, toolBacked: boolean): string | undefined {
+  if (!parallel) return undefined;
+  return [
+    "Intrinsic parallel planning is enabled for this generator. Partition the final workItems into a small number of balanced, ordered streams that can execute concurrently. Keep dependent or order-sensitive items in the same stream and preserve their required order; use unique, stable, descriptive stream names.",
+    toolBacked
+      ? `After submitting every work item, call ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once with version 1 and ordered streams of workItemIndexes. Cover every final work-item index exactly once; do not submit stream metadata as work items or textual JSON.`
+      : `Emit the required top-level ${PARALLEL_SCHEDULE_FIELD} sidecar with version 1 and ordered streams of workItemIndexes. Cover every final work-item index exactly once; do not copy stream metadata into workItems.`,
+  ].join("\n");
 }
 
 /**

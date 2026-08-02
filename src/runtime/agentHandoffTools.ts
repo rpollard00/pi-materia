@@ -169,7 +169,7 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
     const setParallelSchedule = defineTool({
       name: AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule,
       label: "Set Parallel Planner Schedule",
-      description: "Set the versioned ordered stream sidecar for the canonical workItems array. Every item index must occur exactly once.",
+      description: "Set the version-1 ordered stream sidecar for the canonical workItems array. Use a small number of balanced streams, keep dependent or order-sensitive items together in required order, and assign every item index exactly once.",
       parameters: SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS,
       prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule, SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS),
       executionMode: "sequential",
@@ -318,7 +318,7 @@ function capabilityGuidelines(capabilities: AgentHandoffCapabilities): string[] 
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.beginWorkItems} only when an explicitly empty workItems result is required.`);
   }
   if (capabilities.parallelSchedule) {
-    guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} after submitting workItems to provide the ordered version-1 parallel schedule.`);
+    guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once after submitting workItems. Provide a small number of balanced ordered streams, keep dependencies in stream order, and cover every work-item index exactly once.`);
   }
   if (capabilities.satisfied) {
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setSatisfied} to supply this socket's required graph-control result.`);
