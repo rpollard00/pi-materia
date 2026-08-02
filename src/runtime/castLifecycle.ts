@@ -297,9 +297,6 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
         throw new Error(`Cast ${state.castId} has multiple failed parallel lane runs; revive one run at a time is required.`);
       }
       const [loopId] = parallelCandidates[0]!;
-      const loop = state.pipeline.loops?.[loopId];
-      const config = loop?.parallel;
-      if (!config) throw new Error(`Parallel revival run ${JSON.stringify(loopId)} has no current opt-in loop configuration.`);
       if (!deps.parallel) throw new Error("Parallel lane revival is unavailable in this runtime.");
 
       const socket = currentSocketOrThrow(state);

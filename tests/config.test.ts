@@ -844,14 +844,13 @@ describe("config loadouts", () => {
       const loaded = await loadConfig(cwd);
       expect(loaded.config.activeLoadout).toBe("Full-Auto");
       expect(loaded.loadoutSources?.["Parallel-Experimental"]).toBe("default");
-      expect(loaded.config.materia["Normalize-Parallel-Streams"]?.command).toEqual(["node", path.join(profile, "utilities", "normalize-parallel-streams.mjs")]);
-      expect(loaded.config.materia["Parallel-Lane-Checkpoint"]?.command).toEqual(["node", path.join(profile, "utilities", "parallel-lane-checkpoint.mjs")]);
-      expect(loaded.config.materia["Parallel-Finalize"]?.command).toEqual(["node", path.join(profile, "utilities", "parallel-finalize.mjs")]);
-      expect(await readdir(path.join(profile, "utilities"))).toEqual(expect.arrayContaining([
-        "normalize-parallel-streams.mjs",
-        "parallel-lane-checkpoint.mjs",
-        "parallel-finalize.mjs",
-      ]));
+      expect(loaded.config.materia["Normalize-Parallel-Streams"]).toBeUndefined();
+      expect(loaded.config.materia["Parallel-Lane-Checkpoint"]).toBeUndefined();
+      expect(loaded.config.materia["Parallel-Finalize"]).toBeUndefined();
+      const shippedUtilities = await readdir(path.join(profile, "utilities"));
+      expect(shippedUtilities).not.toContain("normalize-parallel-streams.mjs");
+      expect(shippedUtilities).not.toContain("parallel-lane-checkpoint.mjs");
+      expect(shippedUtilities).not.toContain("parallel-finalize.mjs");
 
       loaded.config.activeLoadout = "Parallel-Experimental";
       const pipeline = resolvePipeline(loaded.config);
@@ -1044,9 +1043,6 @@ describe("config loadouts", () => {
       ["Finalize-JJ-Workspace", "json"],
       ["Blackbelt-GH-PR", "json"],
       ["Commit-Sigil", "json"],
-      ["Normalize-Parallel-Streams", "json"],
-      ["Parallel-Lane-Checkpoint", "json"],
-      ["Parallel-Finalize", "json"],
       ["Auto-Architect", "json"],
       ["Parallel-Plan", "json"],
       ["Integration-Review", "json"],

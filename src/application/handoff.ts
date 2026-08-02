@@ -1,7 +1,5 @@
 import { canonicalGeneratorConfigFor, isParallelGeneratorMateria } from "../graph/generator.js";
 import { normalizeParallelPlan, type NormalizedParallelPlan } from "../handoff/parallelPlan.js";
-import { recordParallelFinalization } from "../domain/parallelRun.js";
-import type { MateriaParallelFinalizationProvenance, MateriaParallelRevisionIdentity } from "../domain/parallelRunTypes.js";
 import {
   HANDOFF_CONTEXT_FIELD,
   HANDOFF_SATISFIED_FIELD,
@@ -20,9 +18,7 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
   // The ordinary socket path already validated this output; keeping this guard
   // here prevents direct/replay callers from partially adopting a bad plan.
   const parallelCommit = prepareParallelGeneratorCommit(parsed, socket);
-  const finalization = extractParallelFinalization(parsed, socket);
   applyUtilityStatePatch(state, parsed, socket);
-  if (finalization) applyParallelFinalization(state, finalization);
 
   // `text` is a renderable current-output payload, not durable shared state.
   // Exclude it from the implicit `state.data.envelope` mirror so prose is not
@@ -81,52 +77,7 @@ function applyUtilityStatePatch(state: MateriaCastState, parsed: Record<string, 
   const filteredPatch = { ...patch };
   delete filteredPatch[HANDOFF_WORK_ITEMS_FIELD];
   delete filteredPatch[HANDOFF_SATISFIED_FIELD];
-  delete filteredPatch.parallelFinalization;
   state.data = { ...state.data, ...filteredPatch };
-}
-
-/**
- * Finalization is a runtime-owned control record, not ordinary utility state.
- * Accept it only from a utility socket and require the persisted run identity
- * before it can close a coordinator.
- */
-function extractParallelFinalization(parsed: Record<string, unknown>, socket?: ResolvedMateriaSocket): MateriaParallelFinalizationProvenance | undefined {
-  if (!socket || socket.materia.type !== "utility" || !isPlainObject(parsed.state)) return undefined;
-  const raw = parsed.state.parallelFinalization;
-  if (!isPlainObject(raw) || raw.version !== 1 || typeof raw.parentCastId !== "string" || typeof raw.loopId !== "string" || typeof raw.runId !== "string" || typeof raw.evaluationAccepted !== "boolean" || typeof raw.conflictFree !== "boolean" || (raw.status !== "completed" && raw.status !== "preserved") || (raw.status === "completed" && (!raw.evaluationAccepted || !raw.conflictFree)) || !Array.isArray(raw.cleanedLaneIds) || !raw.cleanedLaneIds.every((laneId) => typeof laneId === "string")) return undefined;
-  const integrationRevision = revisionFromValue(raw.integrationRevision);
-  const parentWorkingRevision = revisionFromValue(raw.parentWorkingRevision);
-  return {
-    version: 1,
-    parentCastId: raw.parentCastId,
-    loopId: raw.loopId,
-    runId: raw.runId,
-    evaluationAccepted: raw.evaluationAccepted,
-    conflictFree: raw.conflictFree,
-    ...(integrationRevision ? { integrationRevision } : {}),
-    ...(typeof raw.bookmarkName === "string" ? { bookmarkName: raw.bookmarkName } : {}),
-    ...(parentWorkingRevision ? { parentWorkingRevision } : {}),
-    cleanedLaneIds: [...raw.cleanedLaneIds],
-    status: raw.status,
-    ...(typeof raw.reason === "string" ? { reason: raw.reason } : {}),
-    ...(typeof raw.description === "string" ? { description: raw.description } : {}),
-    finalizedAt: typeof raw.finalizedAt === "number" && Number.isFinite(raw.finalizedAt) ? raw.finalizedAt : Date.now(),
-  };
-}
-
-function applyParallelFinalization(state: MateriaCastState, provenance: MateriaParallelFinalizationProvenance): void {
-  const run = state.parallelRuns?.[provenance.loopId];
-  if (!run || run.parentCastId !== state.castId || run.runId !== provenance.runId || provenance.parentCastId !== state.castId) return;
-  const result = recordParallelFinalization(run, { parentCastId: state.castId, loopId: provenance.loopId, runId: provenance.runId, provenance, timestamp: provenance.finalizedAt });
-  if (!result.applied) return;
-  state.parallelRuns = { ...(state.parallelRuns ?? {}), [provenance.loopId]: result.state };
-  state.awaitingResponse = false;
-  state.updatedAt = Math.max(state.updatedAt, result.state.updatedAt);
-}
-
-function revisionFromValue(value: unknown): MateriaParallelRevisionIdentity | undefined {
-  if (!isPlainObject(value) || typeof value.commitId !== "string" || !value.commitId.trim() || typeof value.changeId !== "string" || !value.changeId.trim()) return undefined;
-  return { commitId: value.commitId, changeId: value.changeId };
 }
 
 function appendAgentContext(existing: unknown, context: string, socket?: ResolvedMateriaSocket): string {

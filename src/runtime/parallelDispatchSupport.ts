@@ -1,88 +1,14 @@
 import path from "node:path";
 import type { HandoffWorkItem } from "../domain/handoff.js";
 import type { NormalizedParallelPlan, NormalizedParallelStream } from "../handoff/parallelPlan.js";
-import type { ParallelFanInResult } from "../domain/parallelFanIn.js";
 import type {
   MateriaCastState,
-  MateriaParallelFanInProvenance,
-  MateriaParallelFinalizationProvenance,
-  MateriaParallelRevisionIdentity,
   MateriaParallelRunState,
   MateriaParallelUsageTotals,
-  MateriaParallelWorkspaceOwnership,
 } from "../types.js";
 
 /** Canonical plan DTOs are owned by the intrinsic core normalizer. */
 export type { NormalizedParallelPlan, NormalizedParallelStream } from "../handoff/parallelPlan.js";
-
-/** A small revision DTO shared by the runtime and the jj adapter. */
-export interface ParallelWorkspaceRevision extends MateriaParallelRevisionIdentity {}
-
-/** The subset of the jj lifecycle adapter needed by dispatch. */
-export interface ParallelWorkspaceRecord {
-  repositoryRoot: string;
-  workspaceRoot: string;
-  workspacePath: string;
-  workspaceName: string;
-  baseline: ParallelWorkspaceRevision;
-  revision: ParallelWorkspaceRevision;
-  operationId?: string;
-  manifestPath?: string;
-  state?: "active" | "forgotten";
-}
-
-export interface ParallelWorkspaceInspection {
-  /** Whether the owned workspace directory still exists. */
-  exists?: boolean;
-  /** Whether jj still tracks the owned workspace name. */
-  tracked?: boolean;
-  /** Current working-copy revision observed inside the lane workspace. */
-  currentRevision?: ParallelWorkspaceRevision;
-}
-
-export interface ParallelWorkspacePort {
-  pinBaseline(cwd: string): Promise<{ repositoryRoot: string; baseline: ParallelWorkspaceRevision }>;
-  create(input: {
-    parentCastId: string;
-    loopId: string;
-    laneId: string;
-    cwd: string;
-    repositoryRoot: string;
-    baseline: ParallelWorkspaceRevision;
-  }): Promise<ParallelWorkspaceRecord>;
-  inspect?(reference: { workspacePath: string; workspaceRoot: string; workspaceName: string }): Promise<ParallelWorkspaceInspection | undefined>;
-  /** Materialize the ordered parent integration only after all lanes are accepted. */
-  fanIn?(input: {
-    parentCastId: string;
-    loopId: string;
-    runId: string;
-    cwd: string;
-    repositoryRoot: string;
-    baseline: ParallelWorkspaceRevision;
-    queueOrder: readonly string[];
-    lanes: readonly {
-      laneId: string;
-      streamIndex: number;
-      queueIndex: number;
-      workItemIndexes: readonly number[];
-      status: MateriaParallelRunState["lanes"][string]["status"];
-      acceptedHead?: ParallelWorkspaceRevision;
-      workspace?: MateriaParallelWorkspaceOwnership;
-    }[];
-  }): Promise<ParallelFanInResult>;
-  /** Finalize an evaluator-approved integration and clean owned lane workspaces. */
-  finalize?(input: {
-    parentCastId: string;
-    loopId: string;
-    runId: string;
-    cwd: string;
-    repositoryRoot: string;
-    fanIn: MateriaParallelFanInProvenance;
-    evaluationAccepted: boolean;
-    bookmarkName: string;
-    description?: string;
-  }): Promise<MateriaParallelFinalizationProvenance & { satisfied: boolean }>;
-}
 
 export function readNormalizedParallelPlan(state: MateriaCastState, pathValue: string): NormalizedParallelPlan {
   const raw = readStatePath(state, pathValue);
@@ -136,29 +62,6 @@ export function boundedParallelContext(run: MateriaParallelRunState, stream: Nor
   };
 }
 
-export function workspaceOwnership(
-  state: MateriaCastState,
-  loopId: string,
-  laneId: string,
-  workspace: ParallelWorkspaceRecord,
-): MateriaParallelWorkspaceOwnership {
-  return {
-    backend: "jj",
-    parentCastId: state.castId,
-    loopId,
-    laneId,
-    repositoryRoot: workspace.repositoryRoot,
-    workspaceRoot: workspace.workspaceRoot,
-    workspacePath: workspace.workspacePath,
-    workspaceName: workspace.workspaceName,
-    baseline: workspace.baseline,
-    revision: workspace.revision,
-    ...(workspace.operationId !== undefined ? { operationId: workspace.operationId } : {}),
-    ...(workspace.manifestPath !== undefined ? { manifestPath: workspace.manifestPath } : {}),
-    ...(workspace.state !== undefined ? { state: workspace.state } : {}),
-  };
-}
-
 export function childCastIdentity(parentCastId: string, loopId: string, laneId: string, attempt: number): string {
   return ["parallel", parentCastId, loopId, laneId, `attempt-${attempt}`].map(safePart).join(":");
 }
@@ -170,18 +73,6 @@ export function lanePaths(state: MateriaCastState, loopId: string, laneId: strin
     artifactRoot: path.join(root, "artifacts"),
     runDirectory: path.join(root, "run"),
   };
-}
-
-export function revisionInValue(value: unknown): ParallelWorkspaceRevision | undefined {
-  if (!isRecord(value)) return undefined;
-  if (typeof value.commitId === "string" && value.commitId.trim().length > 0 && typeof value.changeId === "string" && value.changeId.trim().length > 0) {
-    return { commitId: value.commitId, changeId: value.changeId };
-  }
-  for (const key of ["state", "parallelLaneCheckpoint", "latestMeaningfulHead", "head", "output"]) {
-    const nested = revisionInValue(value[key]);
-    if (nested) return nested;
-  }
-  return undefined;
 }
 
 export function isParallelUsage(value: unknown): value is MateriaParallelUsageTotals {

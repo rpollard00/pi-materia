@@ -14,11 +14,7 @@ const planIdentity: MateriaParallelPlanIdentity = { version: 1, planId: "plan-1"
 const configIdentity: MateriaParallelConfigIdentity = {
   configHash: "config-1",
   loopId: "build",
-  planInput: "state.parallelPlan",
   maxConcurrency: 2,
-  workspaceMode: "jj",
-  failurePolicy: "all_terminal",
-  fanIn: "ordered",
 };
 const queue: MateriaParallelQueueEntry[] = [
   { laneId: "lane-api", name: "api", streamIndex: 0, workItemIndexes: [0, 2] },
@@ -61,7 +57,7 @@ describe("parallel coordinator durable state", () => {
     })).toMatchObject({ applied: false, reason: "child_mismatch" });
   });
 
-  test("accepts a lane only with its current callback identity and a recorded head", () => {
+  test("accepts a lane only with its current callback identity", () => {
     const state = run();
     const started = transitionParallelRun(state, {
       parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
@@ -72,10 +68,9 @@ describe("parallel coordinator durable state", () => {
 
     const accepted = transitionParallelRun(started.state, {
       parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
-      childCastId: "child-api", status: "accepted", accepted: true,
-      acceptedHead: { commitId: "commit-api", changeId: "change-api" }, timestamp: 120,
+      childCastId: "child-api", status: "accepted", accepted: true, timestamp: 120,
     });
-    expect(accepted.state.lanes["lane-api"]).toMatchObject({ status: "accepted", acceptedHead: { commitId: "commit-api" } });
+    expect(accepted.state.lanes["lane-api"]).toMatchObject({ status: "accepted" });
   });
 
   test("ignores stale callbacks after terminal state, newer attempts, or a newer cast", () => {
@@ -84,7 +79,7 @@ describe("parallel coordinator durable state", () => {
       childCastId: "child-api", status: "running", timestamp: 110,
     }).state, {
       parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
-      childCastId: "child-api", status: "accepted", acceptedHead: { commitId: "c", changeId: "h" }, timestamp: 120,
+      childCastId: "child-api", status: "accepted", timestamp: 120,
     }).state;
 
     expect(transitionParallelRun(accepted, {

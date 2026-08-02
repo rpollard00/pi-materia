@@ -11,7 +11,6 @@ import type {
   StartChildCastInput,
 } from "../application/childCastRunner.js";
 import type {
-  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
@@ -49,13 +48,11 @@ import {
 } from "./parallelDispatchSupport.js";
 
 export type {
-  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
   ParallelLaneDiagnosticArtifact,
   ParallelLaneEventArtifact,
-  ParallelLaneRevisionArtifact,
 } from "../application/parallelArtifacts.js";
 export type { NormalizedParallelPlan, NormalizedParallelStream } from "./parallelDispatchSupport.js";
 
@@ -103,7 +100,6 @@ export interface ParallelLoopDispatcherDependencies {
     appendEvent(runState: MateriaCastState["runState"], type: string, data: unknown): Promise<void>;
     writeUsage?(runState: MateriaCastState["runState"]): Promise<void>;
     lane?: ParallelLaneArtifactPort;
-    fanIn?: ParallelFanInArtifactPort;
   };
   runtimeEvents?: { emit(state: MateriaCastState, type: string, payload: Record<string, unknown>): Promise<void> };
   budget?: { assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void> };

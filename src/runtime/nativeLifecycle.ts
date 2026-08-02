@@ -213,7 +213,6 @@ parallelLoopDispatcher = createParallelLoopDispatcher({
     appendEvent,
     writeUsage,
     lane: parallelLaneArtifacts,
-    fanIn: parallelLaneArtifacts,
   },
   runtimeEvents: {
     emit: (state, type, payload) => {

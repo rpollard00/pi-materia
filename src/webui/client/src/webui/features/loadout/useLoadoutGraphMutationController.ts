@@ -251,12 +251,12 @@ export function useLoadoutGraphMutationController({
     }
   }
 
-  function updateLoopParallel(loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) {
+  function updateLoopParallel(loopId: string, parallel: MateriaLoopParallelConfig | undefined) {
     const loop = activeLoadout?.loops?.[loopId];
     if (!loop) return false;
     const committed = commitGraphMutation(
       `${parallel ? 'Updated' : 'Cleared'} parallel concurrency override for loop ${loopId}.`,
-      (loadout) => updateLoopParallelInLoadout(loadout, loopId, parallel, fanInTargets),
+      (loadout) => updateLoopParallelInLoadout(loadout, loopId, parallel),
       parallel
         ? `Staged max concurrency ${parallel.maxConcurrency ?? 'from app default'} for parallel generator consumer loop ${loopId}.`
         : `Cleared the concurrency override for loop ${loopId}; generator capability still determines parallel execution.`,

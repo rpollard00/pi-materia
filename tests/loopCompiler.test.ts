@@ -31,7 +31,7 @@ function parallelLoadout(): MateriaPipelineConfig {
         sockets: ["Socket-2", "Socket-3"],
         consumes: { from: "Socket-1", output: "workItems" },
         iterator: { items: "state.workItems", as: "workItem", cursor: "workItemIndex", done: "Socket-9" },
-        parallel: { planInput: "state.parallelPlan", maxConcurrency: 2, workspaceMode: "jj", failurePolicy: "all_terminal", fanIn: "ordered" },
+        parallel: { maxConcurrency: 2 },
         exits: [
           { id: "clean", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-10" },
           { id: "conflict", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-11" },

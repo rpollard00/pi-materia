@@ -10,10 +10,7 @@ import type { MateriaCastState, MateriaParallelRunState } from "../types.js";
 import {
   cloneParallelRunState,
   parallelRunKey,
-  recordParallelFanInProvenance,
-  recordParallelFinalization,
   transitionParallelRun,
-  type ParallelFanInProvenanceTransitionInput,
   type ParallelLaneTransitionInput,
   type ParallelTransitionIgnoreReason,
 } from "../domain/parallelRun.js";
@@ -67,51 +64,3 @@ export function applyParallelTransitionToCastState(
 
 /** Short alias for runtime adapters that already have a cast snapshot. */
 export const applyParallelLaneTransitionToCast = applyParallelTransitionToCastState;
-
-/** Apply one guarded fan-in provenance record to a persisted cast snapshot. */
-export function applyParallelFanInProvenanceToCastState(
-  state: MateriaCastState,
-  input: ParallelFanInProvenanceTransitionInput,
-): CastParallelTransitionResult {
-  const expectedCast = input.parentCastId ?? input.castId;
-  if (expectedCast !== undefined && expectedCast !== state.castId) return { state, applied: false, reason: "cast_mismatch" };
-  const run = state.parallelRuns?.[parallelRunKey(input.loopId)];
-  if (!run) return { state, applied: false, reason: "run_mismatch" };
-  const result = recordParallelFanInProvenance(run, { ...input, parentCastId: state.castId });
-  if (!result.applied) return { state, applied: false, reason: result.reason };
-  return {
-    state: {
-      ...state,
-      parallelRuns: { ...(state.parallelRuns ?? {}), [parallelRunKey(input.loopId)]: result.state },
-      updatedAt: Math.max(state.updatedAt, result.state.updatedAt),
-    },
-    applied: true,
-  };
-}
-
-export const applyParallelFanInResultToCastState = applyParallelFanInProvenanceToCastState;
-
-/** Apply the post-integration finalization result to a persisted cast snapshot. */
-export function applyParallelFinalizationToCastState(
-  state: MateriaCastState,
-  input: import("../domain/parallelRun.js").ParallelFinalizationTransitionInput,
-): CastParallelTransitionResult {
-  const expectedCast = input.parentCastId ?? input.castId;
-  if (expectedCast !== undefined && expectedCast !== state.castId) return { state, applied: false, reason: "cast_mismatch" };
-  const run = state.parallelRuns?.[parallelRunKey(input.loopId)];
-  if (!run) return { state, applied: false, reason: "run_mismatch" };
-  const result = recordParallelFinalization(run, { ...input, parentCastId: state.castId });
-  if (!result.applied) return { state, applied: false, reason: result.reason };
-  return {
-    state: {
-      ...state,
-      parallelRuns: { ...(state.parallelRuns ?? {}), [parallelRunKey(input.loopId)]: result.state },
-      awaitingResponse: false,
-      updatedAt: Math.max(state.updatedAt, result.state.updatedAt),
-    },
-    applied: true,
-  };
-}
-
-export const applyParallelFinalizationProvenanceToCastState = applyParallelFinalizationToCastState;
-export type { ParallelFanInProvenanceTransitionInput, ParallelFinalizationTransitionInput } from "../domain/parallelRun.js";

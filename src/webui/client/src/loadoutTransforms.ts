@@ -188,43 +188,17 @@ export function deleteSocketImmutable(loadout: PipelineConfig, socketId: string)
   return setLoadoutSocketLayout(replaceLoops(replaceSockets(loadout, sockets), loops), socketId, undefined);
 }
 
-export interface ParallelFanInTargets {
-  clean?: string;
-  conflict?: string;
-}
-
-/**
- * Update the declarative parallel region as one immutable operation. Fan-in
- * routes are supplied by the authoring surface so enabling parallel mode never
- * creates placeholder sockets or transient lane edges in the parent graph.
- */
+/** Update the optional concurrency override for a derived parallel region. */
 export function updateLoopParallelInLoadout(
   loadout: PipelineConfig,
   loopId: string,
   parallel: MateriaLoopParallelConfig | undefined,
-  fanInTargets: ParallelFanInTargets = {},
 ): PipelineConfig {
   const loop = loadout.loops?.[loopId];
   if (!loadout.loops || !loop) return loadout;
   const nextLoop: PipelineLoop = { ...loop };
   if (parallel) nextLoop.parallel = { ...parallel };
   else delete nextLoop.parallel;
-
-  if (parallel && loop.exit?.from && (fanInTargets.clean || fanInTargets.conflict)) {
-    const source = loop.exit.from;
-    let exits = [...(loop.exits ?? [])];
-    const replaceRoute = (condition: MateriaEdgeCondition, targetSocketId: string | undefined) => {
-      if (!targetSocketId || !loadout.sockets?.[targetSocketId]) return;
-      exits = exits.filter((route) => !(route.from === source && route.condition === condition));
-      exits.push({ id: loopExitRouteId(source, condition), from: source, condition, targetSocketId });
-    };
-    // An omitted target leaves the existing region-owned route untouched so
-    // partial programmatic updates cannot silently discard the other join.
-    replaceRoute('satisfied', fanInTargets.clean);
-    replaceRoute('not_satisfied', fanInTargets.conflict);
-    if (exits.length > 0) nextLoop.exits = exits;
-    else delete nextLoop.exits;
-  }
 
   return { ...loadout, loops: { ...loadout.loops, [loopId]: nextLoop } };
 }

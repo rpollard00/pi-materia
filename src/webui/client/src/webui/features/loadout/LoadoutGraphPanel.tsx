@@ -104,7 +104,7 @@ interface LoadoutGraphLoopActions {
   breakLoop: (loopId: string) => void;
   clearLoopExit: (loopId: string) => void;
   createTaskIteratorLoop: () => void;
-  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) => boolean;
+  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined) => boolean;
   parallelError?: string;
   updateLoopExit: (loopId: string, patch: Partial<{ from: string; when: MateriaEdgeCondition; to: string }>) => void;
 }
@@ -693,7 +693,7 @@ interface LoopControlModalProps {
   closeLoopControls: () => void;
   breakLoop: (loopId: string) => void;
   clearLoopExit: (loopId: string) => void;
-  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined, fanInTargets?: { clean?: string; conflict?: string }) => boolean;
+  updateLoopParallel?: (loopId: string, parallel: MateriaLoopParallelConfig | undefined) => boolean;
   parallelError?: string;
   socketDisplayLabel: (socketId: string) => string;
   socketLabel: (socketId: string) => string;

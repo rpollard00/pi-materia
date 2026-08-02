@@ -2,11 +2,6 @@ import { link, lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/pro
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
-import type {
-  MateriaParallelFanInHead,
-  MateriaParallelFanInProvenance,
-  MateriaParallelFinalizationProvenance,
-} from "../domain/parallelRunTypes.js";
 import {
   assertAbsentOrDirectory,
   assertNoSymlinkAncestors,
@@ -63,6 +58,67 @@ export type JjCommandExecutor = (input: JjCommandInput) => Promise<JjCommandResu
 export interface JjRevisionIdentity {
   commitId: string;
   changeId: string;
+}
+
+export interface JjWorkspaceOwnership {
+  backend: "jj";
+  parentCastId: string;
+  loopId: string;
+  laneId: string;
+  repositoryRoot: string;
+  workspaceRoot: string;
+  workspacePath: string;
+  workspaceName: string;
+  baseline: JjRevisionIdentity;
+  revision?: JjRevisionIdentity;
+  operationId?: string;
+  manifestPath?: string;
+  state?: "active" | "forgotten";
+}
+
+export interface JjFanInHead {
+  laneId: string;
+  streamIndex: number;
+  queueIndex: number;
+  workItemIndexes: number[];
+  head: JjRevisionIdentity;
+  workspace: JjWorkspaceOwnership;
+  workspaceRevision?: JjRevisionIdentity;
+}
+
+export interface JjFanInProvenance {
+  version: 1;
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  baseline: JjRevisionIdentity;
+  parentRevisionBefore: JjRevisionIdentity;
+  parentRevisionAfter: JjRevisionIdentity;
+  orderedHeads: JjFanInHead[];
+  integrationRevision?: JjRevisionIdentity;
+  outcome: "clean" | "conflict";
+  conflictedPaths: string[];
+  conflictDetails: Array<{ path: string; message: string }>;
+  operationId: string;
+  startedAt: number;
+  completedAt: number;
+}
+
+export interface JjFinalizationProvenance {
+  version: 1;
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  evaluationAccepted: boolean;
+  conflictFree: boolean;
+  integrationRevision?: JjRevisionIdentity;
+  bookmarkName?: string;
+  parentWorkingRevision?: JjRevisionIdentity;
+  cleanedLaneIds: string[];
+  status: "completed" | "preserved";
+  reason?: string;
+  description?: string;
+  finalizedAt: number;
 }
 
 export interface JjWorkspaceOwner {
@@ -182,7 +238,7 @@ export interface JjFanInInput {
   now?: number;
 }
 
-export interface JjFanInResult extends MateriaParallelFanInProvenance {
+export interface JjFanInResult extends JjFanInProvenance {
   /** True for a clean integration and false for a materialized conflict. */
   satisfied: boolean;
 }
@@ -194,8 +250,8 @@ export interface JjParallelFinalizeInput {
   cwd: string;
   repositoryRoot?: string;
   /** The durable fan-in record, including every owned lane workspace. */
-  fanIn: MateriaParallelFanInProvenance;
-  /** Acceptance from the post-integration evaluator/resolver route. */
+  fanIn: JjFanInProvenance;
+  /** Acceptance from the unified post-integration review route. */
   evaluationAccepted: boolean;
   /** Bootstrap-owned bookmark. Finalization never invents a replacement. */
   bookmarkName: string;
@@ -203,7 +259,7 @@ export interface JjParallelFinalizeInput {
   description?: string;
 }
 
-export interface JjParallelFinalizeResult extends MateriaParallelFinalizationProvenance {
+export interface JjParallelFinalizeResult extends JjFinalizationProvenance {
   /** True only when the bookmark, fresh parent working commit, and cleanup all succeeded. */
   satisfied: boolean;
 }
@@ -321,7 +377,7 @@ export class JjWorkspaceBackend {
 
       const ordered = orderFanInLanes(input);
       const startedAt = this.#now();
-      const orderedHeads: MateriaParallelFanInHead[] = [];
+      const orderedHeads: JjFanInHead[] = [];
       for (const lane of ordered) {
         const workspaceReference = lane.workspace;
         if (!workspaceReference) throw new JjWorkspaceError("fan_in_workspace_missing", `Parallel lane ${JSON.stringify(lane.laneId)} has no workspace reference.`);

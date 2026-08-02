@@ -30,7 +30,6 @@ export {
   ParallelLoopDispatcher,
 } from "./runtime/parallelDispatcher.js";
 export type {
-  ParallelFanInArtifactPort,
   ParallelFanInCompletionInput,
   ParallelRunFailureInput,
   ParallelLaneArtifactIdentity,
@@ -38,7 +37,6 @@ export type {
   ParallelLaneArtifactPort,
   ParallelLaneDiagnosticArtifact,
   ParallelLaneEventArtifact,
-  ParallelLaneRevisionArtifact,
   NormalizedParallelPlan,
   NormalizedParallelStream,
   ParallelLoopCancellationInput,
@@ -57,10 +55,6 @@ export { classifyTurnFailure, extendEdgeTraversalAllowanceForRevive, extendSameS
 export { defaultProactiveCompactionThresholdPercent } from "./runtime/compaction.js";
 export {
   appendParallelLaneDiagnostic,
-  applyParallelFanInProvenanceToCastState,
-  applyParallelFanInResultToCastState,
-  applyParallelFinalizationProvenanceToCastState,
-  applyParallelFinalizationToCastState,
   applyParallelLaneTransition,
   applyParallelLaneTransitionToCast,
   applyParallelRunPhaseTransition,
@@ -95,8 +89,6 @@ export type {
   ParallelRunPhaseTransitionInput,
   ParallelRunTransitionResult,
   ParallelTransitionGuard,
-  ParallelFanInProvenanceTransitionInput,
-  ParallelFinalizationTransitionInput,
   RestartParallelLaneInput,
   ParallelTransitionIgnoreReason,
 } from "./runtime/parallelCoordinatorState.js";

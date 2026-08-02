@@ -4,33 +4,20 @@ import type { MateriaThinkingLevel } from "./domain/thinking.js";
 import type { ScopePath } from "./domain/scope.js";
 import type { ExecutionScope } from "./domain/executionScope.js";
 import type { LoopParallelismConfig, ParallelismConfig } from "./domain/parallelLoop.js";
-import type {
-  MateriaParallelFanInBehavior,
-  MateriaParallelFailurePolicy,
-  MateriaParallelRunState,
-  MateriaParallelWorkspaceMode,
-} from "./domain/parallelRunTypes.js";
+import type { MateriaParallelRunState } from "./domain/parallelRunTypes.js";
 export type {
   MateriaParallelChildSession,
   MateriaParallelConfigIdentity,
   MateriaParallelDiagnostic,
   MateriaParallelDiagnosticSeverity,
   MateriaParallelFanInPhase,
-  MateriaParallelFailurePolicy,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
   MateriaParallelPlanIdentity,
   MateriaParallelQueueEntry,
-  MateriaParallelRevisionIdentity,
   MateriaParallelRunPhase,
   MateriaParallelRunState,
-  MateriaParallelWorkspaceMode,
-  MateriaParallelWorkspaceOwnership,
-  MateriaParallelFanInBehavior,
-  MateriaParallelFanInHead,
-  MateriaParallelFanInProvenance,
-  MateriaParallelFinalizationProvenance,
   MateriaParallelUsageTotals,
   MateriaParallelRunRecord,
   MateriaParallelLaneRecord,

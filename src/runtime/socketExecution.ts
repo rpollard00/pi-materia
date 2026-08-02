@@ -282,18 +282,16 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
             const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
               ? state.data.envelope as Record<string, unknown>
               : {};
-            // Make the barrier result available both through the canonical
-            // control fields and through a namespaced provenance object. The
-            // latter lets a resolver inspect bounded paths/details without
-            // leaking lane state into generic work-item fields.
+            // Make the barrier result available through canonical control
+            // fields and a namespaced object for the next integration utility,
+            // without leaking branch state into generic work-item fields.
             const nextData: Record<string, unknown> = {
               ...state.data,
               envelope: { ...existingEnvelope, satisfied: handoff.satisfied, context: handoff.context },
               parallelFanIn: handoff.parallelFanIn,
             };
             // The parent is leaving item-scoped lane execution. Do not let a
-            // stale lane item masquerade as the resolver/evaluator's current
-            // work item after the barrier.
+            // stale branch item masquerade as post-barrier current work.
             delete nextData.item;
             delete nextData.currentWorkItem;
             delete nextData.workItem;

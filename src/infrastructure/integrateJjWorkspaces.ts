@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createExecutionScope, type ExecutionScope, type ExecutionScopeExport } from "../domain/executionScope.js";
-import { boundParallelFanInResult, type IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
+import type { IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
 import {
   createJjWorkspaceBackend,
   type JjFanInInput,
@@ -127,7 +127,7 @@ export async function integrateJjWorkspaceExports(
     queueOrder: sources.map(({ laneId }) => laneId),
     lanes,
   });
-  const integration = boundParallelFanInResult(rawIntegration);
+  const integration = boundJjFanInResult(rawIntegration);
   if (!integration.integrationRevision) throw new Error("Integrate-JJ-Workspaces did not materialize an integration revision.");
 
   const integrationScopeId = `${input.executionScope.id}:jj-integration:${encodeURIComponent(input.socketId)}`;
@@ -283,6 +283,22 @@ function intrinsicIdentity(state: unknown, input: IntegrateJjWorkspacesInput): P
   const fanIn = isRecord(state) ? state.parallelFanIn : undefined;
   if (isIntrinsicFanIn(fanIn)) return { parentCastId: fanIn.parentCastId, loopId: fanIn.loopId, runId: fanIn.runId };
   return { parentCastId: input.castId, loopId: input.socketId, runId: `${input.castId}:${input.socketId}:single` };
+}
+
+function boundJjFanInResult(result: JjFanInResult): JjFanInResult {
+  const boundedText = (value: string, max: number) => {
+    const normalized = String(value).replace(/\s+/g, " ").trim();
+    return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+  };
+  return {
+    ...structuredClone(result),
+    satisfied: result.outcome === "clean",
+    conflictedPaths: result.conflictedPaths.slice(0, 64).map((value) => boundedText(value, 512)),
+    conflictDetails: result.conflictDetails.slice(0, 64).map((detail) => ({
+      path: boundedText(detail.path, 512),
+      message: boundedText(detail.message, 1_000),
+    })),
+  };
 }
 
 function isIntrinsicFanIn(value: unknown): value is IntrinsicParallelFanInResult {

@@ -78,8 +78,6 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       "cast:cast-1:base:branch:build:lane-b",
       "cast:cast-1:base:branch:build:lane-c",
     ]);
-    expect(state.parallelRuns?.build?.baseline).toBeUndefined();
-    expect(state.parallelRuns?.build?.lanes["lane-a"]?.workspace).toBeUndefined();
   });
 
   test("fans in once with outputs and scope exports in stream order", async () => {
@@ -118,7 +116,6 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const run = state.parallelRuns!.build!;
     expect(run.phase).toBe("completed");
     expect(run.fanInPhase).toBe("accepted");
-    expect(run.lanes["lane-a"]?.acceptedHead).toBeUndefined();
     expect(run.lanes["lane-a"]?.terminalOutput).toEqual({ satisfied: true, result: "A" });
     expect(fanIns).toHaveLength(1);
     expect(fanIns[0].result.orderedBranches.map((branch: any) => branch.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
@@ -348,7 +345,6 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots().every((child) => child.status === "interrupted")).toBe(true);
     expect(state.parallelRuns?.build?.phase).toBe("failed");
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
-    expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.workspace === undefined)).toBe(true);
     const fresh = dispatcher(childRunner).dispatcher;
     expect(await fresh.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
   });

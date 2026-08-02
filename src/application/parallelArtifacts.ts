@@ -1,4 +1,3 @@
-import type { MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
 import type {
   ChildCastPaths,
   ChildCastStreamEvent,
@@ -11,7 +10,6 @@ export interface ParallelLaneArtifactPaths {
   laneManifestPath: string;
   eventStreamPath: string;
   terminalResultPath: string;
-  revisionPath: string;
   diagnosticsPath: string;
   usagePath: string;
   launchSpecPath: string;
@@ -39,18 +37,11 @@ export interface ParallelLaneArtifactIdentity {
   coordinatorArtifactRoot: string;
   /** Actual child-owned paths, which may be retained across resumed attempts. */
   paths: ChildCastPaths;
-  workspace?: unknown;
 }
 
 export interface ParallelLaneEventArtifact {
   provenance: Readonly<Record<string, unknown>>;
   event: ChildCastStreamEvent;
-}
-
-export interface ParallelLaneRevisionArtifact {
-  baseline?: unknown;
-  workspace?: unknown;
-  acceptedHead?: unknown;
 }
 
 export interface ParallelLaneDiagnosticArtifact {
@@ -61,24 +52,11 @@ export interface ParallelLaneDiagnosticArtifact {
   details?: Readonly<Record<string, unknown>>;
 }
 
-/**
- * Application port for parent-owned lane telemetry. Implementations may write
- * files, object storage, or a test journal; runtime scheduling only exchanges
- * DTOs and never depends on a filesystem.
- */
-export interface ParallelFanInArtifactPort {
-  write(input: {
-    artifactRoot: string;
-    provenance: MateriaParallelFanInProvenance;
-    satisfied: boolean;
-  }): Promise<void>;
-}
-
+/** Parent-owned lane telemetry, independent of repository or workspace state. */
 export interface ParallelLaneArtifactPort {
   initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths>;
   appendEvent(input: ParallelLaneArtifactIdentity & { event: ParallelLaneEventArtifact }): Promise<void>;
   writeTerminalResult(input: ParallelLaneArtifactIdentity & { result: ChildCastTerminalResult; usage?: ChildCastUsage }): Promise<void>;
-  writeRevision(input: ParallelLaneArtifactIdentity & { revision: ParallelLaneRevisionArtifact }): Promise<void>;
   writeDiagnostics(input: ParallelLaneArtifactIdentity & { diagnostics: readonly ParallelLaneDiagnosticArtifact[] }): Promise<void>;
   writeUsage(input: ParallelLaneArtifactIdentity & { usage: ChildCastUsage }): Promise<void>;
 }

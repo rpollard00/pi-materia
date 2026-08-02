@@ -366,7 +366,7 @@ describe("graph validation foundation", () => {
     expect(formatGraphValidationErrors(result.errors)).toContain("has no not_satisfied route back into the loop");
   });
 
-  test("validates opt-in parallel metadata, rejects incomplete topology, and leaves omitted loops sequential", () => {
+  test("treats loop parallel metadata only as a bounded concurrency override", () => {
     const sequential = { ...validGraph(), loops: { work: { sockets: ["Socket-2"] } } };
     expect(validatePipelineGraph(sequential).ok).toBe(true);
 
@@ -375,129 +375,17 @@ describe("graph validation foundation", () => {
       loops: {
         work: {
           sockets: ["Socket-2"],
-          parallel: {
-            planInput: "state.parallelPlan",
-            maxConcurrency: 2,
-            workspaceMode: "jj",
-            failurePolicy: "all_terminal",
-            fanIn: "ordered",
-          },
+          parallel: { maxConcurrency: 2 },
         },
       },
     };
-    const parallelResult = validatePipelineGraph(parallel);
-    expect(parallelResult.ok).toBe(false);
-    expect(parallelResult.errors).toContainEqual(expect.objectContaining({
-      source: "loops.work.consumes",
-      code: "invalid-loop",
-    }));
-    expect(formatGraphValidationErrors(parallelResult.errors)).toContain("must consume workItems");
+    expect(validatePipelineGraph(parallel).ok).toBe(true);
 
     const unsupported = structuredClone(parallel);
     unsupported.loops!.work!.parallel!.maxConcurrency = 0;
     const result = validatePipelineGraph(unsupported);
     expect(result.ok).toBe(false);
     expect(formatGraphValidationErrors(result.errors)).toContain("positive safe integer");
-  });
-
-  test("validates deterministic parallel entry, child topology, and clean/conflict fan-in exits", () => {
-    const graph: MateriaPipelineConfig = {
-      entry: "Socket-1",
-      sockets: {
-        "Socket-1": { materia: "Normalize-Parallel-Streams", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
-        "Socket-3": { materia: "Eval", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-4": { materia: "Integration-Eval" },
-        "Socket-5": { materia: "Resolver" },
-      },
-      loops: {
-        parallelWork: {
-          sockets: ["Socket-2", "Socket-3"],
-          consumes: { from: "Socket-1", output: "workItems" },
-          exit: { from: "Socket-3", when: "satisfied", to: "end" },
-          parallel: {
-            planInput: "state.parallelPlan",
-            maxConcurrency: 2,
-            workspaceMode: "jj",
-            failurePolicy: "all_terminal",
-            fanIn: "ordered",
-          },
-          exits: [
-            { id: "clean", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" },
-            { id: "conflict", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-5" },
-          ],
-        },
-      },
-    };
-
-    expect(validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).toEqual({ ok: true, errors: [] });
-
-    const unifiedReview = structuredClone(graph);
-    unifiedReview.loops!.parallelWork!.exits![1]!.targetSocketId = "Socket-4";
-    expect(validatePipelineGraph(unifiedReview, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).toEqual({ ok: true, errors: [] });
-
-    const malformedExit = structuredClone(graph);
-    (malformedExit.loops!.parallelWork!.exits as unknown as unknown[])[0] = null;
-    expect(() => validatePipelineGraph(malformedExit, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).not.toThrow();
-    const malformedExitResult = validatePipelineGraph(malformedExit, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
-    expect(malformedExitResult.ok).toBe(false);
-    expect(malformedExitResult.errors).toContainEqual(expect.objectContaining({ source: "loops.parallelWork.exits[0]", code: "invalid-loop" }));
-
-    const malformedSockets = structuredClone(graph);
-    (malformedSockets.loops!.parallelWork as unknown as { sockets: unknown }).sockets = { not: "an array" };
-    expect(() => validatePipelineGraph(malformedSockets, { isGeneratorSocket: (socketId) => socketId === "Socket-1" })).not.toThrow();
-    const malformedSocketsResult = validatePipelineGraph(malformedSockets, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
-    expect(malformedSocketsResult.ok).toBe(false);
-    expect(malformedSocketsResult.errors).toContainEqual(expect.objectContaining({ source: "loops.parallelWork.sockets", code: "invalid-loop" }));
-  });
-
-  test("rejects parallel regions with direct parent routes or ambiguous fan-in", () => {
-    const graph: MateriaPipelineConfig = {
-      entry: "Socket-1",
-      sockets: {
-        "Socket-1": { materia: "Normalize", edges: [{ when: "always", to: "Socket-2" }, { when: "satisfied", to: "Socket-3" }] },
-        "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
-        "Socket-3": { materia: "Eval", edges: [{ when: "always", to: "Socket-2" }, { when: "satisfied", to: "Socket-4" }] },
-        "Socket-4": { materia: "After" },
-      },
-      loops: {
-        parallelWork: {
-          sockets: ["Socket-2", "Socket-3"],
-          consumes: { from: "Socket-1" },
-          exit: { from: "Socket-3", when: "satisfied", to: "end" },
-          parallel: { planInput: "state.parallelPlan", maxConcurrency: 1, workspaceMode: "jj", failurePolicy: "all_terminal", fanIn: "ordered" },
-          exits: [{ id: "clean", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" }],
-        },
-      },
-    };
-
-    const result = validatePipelineGraph(graph, { isGeneratorSocket: (socketId) => socketId === "Socket-1" });
-    expect(result.ok).toBe(false);
-    expect(result.errors).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: "loops.parallelWork.consumes", code: "invalid-loop" }),
-      expect.objectContaining({ source: "Socket-3.edges[1].to", code: "invalid-loop" }),
-      expect.objectContaining({ source: "loops.parallelWork.exits", code: "invalid-loop" }),
-    ]));
-  });
-
-  test("rejects overlapping parallel regions", () => {
-    const graph: MateriaPipelineConfig = {
-      entry: "Socket-1",
-      sockets: {
-        "Socket-1": { materia: "Normalize", edges: [{ when: "always", to: "Socket-2" }] },
-        "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
-        "Socket-3": { materia: "Eval", edges: [{ when: "always", to: "Socket-2" }] },
-      },
-      loops: {
-        first: { sockets: ["Socket-2", "Socket-3"], parallel: { planInput: "state.parallelPlan", maxConcurrency: 1, workspaceMode: "jj", failurePolicy: "all_terminal", fanIn: "ordered" } },
-        second: { sockets: ["Socket-3"], parallel: { planInput: "state.parallelPlan", maxConcurrency: 1, workspaceMode: "jj", failurePolicy: "all_terminal", fanIn: "ordered" } },
-      },
-    };
-
-    const result = validatePipelineGraph(graph);
-    expect(result.ok).toBe(false);
-    expect(result.errors).toContainEqual(expect.objectContaining({ source: "loops.first.sockets", code: "invalid-loop" }));
-    expect(formatGraphValidationErrors(result.errors)).toContain("overlap or nest");
   });
 
   test("keeps canonical edges unchanged during graph normalization", () => {

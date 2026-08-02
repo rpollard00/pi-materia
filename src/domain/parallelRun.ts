@@ -3,19 +3,15 @@ import type {
   MateriaParallelConfigIdentity,
   MateriaParallelDiagnostic,
   MateriaParallelFanInPhase,
-  MateriaParallelFanInProvenance,
-  MateriaParallelFinalizationProvenance,
   MateriaParallelGraphIdentity,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
   MateriaParallelPlanIdentity,
   MateriaParallelQueueEntry,
-  MateriaParallelRevisionIdentity,
   MateriaParallelRunPhase,
   MateriaParallelRunState,
   MateriaParallelUsageTotals,
-  MateriaParallelWorkspaceOwnership,
 } from "./parallelRunTypes.js";
 import type { ExecutionScope } from "./executionScope.js";
 
@@ -34,8 +30,7 @@ export type ParallelTransitionIgnoreReason =
   | "run_terminal"
   | "phase_regression"
   | "fan_in_phase_regression"
-  | "event_regression"
-  | "fan_in_provenance_conflict";
+  | "event_regression";
 
 export interface CreateParallelRunStateInput {
   parentCastId: string;
@@ -45,8 +40,6 @@ export interface CreateParallelRunStateInput {
   planIdentity: MateriaParallelPlanIdentity;
   graphIdentity: MateriaParallelGraphIdentity;
   configIdentity: MateriaParallelConfigIdentity;
-  /** Optional only for legacy jj-coupled coordinator records. */
-  baseline?: MateriaParallelRevisionIdentity;
   queue: readonly MateriaParallelQueueEntry[];
   now?: number;
 }
@@ -67,11 +60,9 @@ export interface ParallelTransitionGuard {
 
 export interface ParallelLaneTransitionInput extends ParallelTransitionGuard {
   status?: MateriaParallelLaneStatus;
-  acceptedHead?: MateriaParallelRevisionIdentity;
   accepted?: boolean;
   executionScope?: ExecutionScope;
   terminalOutput?: unknown;
-  workspace?: MateriaParallelWorkspaceOwnership;
   childSession?: MateriaParallelChildSession;
   usage?: MateriaParallelUsageTotals;
   lastEvent?: MateriaParallelLastEvent;
@@ -98,16 +89,6 @@ export interface ParallelRunGuard {
 export interface ParallelRunPhaseTransitionInput extends ParallelRunGuard {
   phase?: MateriaParallelRunPhase;
   fanInPhase?: MateriaParallelFanInPhase;
-  timestamp?: number;
-}
-
-export interface ParallelFanInProvenanceTransitionInput extends ParallelRunGuard {
-  provenance: MateriaParallelFanInProvenance;
-  timestamp?: number;
-}
-
-export interface ParallelFinalizationTransitionInput extends ParallelRunGuard {
-  provenance: MateriaParallelFinalizationProvenance;
   timestamp?: number;
 }
 
@@ -142,10 +123,6 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
   if (!Number.isSafeInteger(input.configIdentity.maxConcurrency) || input.configIdentity.maxConcurrency < 1) {
     throw new Error("parallel maxConcurrency must be a positive safe integer");
   }
-  if (input.baseline && (typeof input.baseline.commitId !== "string" || typeof input.baseline.changeId !== "string" || input.baseline.commitId.trim().length === 0 || input.baseline.changeId.trim().length === 0)) {
-    throw new Error("parallel baseline must contain commitId and changeId");
-  }
-
   const queue = input.queue.map((entry, queueIndex) => {
     assertQueueEntry(entry, queueIndex);
     return {
@@ -197,12 +174,8 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
     planIdentity: clone(input.planIdentity),
     graphIdentity: clone(input.graphIdentity),
     configIdentity: clone(input.configIdentity),
-    ...(input.baseline ? { baseline: clone(input.baseline) } : {}),
     queueOrder: queue.map((entry) => entry.laneId),
     maxConcurrency: input.configIdentity.maxConcurrency,
-    ...(input.configIdentity.workspaceMode ? { workspaceMode: input.configIdentity.workspaceMode } : {}),
-    ...(input.configIdentity.failurePolicy ? { failurePolicy: input.configIdentity.failurePolicy } : {}),
-    ...(input.configIdentity.fanIn ? { fanIn: input.configIdentity.fanIn } : {}),
     phase: noLanes ? "completed" : "dispatching",
     fanInPhase: noLanes ? "skipped" : "not_started",
     lanes,
@@ -275,10 +248,6 @@ export function transitionParallelRun(
     nextLane.terminalOutput = clone(input.terminalOutput);
     changed = true;
   }
-  if (input.workspace !== undefined) {
-    nextLane.workspace = clone(input.workspace);
-    changed = true;
-  }
   if (input.childCastId !== undefined && input.childSession !== undefined && input.childCastId !== input.childSession.childCastId) {
     return ignored(state, "child_mismatch");
   }
@@ -289,10 +258,6 @@ export function transitionParallelRun(
   if (input.childSession !== undefined) {
     nextLane.childSession = clone(input.childSession);
     nextLane.childCastId = input.childSession.childCastId;
-    changed = true;
-  }
-  if (input.acceptedHead !== undefined) {
-    nextLane.acceptedHead = clone(input.acceptedHead);
     changed = true;
   }
   if (input.usage !== undefined) {
@@ -361,61 +326,6 @@ export function transitionParallelRunPhase(
 export const applyParallelRunPhaseTransition = transitionParallelRunPhase;
 export const guardedParallelRunPhaseTransition = transitionParallelRunPhase;
 
-/** Persist one guarded fan-in result without allowing a second result to replace it. */
-export function recordParallelFanInProvenance(
-  state: MateriaParallelRunState,
-  input: ParallelFanInProvenanceTransitionInput,
-): ParallelRunTransitionResult {
-  const guardFailure = runGuardFailureFor(state, input);
-  if (guardFailure) return ignored(state, guardFailure);
-  if (state.fanInProvenance !== undefined) {
-    return JSON.stringify(state.fanInProvenance) === JSON.stringify(input.provenance)
-      ? { state, applied: false, reason: "fan_in_provenance_conflict" }
-      : ignored(state, "fan_in_provenance_conflict");
-  }
-  const timestamp = finiteTimestamp(input.timestamp, state.updatedAt);
-  const next = clone(state);
-  next.fanInProvenance = clone(input.provenance);
-  next.updatedAt = Math.max(state.updatedAt, timestamp);
-  return { state: next, applied: true };
-}
-
-export const applyParallelFanInProvenance = recordParallelFanInProvenance;
-
-/**
- * Record the final evaluation/VCS boundary exactly once. A rejected
- * evaluation remains retryable and deliberately leaves the coordinator in its
- * evaluating/resolving phase; an accepted result closes the run.
- */
-export function recordParallelFinalization(
-  state: MateriaParallelRunState,
-  input: ParallelFinalizationTransitionInput,
-): ParallelRunTransitionResult {
-  const guardFailure = runGuardFailureFor(state, input);
-  if (guardFailure) return ignored(state, guardFailure);
-  if (input.provenance.status === "completed" && (!input.provenance.evaluationAccepted || !input.provenance.conflictFree)) {
-    return ignored(state, "invalid_status_transition");
-  }
-  if (state.finalizationProvenance !== undefined) {
-    if (state.finalizationProvenance.status === "completed") return ignored(state, "fan_in_provenance_conflict");
-    if (input.provenance.status === "preserved" && JSON.stringify(state.finalizationProvenance) === JSON.stringify(input.provenance)) {
-      return { state, applied: false, reason: "fan_in_provenance_conflict" };
-    }
-  }
-  const timestamp = finiteTimestamp(input.timestamp, state.updatedAt);
-  const next = clone(state);
-  next.finalizationProvenance = clone(input.provenance);
-  next.updatedAt = Math.max(state.updatedAt, timestamp);
-  if (input.provenance.status === "completed") {
-    next.phase = "completed";
-    next.fanInPhase = "accepted";
-    next.endedAt = timestamp;
-  }
-  return { state: next, applied: true };
-}
-
-export const applyParallelFinalizationProvenance = recordParallelFinalization;
-
 export interface RestartParallelLaneInput extends ParallelTransitionGuard {
   timestamp?: number;
   diagnostic?: MateriaParallelDiagnostic;
@@ -453,7 +363,6 @@ export function restartParallelLaneAttempt(
           childCastId: undefined,
           childSession: undefined,
         }),
-    acceptedHead: undefined,
     startedAt: undefined,
     endedAt: undefined,
     failureReason: undefined,
@@ -543,9 +452,7 @@ function hasTerminalLaneMutation(input: ParallelLaneTransitionInput): boolean {
   return input.childCastId !== undefined
     || input.executionScope !== undefined
     || input.terminalOutput !== undefined
-    || input.workspace !== undefined
     || input.childSession !== undefined
-    || input.acceptedHead !== undefined
     || input.usage !== undefined
     || input.failureReason !== undefined
     || input.phase !== undefined
@@ -568,7 +475,7 @@ function isTerminalRunPhase(phase: MateriaParallelRunPhase): boolean {
 }
 
 function phaseRank(phase: MateriaParallelRunPhase): number {
-  return ({ dispatching: 0, awaiting_lanes: 1, fan_in: 2, conflict: 3, resolving: 4, evaluating: 5, completed: 6, failed: 6 } satisfies Record<MateriaParallelRunPhase, number>)[phase];
+  return ({ dispatching: 0, awaiting_lanes: 1, completed: 2, failed: 2 } satisfies Record<MateriaParallelRunPhase, number>)[phase];
 }
 
 function isTerminalFanInPhase(phase: MateriaParallelFanInPhase): boolean {
@@ -576,7 +483,7 @@ function isTerminalFanInPhase(phase: MateriaParallelFanInPhase): boolean {
 }
 
 function fanInPhaseRank(phase: MateriaParallelFanInPhase): number {
-  return ({ not_started: 0, ready: 1, running: 2, conflict: 3, resolved: 4, accepted: 5, skipped: 5, failed: 5 } satisfies Record<MateriaParallelFanInPhase, number>)[phase];
+  return ({ not_started: 0, accepted: 1, skipped: 1, failed: 1 } satisfies Record<MateriaParallelFanInPhase, number>)[phase];
 }
 
 function appendDiagnostic(existing: readonly MateriaParallelDiagnostic[], diagnostic: MateriaParallelDiagnostic): MateriaParallelDiagnostic[] {

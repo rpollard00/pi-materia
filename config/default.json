@@ -865,47 +865,6 @@
         "runtime": "node"
       }
     },
-    "Normalize-Parallel-Streams": {
-      "type": "utility",
-      "label": "Normalize-Parallel-Streams",
-      "description": "Deterministically validate planner-defined ordered parallel streams, preserve canonical workItems, and emit stable lane metadata under state.parallelPlan.",
-      "group": "Utility",
-      "color": "materia-color-black-gray",
-      "parse": "json",
-      "generator": true,
-      "script": {
-        "kind": "shippedUtility",
-        "name": "normalize-parallel-streams.mjs",
-        "runtime": "node"
-      }
-    },
-    "Parallel-Lane-Checkpoint": {
-      "type": "utility",
-      "label": "Parallel-Lane-Checkpoint",
-      "description": "Deterministically checkpoint meaningful work inside one jj lane workspace without moving parent or shared bookmarks, then open a fresh empty commit for the next stream item.",
-      "group": "Utility",
-      "color": "materia-color-black-gray",
-      "parse": "json",
-      "parallelSafe": true,
-      "script": {
-        "kind": "shippedUtility",
-        "name": "parallel-lane-checkpoint.mjs",
-        "runtime": "node"
-      }
-    },
-    "Parallel-Finalize": {
-      "type": "utility",
-      "label": "Parallel-Finalize",
-      "description": "Finalize an evaluator-approved clean or resolved jj parallel integration, advance the bootstrap-owned bookmark, create a verified empty parent working commit, and remove only owned lane workspaces.",
-      "group": "Utility",
-      "color": "materia-color-black-gray",
-      "parse": "json",
-      "script": {
-        "kind": "shippedUtility",
-        "name": "parallel-finalize.mjs",
-        "runtime": "node"
-      }
-    },
     "Chain-Context": {
       "type": "agent",
       "tools": "readOnly",

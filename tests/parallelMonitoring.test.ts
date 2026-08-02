@@ -12,13 +12,8 @@ function run() {
     configIdentity: {
       configHash: "config-1",
       loopId: "build",
-      planInput: "state.parallelPlan",
       maxConcurrency: 2,
-      workspaceMode: "jj",
-      failurePolicy: "all_terminal",
-      fanIn: "ordered",
     },
-    baseline: { commitId: "base", changeId: "base-change" },
     queue: [
       { laneId: "lane-api", name: "api", streamIndex: 0, workItemIndexes: [0, 2] },
       { laneId: "lane-ui", name: "ui", streamIndex: 1, workItemIndexes: [1] },
@@ -70,28 +65,12 @@ describe("parallel monitor summaries", () => {
   test("reports intrinsic barrier completion without exposing VCS conflict state", () => {
     const state = run();
     for (const lane of Object.values(state.lanes)) lane.status = "accepted";
-    state.phase = "resolving";
-    state.fanInPhase = "conflict";
-    state.fanInProvenance = {
-      version: 1,
-      parentCastId: "cast-1",
-      loopId: "build",
-      runId: "parallel-run-1",
-      baseline: state.baseline,
-      parentRevisionBefore: state.baseline,
-      parentRevisionAfter: state.baseline,
-      orderedHeads: [],
-      outcome: "conflict",
-      conflictedPaths: ["src/file.ts"],
-      conflictDetails: [],
-      operationId: "op-1",
-      startedAt: 20,
-      completedAt: 21,
-    };
+    state.phase = "completed";
+    state.fanInPhase = "accepted";
 
     const summary = summarizeParallelRun(state);
     expect(summary.counts).toMatchObject({ accepted: 2, completed: 2, barrierReached: 2 });
-    expect(summary.barrier).toEqual({ phase: "waiting", reached: 2, total: 2 });
+    expect(summary.barrier).toEqual({ phase: "accepted", reached: 2, total: 2 });
     expect(summary).not.toHaveProperty("baseline");
     expect(summary.counts).not.toHaveProperty("conflict");
   });

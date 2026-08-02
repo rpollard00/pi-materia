@@ -29,7 +29,6 @@ function identity(root: string) {
       artifactRoot: path.join(root, "attempt-2", "artifacts"),
       runDirectory: path.join(root, "attempt-2", "run"),
     },
-    workspace: { workspacePath: path.join(root, "workspace") },
   };
 }
 
@@ -45,7 +44,6 @@ describe("parallel lane artifact store", () => {
       store.appendEvent({ ...input, event: { provenance: { childSequence: 2 }, event: { childCastId: "child-1", sequence: 2, type: "second", occurredAt: 2 } } }),
     ]);
     await store.writeUsage({ ...input, usage });
-    await store.writeRevision({ ...input, revision: { baseline: { commitId: "base", changeId: "base-change" }, acceptedHead: { commitId: "head", changeId: "head-change" } } });
     await store.writeTerminalResult({ ...input, result: { status: "succeeded", accepted: true, endedAt: 3 }, usage });
     await store.writeDiagnostics({
       ...input,

@@ -1,16 +1,13 @@
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type {
-  ParallelFanInArtifactPort,
   ParallelLaneArtifactIdentity,
   ParallelLaneArtifactPaths,
   ParallelLaneArtifactPort,
   ParallelLaneDiagnosticArtifact,
   ParallelLaneEventArtifact,
-  ParallelLaneRevisionArtifact,
 } from "../application/index.js";
 import type { ChildCastTerminalResult, ChildCastUsage } from "../application/childCastRunner.js";
-import type { MateriaParallelFanInProvenance } from "../domain/parallelRunTypes.js";
 import { boundedMessage, clone, writeJsonAtomically } from "./piChildCastSupport.js";
 
 const MAX_DIAGNOSTICS = 24;
@@ -23,7 +20,7 @@ const MAX_DIAGNOSTIC_DETAILS_BYTES = 4_096;
  * their own attempt directory so resuming a retained child session cannot mix
  * or overwrite later-attempt provenance.
  */
-export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, ParallelFanInArtifactPort {
+export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort {
   readonly #eventTails = new Map<string, Promise<void>>();
 
   async initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths> {
@@ -45,7 +42,6 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
         streamIndex: input.streamIndex,
         workItemIndexes: [...input.workItemIndexes],
       },
-      workspace: clone(input.workspace),
       paths,
     });
     return paths;
@@ -67,15 +63,6 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
     });
   }
 
-  async writeRevision(input: ParallelLaneArtifactIdentity & { revision: ParallelLaneRevisionArtifact }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
-    await writeJsonAtomically(paths.revisionPath, {
-      version: 1,
-      identity: identityForArtifact(input),
-      revision: clone(input.revision),
-    });
-  }
-
   async writeDiagnostics(input: ParallelLaneArtifactIdentity & { diagnostics: readonly ParallelLaneDiagnosticArtifact[] }): Promise<void> {
     const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     const diagnostics = input.diagnostics.slice(-MAX_DIAGNOSTICS).map(boundDiagnostic);
@@ -85,20 +72,6 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
       diagnostics,
       truncated: input.diagnostics.length > diagnostics.length,
     });
-  }
-
-  async writeFanIn(input: { artifactRoot: string; provenance: MateriaParallelFanInProvenance; satisfied: boolean }): Promise<void> {
-    const directory = path.join(input.artifactRoot, "parallel", safeArtifactPart(input.provenance.loopId));
-    await mkdir(directory, { recursive: true });
-    await writeJsonAtomically(path.join(directory, "fan-in.json"), {
-      version: 1,
-      satisfied: input.satisfied,
-      provenance: clone(input.provenance),
-    });
-  }
-
-  async write(input: { artifactRoot: string; provenance: MateriaParallelFanInProvenance; satisfied: boolean }): Promise<void> {
-    return this.writeFanIn(input);
   }
 
   async writeUsage(input: ParallelLaneArtifactIdentity & { usage: ChildCastUsage }): Promise<void> {
@@ -139,7 +112,6 @@ function artifactPaths(paths: { sessionPath: string; artifactRoot: string; runDi
     laneManifestPath: path.join(attemptRoot, "lane.json"),
     eventStreamPath: path.join(attemptRoot, "events.jsonl"),
     terminalResultPath: path.join(attemptRoot, "terminal-result.json"),
-    revisionPath: path.join(attemptRoot, "revision.json"),
     diagnosticsPath: path.join(attemptRoot, "diagnostics.json"),
     usagePath: path.join(attemptRoot, "usage.json"),
     launchSpecPath: path.join(paths.runDirectory, `child-launch${suffix}.json`),
@@ -148,10 +120,6 @@ function artifactPaths(paths: { sessionPath: string; artifactRoot: string; runDi
     stderrPath: path.join(paths.artifactRoot, `child-stderr${suffix}.log`),
     socketArtifactsPath: paths.artifactRoot,
   };
-}
-
-function safeArtifactPart(value: string): string {
-  return value.trim().replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "") || "parallel";
 }
 
 function identityForArtifact(input: ParallelLaneArtifactIdentity): Record<string, unknown> {
