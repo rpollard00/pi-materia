@@ -19,15 +19,15 @@ const MAX_DIAGNOSTIC_DETAILS_BYTES = 4_096;
 
 /**
  * File-backed parent-cast lane telemetry. Child stdout/stderr, sessions, and
- * socket artifacts are produced by the child runner in the same attempt
- * directory; this store writes the stable index and coordinator-owned records
- * beside them.
+ * socket artifacts remain at child-runner-owned paths. Coordinator records use
+ * their own attempt directory so resuming a retained child session cannot mix
+ * or overwrite later-attempt provenance.
  */
 export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, ParallelFanInArtifactPort {
   readonly #eventTails = new Map<string, Promise<void>>();
 
   async initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     await mkdir(path.dirname(paths.laneManifestPath), { recursive: true });
     await writeJsonAtomically(paths.laneManifestPath, {
       version: 1,
@@ -37,6 +37,10 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
         loopId: input.loopId,
         laneId: input.laneId,
         childCastId: input.childCastId,
+        planId: input.planId,
+        graphHash: input.graphHash,
+        branchId: input.branchId,
+        executionScopeId: input.executionScopeId,
         attempt: input.attempt,
         streamIndex: input.streamIndex,
         workItemIndexes: [...input.workItemIndexes],
@@ -48,13 +52,13 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
   }
 
   async appendEvent(input: ParallelLaneArtifactIdentity & { event: ParallelLaneEventArtifact }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     const line = `${JSON.stringify({ ...input.event, parentCastId: input.parentCastId, loopId: input.loopId, laneId: input.laneId, attempt: input.attempt })}\n`;
     await this.#appendOrdered(paths.eventStreamPath, line);
   }
 
   async writeTerminalResult(input: ParallelLaneArtifactIdentity & { result: ChildCastTerminalResult; usage?: ChildCastUsage }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     await writeJsonAtomically(paths.terminalResultPath, {
       version: 1,
       identity: identityForArtifact(input),
@@ -64,7 +68,7 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
   }
 
   async writeRevision(input: ParallelLaneArtifactIdentity & { revision: ParallelLaneRevisionArtifact }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     await writeJsonAtomically(paths.revisionPath, {
       version: 1,
       identity: identityForArtifact(input),
@@ -73,7 +77,7 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
   }
 
   async writeDiagnostics(input: ParallelLaneArtifactIdentity & { diagnostics: readonly ParallelLaneDiagnosticArtifact[] }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     const diagnostics = input.diagnostics.slice(-MAX_DIAGNOSTICS).map(boundDiagnostic);
     await writeJsonAtomically(paths.diagnosticsPath, {
       version: 1,
@@ -98,7 +102,7 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort, 
   }
 
   async writeUsage(input: ParallelLaneArtifactIdentity & { usage: ChildCastUsage }): Promise<void> {
-    const paths = artifactPaths(input.paths, input.attempt);
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
     await writeJsonAtomically(paths.usagePath, {
       version: 1,
       identity: identityForArtifact(input),
@@ -124,13 +128,13 @@ export function createParallelLaneArtifactStore(): FileParallelLaneArtifactStore
   return new FileParallelLaneArtifactStore();
 }
 
-export function parallelLaneArtifactPaths(paths: { sessionPath: string; artifactRoot: string; runDirectory: string }, attempt: number): ParallelLaneArtifactPaths {
-  return artifactPaths(paths, attempt);
+export function parallelLaneArtifactPaths(paths: { sessionPath: string; artifactRoot: string; runDirectory: string }, attempt: number, coordinatorArtifactRoot: string): ParallelLaneArtifactPaths {
+  return artifactPaths(paths, attempt, coordinatorArtifactRoot);
 }
 
-function artifactPaths(paths: { sessionPath: string; artifactRoot: string; runDirectory: string }, attempt: number): ParallelLaneArtifactPaths {
+function artifactPaths(paths: { sessionPath: string; artifactRoot: string; runDirectory: string }, attempt: number, coordinatorArtifactRoot: string): ParallelLaneArtifactPaths {
   const suffix = attempt === 1 ? "" : `-attempt-${attempt}`;
-  const attemptRoot = path.dirname(paths.runDirectory);
+  const attemptRoot = coordinatorArtifactRoot;
   return {
     laneManifestPath: path.join(attemptRoot, "lane.json"),
     eventStreamPath: path.join(attemptRoot, "events.jsonl"),
@@ -157,6 +161,10 @@ function identityForArtifact(input: ParallelLaneArtifactIdentity): Record<string
     loopId: input.loopId,
     laneId: input.laneId,
     childCastId: input.childCastId,
+    planId: input.planId,
+    graphHash: input.graphHash,
+    branchId: input.branchId,
+    executionScopeId: input.executionScopeId,
     attempt: input.attempt,
   };
 }

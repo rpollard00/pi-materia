@@ -86,7 +86,6 @@ export {
   transitionParallelRunPhase,
   updateParallelRunState,
   isParallelLaneRevivalCandidate,
-  validateParallelRecovery,
 } from "./runtime/parallelCoordinatorState.js";
 export type {
   CastParallelTransitionResult,
@@ -100,10 +99,6 @@ export type {
   ParallelFinalizationTransitionInput,
   RestartParallelLaneInput,
   ParallelTransitionIgnoreReason,
-  ParallelRecoveryPlan,
-  ParallelRecoveryValidationIssue,
-  ParallelRecoveryValidationInput,
-  ParallelRecoveryValidationResult,
 } from "./runtime/parallelCoordinatorState.js";
 export {
   clearCastState,

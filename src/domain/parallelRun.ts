@@ -5,6 +5,7 @@ import type {
   MateriaParallelFanInPhase,
   MateriaParallelFanInProvenance,
   MateriaParallelFinalizationProvenance,
+  MateriaParallelGraphIdentity,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
@@ -42,6 +43,7 @@ export interface CreateParallelRunStateInput {
   /** Optional stable coordinator identity. The deterministic fallback is revival-safe. */
   runId?: string;
   planIdentity: MateriaParallelPlanIdentity;
+  graphIdentity: MateriaParallelGraphIdentity;
   configIdentity: MateriaParallelConfigIdentity;
   /** Optional only for legacy jj-coupled coordinator records. */
   baseline?: MateriaParallelRevisionIdentity;
@@ -128,8 +130,10 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
   assertNonEmpty(input.parentCastId, "parentCastId");
   assertNonEmpty(input.loopId, "loopId");
   if (!input.planIdentity || typeof input.planIdentity !== "object") throw new Error("parallel planIdentity is required");
+  if (!input.graphIdentity || typeof input.graphIdentity !== "object") throw new Error("parallel graphIdentity is required");
   if (!input.configIdentity || typeof input.configIdentity !== "object") throw new Error("parallel configIdentity is required");
   assertNonEmpty(input.planIdentity.planId, "planIdentity.planId");
+  assertNonEmpty(input.graphIdentity.graphHash, "graphIdentity.graphHash");
   assertNonEmpty(input.configIdentity.configHash, "configIdentity.configHash");
   if (input.configIdentity.loopId !== input.loopId) throw new Error("parallel configIdentity.loopId must match loopId");
   if (input.planIdentity.workItemCount < 0 || !Number.isSafeInteger(input.planIdentity.workItemCount)) {
@@ -171,6 +175,7 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
   const lanes: Record<string, MateriaParallelLaneState> = {};
   for (const [queueIndex, entry] of queue.entries()) {
     lanes[entry.laneId] = {
+      branchId: `${input.runId?.trim() || `parallel:${input.parentCastId}:${input.loopId}:${input.planIdentity.planId}`}:branch:${encodeURIComponent(entry.laneId)}`,
       laneId: entry.laneId,
       name: entry.name,
       streamIndex: entry.streamIndex,
@@ -190,6 +195,7 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
     loopId: input.loopId,
     runId: input.runId?.trim() || `parallel:${input.parentCastId}:${input.loopId}:${input.planIdentity.planId}`,
     planIdentity: clone(input.planIdentity),
+    graphIdentity: clone(input.graphIdentity),
     configIdentity: clone(input.configIdentity),
     ...(input.baseline ? { baseline: clone(input.baseline) } : {}),
     queueOrder: queue.map((entry) => entry.laneId),

@@ -27,9 +27,17 @@ export interface ParallelLaneArtifactIdentity {
   loopId: string;
   laneId: string;
   childCastId: string;
+  /** Immutable revival identities copied into every attempt manifest. */
+  planId: string;
+  graphHash: string;
+  branchId: string;
+  executionScopeId: string;
   attempt: number;
   streamIndex: number;
   workItemIndexes: readonly number[];
+  /** Parent-owned directory for this exact lane attempt. It must not follow a resumed child session. */
+  coordinatorArtifactRoot: string;
+  /** Actual child-owned paths, which may be retained across resumed attempts. */
   paths: ChildCastPaths;
   workspace?: unknown;
 }

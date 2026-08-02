@@ -8,6 +8,7 @@ function run() {
     loopId: "build",
     runId: "parallel-run-1",
     planIdentity: { version: 1, planId: "plan-1", workItemCount: 3 },
+    graphIdentity: { graphHash: "graph-1" },
     configIdentity: {
       configHash: "config-1",
       loopId: "build",

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createFakeChildCastRunner } from "../src/application/index.js";
 import { createBaseExecutionScope, createExecutionScope } from "../src/domain/executionScope.js";
+import { createParallelLaneArtifactStore } from "../src/infrastructure/index.js";
 import { ParallelLoopDispatcher } from "../src/runtime/parallelDispatcher.js";
 import type { MateriaCastState } from "../src/types.js";
 
@@ -69,7 +73,11 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     ]);
     expect(started[0]!.executionScope.state).toEqual(state.baseScope.state);
     expect(started[0]!.executionScope.state).not.toBe(state.baseScope.state);
-    expect(Object.keys(state.branchScopes)).toEqual(started.map((child) => child.executionScope.id));
+    expect(Object.keys(state.branchScopes)).toEqual([
+      "cast:cast-1:base:branch:build:lane-a",
+      "cast:cast-1:base:branch:build:lane-b",
+      "cast:cast-1:base:branch:build:lane-c",
+    ]);
     expect(state.parallelRuns?.build?.baseline).toBeUndefined();
     expect(state.parallelRuns?.build?.lanes["lane-a"]?.workspace).toBeUndefined();
   });
@@ -152,6 +160,169 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(state.parallelRuns?.build?.phase).toBe("failed");
   });
 
+  test("revives only failed branches while preserving accepted outputs and immutable attempt artifacts", async () => {
+    const state = makeState();
+    state.artifactRoot = await mkdtemp(path.join(os.tmpdir(), "materia-revival-"));
+    const artifacts = { lane: createParallelLaneArtifactStore(), appendEvent: async () => undefined };
+    const initial = dispatcher(undefined, { artifacts });
+    await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    const children = initial.childRunner.listSnapshots();
+    const byLane = (laneId: string) => children.find((child) => child.identity.laneId === laneId)!;
+    initial.childRunner.complete(byLane("lane-a").identity.childCastId, { output: { result: "accepted-a" } });
+    initial.childRunner.fail(byLane("lane-b").identity.childCastId, { error: "retry me" });
+    initial.childRunner.complete(byLane("lane-c").identity.childCastId, { output: { result: "accepted-c" } });
+    await flush(initial.childRunner);
+
+    const acceptedBefore = structuredClone(state.parallelRuns!.build!.lanes["lane-a"]);
+    const fanIns: any[] = [];
+    const revived = dispatcher(initial.childRunner, { artifacts }).dispatcher;
+    expect(await revived.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
+    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
+
+    expect(state.parallelRuns!.build!.lanes["lane-a"]).toEqual(acceptedBefore);
+    const attempt2 = initial.childRunner.listSnapshots().find((child) => child.attempt === 2)!;
+    expect(attempt2.identity.laneId).toBe("lane-b");
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.childSession).toEqual({
+      childCastId: attempt2.identity.childCastId,
+      ...attempt2.paths,
+    });
+
+    initial.childRunner.fail(attempt2.identity.childCastId, { error: "retry me again" });
+    await flush(initial.childRunner);
+    const revivedAgain = dispatcher(initial.childRunner, { artifacts }).dispatcher;
+    expect(await revivedAgain.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
+    await revivedAgain.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
+    const attempt3 = initial.childRunner.listSnapshots().find((child) => child.attempt === 3)!;
+    expect(attempt3.paths).toEqual(attempt2.paths);
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.childSession).toEqual({ childCastId: attempt3.identity.childCastId, ...attempt3.paths });
+    const laneRoot = path.join(state.artifactRoot, "parallel", "build", "lanes", "lane-b");
+    const attempt2Manifest = JSON.parse(await readFile(path.join(laneRoot, "attempt-2", "lane.json"), "utf8"));
+    const attempt3Manifest = JSON.parse(await readFile(path.join(laneRoot, "attempt-3", "lane.json"), "utf8"));
+    expect([attempt2Manifest.identity.attempt, attempt3Manifest.identity.attempt]).toEqual([2, 3]);
+    expect(attempt2Manifest.paths.laneManifestPath).not.toBe(attempt3Manifest.paths.laneManifestPath);
+    expect(attempt2Manifest.paths.sessionPath).toBe(attempt3Manifest.paths.sessionPath);
+
+    initial.childRunner.complete(attempt3.identity.childCastId, { output: { result: "accepted-b" } });
+    await flush(initial.childRunner);
+    expect(JSON.parse(await readFile(path.join(laneRoot, "attempt-2", "terminal-result.json"), "utf8")).result.status).toBe("failed");
+    expect(JSON.parse(await readFile(path.join(laneRoot, "attempt-3", "terminal-result.json"), "utf8")).result.status).toBe("succeeded");
+    expect(fanIns).toHaveLength(1);
+    expect(fanIns[0].result.orderedBranches.map((branch: any) => branch.terminalOutput)).toEqual([
+      { result: "accepted-a" }, { result: "accepted-b" }, { result: "accepted-c" },
+    ]);
+  });
+
+  test("rejects plan, graph, branch, and execution-scope drift before revival", async () => {
+    const state = makeState();
+    const initial = dispatcher();
+    await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    const children = initial.childRunner.listSnapshots();
+    initial.childRunner.fail(children[0]!.identity.childCastId, {});
+    for (const child of children.slice(1)) initial.childRunner.complete(child.identity.childCastId);
+    await flush(initial.childRunner);
+    const subject = dispatcher(initial.childRunner).dispatcher;
+    const input = { pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } };
+
+    state.data.parallelPlan = { ...(state.data.parallelPlan as any), planId: "drifted" };
+    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "plan_mismatch")).toBe(true);
+    state.data.parallelPlan = { ...(state.data.parallelPlan as any), planId: "plan-1" };
+    const graphHash = state.parallelRuns!.build!.graphIdentity.graphHash;
+    state.parallelRuns!.build!.graphIdentity.graphHash = "drifted";
+    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "graph_drift")).toBe(true);
+    state.parallelRuns!.build!.graphIdentity.graphHash = graphHash;
+    state.parallelRuns!.build!.lanes["lane-a"]!.branchId = "drifted";
+    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "branch_identity_drift")).toBe(true);
+    state.parallelRuns!.build!.lanes["lane-a"]!.branchId = `${state.parallelRuns!.build!.runId}:branch:lane-a`;
+    const lane = state.parallelRuns!.build!.lanes["lane-a"]!;
+    const scope = lane.executionScope!;
+    state.branchScopes[scope.id] = { ...scope, cwd: "/drifted" };
+    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "scope_drift")).toBe(true);
+
+    state.branchScopes[scope.id] = structuredClone(scope);
+    const sessionPath = lane.childSession!.sessionPath;
+    lane.childSession!.sessionPath = "/drifted/session.jsonl";
+    await expect(subject.revive(input)).rejects.toThrow(/session path drift/);
+    lane.childSession!.sessionPath = sessionPath;
+    lane.attempt += 1;
+    await expect(subject.revive(input)).rejects.toThrow(/attempt drift/);
+  });
+
+  test("rejects retained child initial-data drift before revival and after resume", async () => {
+    const setupFailedRun = async () => {
+      const state = makeState();
+      const initial = dispatcher();
+      await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+      const children = initial.childRunner.listSnapshots();
+      initial.childRunner.fail(children[0]!.identity.childCastId, { error: "retry" });
+      for (const child of children.slice(1)) initial.childRunner.complete(child.identity.childCastId);
+      await flush(initial.childRunner);
+      return { state, childRunner: initial.childRunner };
+    };
+    const delegate = (childRunner: ReturnType<typeof createFakeChildCastRunner>) => ({
+      start: childRunner.start.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      subscribe: childRunner.subscribe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+    });
+
+    const before = await setupFailedRun();
+    const beforePort = delegate(before.childRunner);
+    beforePort.observe = async (input) => {
+      const observation = await before.childRunner.observe(input);
+      if (!observation || observation.snapshot.identity.laneId !== "lane-a") return observation;
+      const drifted = structuredClone(observation);
+      (drifted.snapshot.compiledLoadout.initialData as any).workItems = [{ title: "corrupted", context: "corrupted" }];
+      return drifted;
+    };
+    const beforeSubject = dispatcher(beforePort as any).dispatcher;
+    const beforeValidation = await beforeSubject.validateRevival({ pi: {} as any, ctx: {} as any, state: before.state, loopId: "build", config: { maxConcurrency: 3 } });
+    expect(beforeValidation.ok).toBe(false);
+    expect(beforeValidation.issues).toContainEqual(expect.objectContaining({ code: "child_session_drift", laneId: "lane-a" }));
+
+    const after = await setupFailedRun();
+    const afterPort = delegate(after.childRunner);
+    afterPort.resume = async (input) => {
+      const resumed = await after.childRunner.resume(input);
+      const drifted = structuredClone(resumed);
+      (drifted.snapshot.compiledLoadout.initialData as any).workItems = [{ title: "corrupted", context: "corrupted" }];
+      return drifted;
+    };
+    const afterSubject = dispatcher(afterPort as any).dispatcher;
+    await afterSubject.revive({ pi: {} as any, ctx: {} as any, state: after.state, loopId: "build", config: { maxConcurrency: 3 } });
+    expect(after.state.parallelRuns!.build!.lanes["lane-a"]!.status).toBe("failed");
+    expect(after.state.parallelRuns!.build!.lanes["lane-a"]!.failureReason).toContain("initial-data drift");
+  });
+
+  test("rejects complete child identity and cwd drift after resume", async () => {
+    const state = makeState();
+    const initial = dispatcher();
+    await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    for (const child of initial.childRunner.listSnapshots()) initial.childRunner.fail(child.identity.childCastId, { error: "retry" });
+    await flush(initial.childRunner);
+
+    const children = {
+      start: initial.childRunner.start.bind(initial.childRunner),
+      observe: initial.childRunner.observe.bind(initial.childRunner),
+      subscribe: initial.childRunner.subscribe.bind(initial.childRunner),
+      abort: initial.childRunner.abort.bind(initial.childRunner),
+      resume: async (input: any) => {
+        const resumed = structuredClone(await initial.childRunner.resume(input));
+        if (resumed.snapshot.identity.laneId === "lane-a") resumed.snapshot.identity.parentCastId = "other-parent";
+        if (resumed.snapshot.identity.laneId === "lane-b") resumed.snapshot.identity.loopId = "other-loop";
+        if (resumed.snapshot.identity.laneId === "lane-c") resumed.snapshot.cwd = "/other/cwd";
+        return resumed;
+      },
+    };
+    const subject = dispatcher(children as any).dispatcher;
+    await subject.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } });
+
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.failureReason).toContain("identity or attempt drift");
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.failureReason).toContain("identity or attempt drift");
+    expect(state.parallelRuns!.build!.lanes["lane-c"]!.failureReason).toContain("cwd drift");
+    expect(Object.values(state.parallelRuns!.build!.lanes).every((lane) => lane.status === "failed")).toBe(true);
+  });
+
   test("aggregates usage and preserves event forwarding", async () => {
     const state = makeState();
     const forwarded: any[] = [];
@@ -178,6 +349,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(state.parallelRuns?.build?.phase).toBe("failed");
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.workspace === undefined)).toBe(true);
+    const fresh = dispatcher(childRunner).dispatcher;
+    expect(await fresh.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
   });
 
   test("rehydrates persisted running children when cancellation uses a fresh dispatcher", async () => {

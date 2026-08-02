@@ -31,6 +31,7 @@ function run() {
     loopId: "build",
     runId: "run-1",
     planIdentity,
+    graphIdentity: { graphHash: "graph-1" },
     configIdentity,
     baseline: { commitId: "commit-0", changeId: "change-0" },
     queue,

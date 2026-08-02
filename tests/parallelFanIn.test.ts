@@ -24,6 +24,7 @@ function run(overrides: Record<string, unknown> = {}) {
     loopId: "build",
     runId: "run",
     planIdentity: { version: 1, planId: "plan", workItemCount: 2 },
+    graphIdentity: { graphHash: "graph" },
     configIdentity,
     baseline: { commitId: "base", changeId: "base-change" },
     queue: [

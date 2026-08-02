@@ -62,6 +62,11 @@ export interface MateriaParallelPlanIdentity {
   workItemCount: number;
 }
 
+/** Immutable compiled branch-program identity pinned for one parallel run. */
+export interface MateriaParallelGraphIdentity {
+  graphHash: string;
+}
+
 /** The loop/config identity pinned for one parallel run. */
 export interface MateriaParallelConfigIdentity {
   configHash: string;
@@ -157,6 +162,8 @@ export interface MateriaParallelLastEvent {
 
 /** Durable state for one normalized stream/lane. */
 export interface MateriaParallelLaneState {
+  /** Stable identity of this branch across attempts and process restarts. */
+  branchId: string;
   laneId: string;
   name: string;
   streamIndex: number;
@@ -189,6 +196,7 @@ export interface MateriaParallelRunState {
   loopId: string;
   runId: string;
   planIdentity: MateriaParallelPlanIdentity;
+  graphIdentity: MateriaParallelGraphIdentity;
   configIdentity: MateriaParallelConfigIdentity;
   /** Legacy jj baseline retained only when reading an older coordinator run. */
   baseline?: MateriaParallelRevisionIdentity;

@@ -1,4 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
+import path from "node:path";
 import { collectAcceptedParallelBranches, type IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
 import { parallelBranchRegionForEntry } from "../graph/parallelRegions.js";
 import type {
@@ -114,6 +116,7 @@ interface PreparedLane {
   compiledLoadout: CompiledLoopChildLoadout;
   recoveryChildCastId?: string;
   recoveryAfterSequence?: number;
+  recoveryScope?: MateriaParallelLaneState["executionScope"];
   resumeChild?: boolean;
 }
 
@@ -185,10 +188,17 @@ export class ParallelLoopDispatcher {
         parentCastId: input.state.castId,
         loopId: input.loopId,
         planIdentity: { version: plan.version, planId: plan.planId, workItemCount: plan.workItemCount },
+        graphIdentity: { graphHash: parallelGraphHash(prepared) },
         configIdentity: { configHash: input.state.configHash, loopId: input.loopId, maxConcurrency: input.config.maxConcurrency },
         queue: plan.streams.map((stream) => ({ laneId: stream.laneId, name: stream.name, streamIndex: stream.streamIndex, workItemIndexes: [...stream.workItemIndexes] })),
         now: this.#now(),
       });
+      const baseScope = input.state.baseScope ?? createBaseExecutionScope(input.state.castId, input.state.cwd);
+      for (const laneId of run.queueOrder) {
+        const scope = cloneParallelBranchExecutionScope(baseScope, input.loopId, laneId);
+        run.lanes[laneId]!.executionScope = scope;
+        input.state.branchScopes = { ...(input.state.branchScopes ?? {}), [scope.id]: cloneExecutionScope(scope) };
+      }
       this.#run = run;
       this.#prepared = prepared;
       this.#nextQueueIndex = 0;
@@ -231,12 +241,48 @@ export class ParallelLoopDispatcher {
     try { plan = readNormalizedParallelPlan(input.state, "state.parallelPlan"); }
     catch (error) { issues.push({ code: "plan_invalid", path: "state.parallelPlan", message: boundedFailureReason(parallelErrorMessage(error)) }); }
     if (run.parentCastId !== input.state.castId) issues.push({ code: "cast_mismatch", path: "run.parentCastId", message: "persisted run belongs to another cast" });
+    if (run.loopId !== input.loopId || run.configIdentity.loopId !== input.loopId) issues.push({ code: "loop_mismatch", path: "run.loopId", message: "persisted run belongs to another loop" });
+    if (run.phase !== "failed" || run.fanInPhase !== "skipped") issues.push({ code: "run_not_revivable", path: "run.phase", message: "only failed branch work whose barrier was skipped can be revived" });
     if (run.configIdentity.configHash !== input.state.configHash || run.maxConcurrency !== input.config.maxConcurrency) issues.push({ code: "config_mismatch", path: "run.configIdentity", message: "parallel configuration changed" });
     if (plan && (run.planIdentity.planId !== plan.planId || run.planIdentity.version !== plan.version || run.planIdentity.workItemCount !== plan.workItemCount)) issues.push({ code: "plan_mismatch", path: "run.planIdentity", message: "normalized parallel plan changed" });
-    for (const lane of Object.values(run.lanes)) {
-      if (lane.status === "accepted" && !lane.executionScope) issues.push({ code: "scope_missing", path: `lanes.${lane.laneId}.executionScope`, laneId: lane.laneId, message: "accepted branch has no persisted execution scope" });
-      if (lane.executionScope && input.state.branchScopes?.[lane.executionScope.id]?.id !== lane.executionScope.id) issues.push({ code: "scope_drift", path: `lanes.${lane.laneId}.executionScope`, laneId: lane.laneId, message: "persisted branch scope differs from cast branch scopes" });
+    let prepared: PreparedLane[] | undefined;
+    if (plan) {
+      try {
+        const workItems = readParallelWorkItems(input.state);
+        if (workItems.length !== plan.workItemCount) throw new Error("work-item count differs from the immutable plan");
+        prepared = compileStreams(input as ParallelLoopDispatchInput, plan, workItems);
+        if (!run.graphIdentity?.graphHash || run.graphIdentity.graphHash !== parallelGraphHash(prepared)) issues.push({ code: "graph_drift", path: "run.graphIdentity", message: "compiled parallel branch graph changed" });
+      } catch (error) {
+        issues.push({ code: "graph_invalid", path: "state.pipeline", message: boundedFailureReason(parallelErrorMessage(error)) });
+      }
     }
+    const plannedLaneIds = plan?.streams.map((stream) => stream.laneId) ?? [];
+    if (!sameStrings(run.queueOrder, plannedLaneIds)) issues.push({ code: "branch_order_drift", path: "run.queueOrder", message: "persisted branches no longer exactly match normalized stream order" });
+    for (const [queueIndex, laneId] of run.queueOrder.entries()) {
+      const lane = run.lanes[laneId];
+      const stream = plan?.streams[queueIndex];
+      if (!lane || !stream || lane.laneId !== laneId || lane.queueIndex !== queueIndex || lane.name !== stream.name || lane.streamIndex !== stream.streamIndex || !sameNumbers(lane.workItemIndexes, stream.workItemIndexes)) {
+        issues.push({ code: "branch_drift", path: `lanes.${laneId}`, laneId, message: "persisted branch identity or stream membership changed" });
+        continue;
+      }
+      const expectedBranchId = `${run.runId}:branch:${encodeURIComponent(laneId)}`;
+      if (lane.branchId !== expectedBranchId) issues.push({ code: "branch_identity_drift", path: `lanes.${laneId}.branchId`, laneId, message: "persisted branch identity changed" });
+      if (lane.status !== "accepted" && lane.status !== "failed" && lane.status !== "interrupted") issues.push({ code: "lane_not_terminal", path: `lanes.${laneId}.status`, laneId, message: "revival only restarts failed or interrupted terminal branches" });
+      if (!lane.executionScope) issues.push({ code: "scope_missing", path: `lanes.${laneId}.executionScope`, laneId, message: "branch has no persisted execution scope" });
+      else {
+        const persistedScope = input.state.branchScopes?.[lane.executionScope.id];
+        if (!persistedScope || !sameJson(persistedScope, lane.executionScope)) issues.push({ code: "scope_drift", path: `lanes.${laneId}.executionScope`, laneId, message: "persisted execution scope differs from the cast branch scope snapshot" });
+      }
+      const preparedLane = prepared?.find((candidate) => candidate.stream.laneId === laneId);
+      if ((lane.status === "failed" || lane.status === "interrupted") && lane.childCastId && lane.childSession && preparedLane) {
+        const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
+        if (observation) {
+          try { assertRecoverySnapshot(run, lane, preparedLane, observation.snapshot); }
+          catch (error) { issues.push({ code: "child_session_drift", path: `lanes.${laneId}.childSession`, laneId, message: boundedFailureReason(parallelErrorMessage(error)) }); }
+        }
+      }
+    }
+    for (const laneId of Object.keys(run.lanes)) if (!run.queueOrder.includes(laneId)) issues.push({ code: "unexpected_branch", path: `lanes.${laneId}`, laneId, message: "persisted run contains a branch outside the immutable plan" });
     return { ok: issues.length === 0, issues };
   }
 
@@ -257,7 +303,9 @@ export class ParallelLoopDispatcher {
       if (lane.childCastId && lane.childSession) {
         const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
         if (observation) {
+          assertRecoverySnapshot(original, lane, prepared, observation.snapshot);
           prepared.recoveryChildCastId = lane.childCastId;
+          prepared.recoveryScope = cloneExecutionScope(observation.snapshot.executionScope);
           prepared.resumeChild = true;
           prepared.recoveryAfterSequence = lane.lastEvent?.sequence ?? observation.events.at(-1)?.sequence ?? 0;
           this.#latestUsage.set(lane.childCastId, observation.snapshot.usage);
@@ -339,11 +387,29 @@ export class ParallelLoopDispatcher {
     if (!lane || lane.status !== "queued") return;
     const attempt = lane.attempt;
     const childCastId = prepared.recoveryChildCastId ?? childCastIdentity(state.castId, input.loopId, lane.laneId, attempt);
-    const paths = lanePaths(state, input.loopId, lane.laneId, attempt);
+    const coordinatorArtifactRoot = path.dirname(lanePaths(state, input.loopId, lane.laneId, attempt).runDirectory);
+    let paths = lanePaths(state, input.loopId, lane.laneId, attempt);
     const baseScope = state.baseScope ?? createBaseExecutionScope(state.castId, state.cwd);
-    const scope = cloneParallelBranchExecutionScope(baseScope, input.loopId, lane.laneId);
+    const scope = cloneExecutionScope(prepared.recoveryScope ?? lane.executionScope ?? cloneParallelBranchExecutionScope(baseScope, input.loopId, lane.laneId));
     state.branchScopes = { ...(state.branchScopes ?? {}), [scope.id]: scope };
-    const identity: ParallelLaneArtifactIdentity = { parentCastId: state.castId, runId: this.#run!.runId, loopId: input.loopId, laneId: lane.laneId, childCastId, attempt, streamIndex: lane.streamIndex, workItemIndexes: [...lane.workItemIndexes], paths };
+    if (prepared.resumeChild) {
+      try {
+        const resumed = await this.#deps.children.resume({ childCastId, mode: "resume" });
+        assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, resumed.snapshot);
+        // Resume is owned by the child runner and may intentionally retain its
+        // original session. Persist those actual paths instead of speculative
+        // paths for the parent's new lane attempt.
+        paths = { ...resumed.snapshot.paths };
+      } catch (error) {
+        await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${parallelErrorMessage(error)}` }).catch(() => undefined);
+        if (!this.#cancelRequested) {
+          const failedIdentity: ParallelLaneArtifactIdentity = { parentCastId: state.castId, runId: this.#run!.runId, loopId: input.loopId, laneId: lane.laneId, childCastId, planId: this.#run!.planIdentity.planId, graphHash: this.#run!.graphIdentity.graphHash, branchId: lane.branchId, executionScopeId: scope.id, attempt, streamIndex: lane.streamIndex, workItemIndexes: [...lane.workItemIndexes], coordinatorArtifactRoot, paths };
+          await this.#failLane(input, state, prepared.stream, failedIdentity, `child launch failed: ${parallelErrorMessage(error)}`);
+        }
+        return;
+      }
+    }
+    const identity: ParallelLaneArtifactIdentity = { parentCastId: state.castId, runId: this.#run!.runId, loopId: input.loopId, laneId: lane.laneId, childCastId, planId: this.#run!.planIdentity.planId, graphHash: this.#run!.graphIdentity.graphHash, branchId: lane.branchId, executionScopeId: scope.id, attempt, streamIndex: lane.streamIndex, workItemIndexes: [...lane.workItemIndexes], coordinatorArtifactRoot, paths };
     const artifactPaths = await this.#initializeLaneArtifacts(identity, state);
     const childSession = { childCastId, sessionPath: paths.sessionPath, artifactRoot: paths.artifactRoot, runDirectory: paths.runDirectory };
     if (!this.#applyLaneTransition(input, state, { laneId: lane.laneId, attempt, childCastId, status: "running", executionScope: scope, childSession, timestamp: this.#now() })) return;
@@ -365,8 +431,7 @@ export class ParallelLoopDispatcher {
       attempt,
     };
     try {
-      if (prepared.resumeChild) await this.#deps.children.resume({ childCastId, mode: "resume" });
-      else await this.#deps.children.start(startInput);
+      if (!prepared.resumeChild) await this.#deps.children.start(startInput);
       if (this.#cancelRequested) { await this.#abortChild(childCastId, "parallel execution cancelled"); return; }
       active.subscription = this.#deps.children.subscribe({ childCastId, afterSequence: prepared.recoveryAfterSequence }, {
         onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
@@ -409,15 +474,13 @@ export class ParallelLoopDispatcher {
     if (this.#budgetFailure) return;
     const accepted = result.status === "succeeded" && result.accepted;
     const reason = result.error ?? (accepted ? undefined : "Child lane did not complete with an accepted result.");
-    const terminalScope = accepted
-      ? cloneExecutionScope(observation?.snapshot.executionScope ?? this.#run!.lanes[stream.laneId]!.executionScope!)
-      : undefined;
+    const terminalScope = cloneExecutionScope(observation?.snapshot.executionScope ?? this.#run!.lanes[stream.laneId]!.executionScope!);
     if (terminalScope) state.branchScopes = { ...(state.branchScopes ?? {}), [terminalScope.id]: terminalScope };
     this.#applyLaneTransition(input, state, {
       laneId: stream.laneId, attempt: active.attempt, childCastId: active.childCastId,
       status: accepted ? "accepted" : result.status === "interrupted" ? "interrupted" : "failed",
       accepted,
-      ...(terminalScope ? { executionScope: terminalScope } : {}),
+      executionScope: terminalScope,
       ...(accepted && result.output !== undefined ? { terminalOutput: result.output } : {}),
       ...(usage ? { usage } : {}),
       ...(reason ? { failureReason: boundedFailureReason(reason), diagnostic: { code: "parallel_lane_terminal", message: boundedFailureReason(reason), severity: "error", occurredAt: result.endedAt } } : { failureReason: undefined }),
@@ -635,9 +698,14 @@ function activeForPersistedLane(state: MateriaCastState, run: MateriaParallelRun
       loopId: run.loopId,
       laneId: lane.laneId,
       childCastId,
+      planId: run.planIdentity.planId,
+      graphHash: run.graphIdentity.graphHash,
+      branchId: lane.branchId,
+      executionScopeId: lane.executionScope?.id ?? "missing-scope",
       attempt: lane.attempt,
       streamIndex: lane.streamIndex,
       workItemIndexes: [...lane.workItemIndexes],
+      coordinatorArtifactRoot: path.dirname(lanePaths(state, run.loopId, lane.laneId, lane.attempt).runDirectory),
       paths,
     },
   };
@@ -652,6 +720,59 @@ function compileStreams(input: ParallelLoopDispatchInput, plan: NormalizedParall
 function boundedParallelChildData(run: MateriaParallelRunState, stream: NormalizedParallelStream): Record<string, unknown> {
   return { parallelContext: boundedParallelContext(run, stream), parallelRun: { runId: run.runId, planId: run.planIdentity.planId, loopId: run.loopId, laneId: stream.laneId }, parallelLane: { laneId: stream.laneId, name: stream.name, streamIndex: stream.streamIndex, workItemIndexes: [...stream.workItemIndexes] } };
 }
+function parallelGraphHash(prepared: readonly PreparedLane[]): string {
+  const graph = prepared.map(({ stream, compiledLoadout }) => ({
+    laneId: stream.laneId,
+    childLoadoutId: compiledLoadout.childLoadoutId,
+    loadout: compiledLoadout.loadout,
+    initialData: compiledLoadout.initialData,
+  }));
+  return createHash("sha256").update(JSON.stringify(graph)).digest("hex");
+}
+function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, snapshot: ChildCastSnapshot): void {
+  if (snapshot.identity.childCastId !== lane.childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId) {
+    throw new Error(`Parallel revival child identity drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (snapshot.attempt !== lane.attempt) throw new Error(`Parallel revival child attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (!lane.childSession || lane.childSession.childCastId !== snapshot.identity.childCastId || !sameJson(childSessionPaths(lane.childSession), snapshot.paths)) {
+    throw new Error(`Parallel revival child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (!sameJson(snapshot.compiledLoadout, expectedChildCompiledLoadout(run, prepared))) {
+    throw new Error(`Parallel revival graph or initial-data drift for child ${JSON.stringify(snapshot.identity.childCastId)}.`);
+  }
+  if (!lane.executionScope || !sameJson(snapshot.executionScope, lane.executionScope)) {
+    throw new Error(`Parallel revival execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (snapshot.cwd !== lane.executionScope.cwd) throw new Error(`Parallel revival child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+}
+function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, childCastId: string, attempt: number, scope: NonNullable<MateriaParallelLaneState["executionScope"]>, snapshot: ChildCastSnapshot): void {
+  if (snapshot.identity.childCastId !== childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId || snapshot.attempt !== attempt) {
+    throw new Error(`Parallel resumed child identity or attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (!lane.childSession || !sameJson(childSessionPaths(lane.childSession), snapshot.paths)) {
+    throw new Error(`Parallel resumed child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (!sameJson(snapshot.compiledLoadout, expectedChildCompiledLoadout(run, prepared))) {
+    throw new Error(`Parallel resumed child graph or initial-data drift for lane ${JSON.stringify(lane.laneId)}.`);
+  }
+  if (!sameJson(snapshot.executionScope, scope)) throw new Error(`Parallel resumed child execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (snapshot.cwd !== scope.cwd) throw new Error(`Parallel resumed child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+}
+function expectedChildCompiledLoadout(run: MateriaParallelRunState, prepared: PreparedLane): ChildCastSnapshot["compiledLoadout"] {
+  return {
+    childLoadoutId: prepared.compiledLoadout.childLoadoutId,
+    loadout: prepared.compiledLoadout.loadout,
+    initialData: { ...prepared.compiledLoadout.initialData, ...boundedParallelChildData(run, prepared.stream) },
+    loopId: run.loopId,
+    laneId: prepared.stream.laneId,
+  };
+}
+function childSessionPaths(session: NonNullable<MateriaParallelLaneState["childSession"]>): ChildCastSnapshot["paths"] {
+  return { sessionPath: session.sessionPath, artifactRoot: session.artifactRoot, runDirectory: session.runDirectory };
+}
+function sameStrings(left: readonly string[], right: readonly string[]): boolean { return left.length === right.length && left.every((value, index) => value === right[index]); }
+function sameNumbers(left: readonly number[], right: readonly number[]): boolean { return left.length === right.length && left.every((value, index) => value === right[index]); }
+function sameJson(left: unknown, right: unknown): boolean { try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; } }
 function validateDispatchConfig(config: EffectiveParallelConcurrencyConfig): void { if (!Number.isSafeInteger(config.maxConcurrency) || config.maxConcurrency < 1) throw new Error("parallel maxConcurrency must be a positive safe integer"); }
 function isTerminalLaneStatus(status: string): boolean { return status === "accepted" || status === "failed" || status === "interrupted"; }
 function aggregateParallelLaneFailureReason(run: MateriaParallelRunState): string { return boundedFailureReason(`Parallel fan-in skipped because not all branches were accepted: ${run.queueOrder.filter((id) => run.lanes[id]?.status !== "accepted").map((id) => `${id} (${run.lanes[id]?.status ?? "missing"}${run.lanes[id]?.failureReason ? `: ${run.lanes[id]!.failureReason}` : ""})`).join("; ")}.`); }
