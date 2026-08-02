@@ -413,7 +413,7 @@ function activeParallelRun(state: MateriaCastState): ParallelRunMonitorSummary |
 /** Compact, bounded aggregate status for the persistent Pi/TUI widget. */
 export function formatParallelRunCompactStatus(summary: ParallelRunMonitorSummary): string {
   const { counts } = summary;
-  return `parallel ${summary.loopId} q${counts.queued} r${counts.running} a${counts.accepted} f${counts.failed} i${counts.interrupted} fi${counts.fanIn} c${counts.conflict} ✓${counts.completed}/${counts.total}`;
+  return `parallel ${summary.loopId} q${counts.queued} r${counts.running} a${counts.accepted} f${counts.failed} i${counts.interrupted} barrier:${summary.barrier.phase} ${counts.barrierReached}/${counts.total}`;
 }
 
 function createMateriaStatusRenderModel(

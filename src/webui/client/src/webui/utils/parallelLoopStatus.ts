@@ -9,9 +9,7 @@ export function formatParallelLoopStatus(summary: ParallelRunMonitorSummary): st
     `Accepted ${counts.accepted}`,
     `Failed ${counts.failed}`,
     `Interrupted ${counts.interrupted}`,
-    `Fan-in ${counts.fanIn}`,
-    `Conflict ${counts.conflict}`,
-    `Complete ${counts.completed}/${counts.total}`,
+    `Barrier ${summary.barrier.phase} ${counts.barrierReached}/${counts.total}`,
   ].join(' · ');
 }
 
@@ -21,10 +19,10 @@ export function formatParallelLoopStatus(summary: ParallelRunMonitorSummary): st
  */
 export function parallelLaneAccessibleLabel(lane: ParallelLaneMonitorSummary): string {
   const artifact = lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'artifact pending';
-  const workspace = lane.workspace?.workspacePath ?? 'workspace pending';
-  return `${lane.laneId} (${lane.status}), child artifacts ${artifact}, jj workspace ${workspace}`;
+  const scope = lane.scope ? `${lane.scope.id} at ${lane.scope.cwd}` : 'scope pending';
+  return `${lane.laneId} (${lane.status}, attempt ${lane.attempt}), ${scope}, child artifacts ${artifact}`;
 }
 
 export function formatParallelLaneStatus(lane: ParallelLaneMonitorSummary): string {
-  return `${lane.name} · ${lane.status} · items ${lane.workItemIndexes.join(', ') || 'none'}`;
+  return `${lane.name} · ${lane.status} · attempt ${lane.attempt} · items ${lane.workItemIndexes.join(', ') || 'none'}`;
 }

@@ -1,6 +1,7 @@
 import { canonicalGeneratorConfigFor } from '../../../../../graph/generator.js';
 import { edgeConditionState } from '../../../../../graph/graphValidation.js';
 import { analyzeLoadoutGraph } from '../../../../../graph/loadoutGraphAnalysis.js';
+import { deriveParallelBranchRegions } from '../../../../../graph/parallelRegions.js';
 import { fromWebUiLoadoutDto } from '../../../../loadoutDto.js';
 import { formatToolScopeSpec } from '../../../../../domain/toolScope.js';
 import type { MateriaEdgeCondition } from '../../../../../types.js';
@@ -637,6 +638,14 @@ export function formatLoopDisplayLabel(loadout: PipelineConfig | undefined, loop
 }
 
 export function getLoopRegions(loadout: PipelineConfig | undefined, positions: Map<string, PositionedSocket>, definitions?: MateriaConfig['materia']): LoopRegion[] {
+  const derived = loadout ? deriveParallelBranchRegions(fromWebUiLoadoutDto(loadout as never), {
+    isParallelGeneratorSocket: (socketId) => {
+      const reference = extractMateriaReference(loadout.sockets?.[socketId]);
+      const definition = reference ? definitions?.[reference.materia] : undefined;
+      return definition?.generator === true && definition.parallel === true;
+    },
+  }) : undefined;
+  const parallelRegions = new Map(derived?.ok ? derived.value.map((region) => [region.loopId, region]) : []);
   return Object.entries(loadout?.loops ?? {}).flatMap(([id, loop], index) => {
     const sockets = loop.sockets.map((socketId) => positions.get(socketId)).filter(Boolean) as PositionedSocket[];
     if (sockets.length === 0) return [];
@@ -646,9 +655,10 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const maxX = Math.max(...sockets.map((socket) => socket.x + socketCardWidth));
     const consumer = loopConsumerSummary(loadout, id, loop, definitions);
     const exit = loop.exit ? `Exit: ${formatSocketLabel(loop.exit.from, loadout?.sockets?.[loop.exit.from])}.${edgeConditionLabel(loop.exit.when)} → ${loop.exit.to === 'end' ? 'end' : formatSocketLabel(loop.exit.to, loadout?.sockets?.[loop.exit.to])}` : undefined;
-    const parallel = loop.parallel !== undefined;
+    const parallelRegion = parallelRegions.get(id);
+    const parallel = parallelRegion !== undefined;
     const parallelSummary = parallel
-      ? `Parallel: ${loop.parallel?.maxConcurrency ?? 'app default'} concurrent streams`
+      ? `Parallel: ${loop.parallel?.maxConcurrency ?? 'app default'} concurrent streams${parallelRegion.preludeSocketIds.length ? ` • Prelude: ${loopMemberLabels(loadout, [...parallelRegion.preludeSocketIds]).join(' → ')}` : ''}`
       : undefined;
     const summary = [consumer, exit, parallelSummary].filter(Boolean).join(' • ');
     const label = formatLoopDisplayLabel(loadout, id, loop.sockets);
@@ -656,7 +666,7 @@ export function getLoopRegions(loadout: PipelineConfig | undefined, positions: M
     const headerWidth = Math.min(loopHeaderMaxWidth, Math.max(estimateLoopHeaderWidth(label, summary), socketSpanWidth + 48));
     const headerX = rounded(minX + socketSpanWidth / 2 - headerWidth / 2);
     const headerY = minY - loopHeaderOffset;
-    const visuals = parallel ? buildParallelLoopVisuals(loadout, id, loop, positions, minX, minY, maxX, Math.max(...sockets.map((socket) => socket.y))) : undefined;
+    const visuals = parallelRegion ? buildParallelLoopVisuals(loadout, id, loop, parallelRegion, positions, minX, minY, maxX, Math.max(...sockets.map((socket) => socket.y))) : undefined;
     return [{ id, label, x: headerX, y: headerY, width: headerWidth, height: loopHeaderHeight, summary, cyclePath: loopCyclePath(cycleSockets.length > 0 ? cycleSockets : sockets), ...(parallel ? { parallel: true, parallelVisuals: visuals } : {}), ...loopAccent(index) }];
   });
 }

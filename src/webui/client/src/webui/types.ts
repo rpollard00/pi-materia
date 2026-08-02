@@ -682,7 +682,8 @@ export interface ParallelLoopBarrierVisual {
 
 export interface ParallelLoopFanInVisual {
   id: string;
-  condition: MateriaEdgeCondition;
+  /** Legacy authored-route decoration; intrinsic barriers omit this. */
+  condition?: MateriaEdgeCondition;
   targetSocketId?: string;
   path: string;
   labelX: number;
@@ -694,6 +695,8 @@ export interface ParallelLoopVisuals {
   fork: ParallelLoopForkVisual;
   barrier: ParallelLoopBarrierVisual;
   fanIn: ParallelLoopFanInVisual[];
+  preludeSocketIds?: string[];
+  loopSocketIds?: string[];
 }
 
 export interface LoopRegion {
@@ -707,7 +710,7 @@ export interface LoopRegion {
   cyclePath: string;
   accent: string;
   accentSoft: string;
-  /** True when this symbolic region owns an opt-in parallel coordinator. */
+  /** True when this loop consumes a parallel-capable generator. */
   parallel?: boolean;
   /** Derived-only fork/barrier/fan-in visuals; never persisted as sockets or edges. */
   parallelVisuals?: ParallelLoopVisuals;

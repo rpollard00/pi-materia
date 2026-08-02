@@ -437,7 +437,7 @@ export class ParallelLoopDispatcher {
         onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
         onTerminal: (result) => this.#handleChildTerminal(input, state, prepared.stream, active, result),
       });
-      await this.#appendEvent(state, "parallel_lane_started", { parentCastId: state.castId, loopId: input.loopId, runId: this.#run?.runId, laneId: lane.laneId, childCastId, executionScope: { id: scope.id, cwd: scope.cwd }, ...(artifactPaths ? { artifactPaths } : {}) });
+      await this.#appendEvent(state, "parallel_lane_started", { parentCastId: state.castId, loopId: input.loopId, runId: this.#run?.runId, laneId: lane.laneId, streamIndex: prepared.stream.streamIndex, attempt, childCastId, executionScope: { id: scope.id, cwd: scope.cwd, exportNames: Object.keys(scope.exports).sort() }, ...(artifactPaths ? { artifactPaths } : {}) });
     } catch (error) {
       this.#active.delete(lane.laneId);
       await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${parallelErrorMessage(error)}` }).catch(() => undefined);
@@ -488,7 +488,8 @@ export class ParallelLoopDispatcher {
     });
     const diagnostics = observation?.snapshot.diagnostics.map(toParallelDiagnostic) ?? [];
     await this.#writeTerminal(active, result, usage, diagnostics);
-    await this.#appendEvent(state, "parallel_lane_terminal", { ...this.#eventProvenance(state, input.loopId, stream, active), status: result.status, accepted, ...(result.output !== undefined ? { output: result.output } : {}), ...(reason ? { error: boundedFailureReason(reason) } : {}), ...(usage ? { usage } : {}) });
+    const reached = Object.values(this.#run!.lanes).filter((lane) => isTerminalLaneStatus(lane.status)).length;
+    await this.#appendEvent(state, "parallel_lane_terminal", { ...this.#eventProvenance(state, input.loopId, stream, active), status: result.status, accepted, barrier: { reached, total: this.#run!.queueOrder.length }, executionScope: { id: terminalScope.id, cwd: terminalScope.cwd, exportNames: Object.keys(terminalScope.exports).sort() }, ...(result.output !== undefined ? { output: result.output } : {}), ...(reason ? { error: boundedFailureReason(reason) } : {}), ...(usage ? { usage } : {}) });
     await this.#pump();
     await this.#maybeAllTerminal(input, state);
   }
@@ -506,7 +507,7 @@ export class ParallelLoopDispatcher {
     if (rejected.length) {
       const reason = aggregateParallelLaneFailureReason(run);
       this.#transitionRun(input, state, "failed", "skipped");
-      await this.#appendEvent(state, "parallel_branches_failed", { loopId: input.loopId, runId: run.runId, reason, laneStatuses: Object.fromEntries(Object.entries(run.lanes).map(([id, lane]) => [id, lane.status])) });
+      await this.#appendEvent(state, "parallel_branches_failed", { loopId: input.loopId, runId: run.runId, reason, barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "failed" }, orderedBranches: run.queueOrder.map((laneId) => ({ laneId, status: run.lanes[laneId]?.status ?? "interrupted", attempt: run.lanes[laneId]?.attempt ?? 0 })) });
       await this.#notifyRunFailure(input, state, run.runId, reason);
       return;
     }
@@ -517,6 +518,7 @@ export class ParallelLoopDispatcher {
     await this.#appendEvent(state, "parallel_branches_terminal", {
       loopId: input.loopId,
       runId: run.runId,
+      barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "accepted" },
       orderedBranches: result.orderedBranches,
     });
     if (!input.onFanIn) return;
@@ -568,7 +570,7 @@ export class ParallelLoopDispatcher {
       }
       for (const lane of active) lane.subscription?.unsubscribe();
       this.#transitionRun(dispatchInput, state, "failed", "skipped");
-      await this.#appendEvent(state, "parallel_cancelled", { loopId: run.loopId, runId: run.runId, reason });
+      await this.#appendEvent(state, "parallel_cancelled", { loopId: run.loopId, runId: run.runId, reason, barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "failed" }, orderedBranches: run.queueOrder.map((laneId) => ({ laneId, status: this.#run?.lanes[laneId]?.status ?? "interrupted", attempt: this.#run?.lanes[laneId]?.attempt ?? 0 })) });
     }
     this.#active.clear();
   }

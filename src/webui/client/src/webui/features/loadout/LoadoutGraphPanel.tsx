@@ -363,6 +363,21 @@ function GraphCanvas(props: GraphCanvasProps) {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvasWidth = loadoutGraph.width;
   const canvasHeight = loadoutGraph.height;
+  const parallelPreludeMemberships = useMemo(() => {
+    const memberships = new Map<string, ParallelPreludeMembership>();
+    for (const region of loopRegions) {
+      const preludeSocketIds = region.parallelVisuals?.preludeSocketIds ?? [];
+      for (const socketId of preludeSocketIds) {
+        const existing = memberships.get(socketId);
+        memberships.set(socketId, {
+          loopIds: existing ? [...existing.loopIds, region.id] : [region.id],
+          accent: region.accent,
+          accentSoft: region.accentSoft,
+        });
+      }
+    }
+    return memberships;
+  }, [loopRegions]);
 
   const scheduleHideZoomPercent = () => {
     if (hideTimerRef.current !== null) clearTimeout(hideTimerRef.current);
@@ -424,6 +439,7 @@ function GraphCanvas(props: GraphCanvasProps) {
               handleSocketClick={handleSocketClick}
               loopExitBadge={loopExitBadges.get(socket.id)}
               loopMembership={loopMemberships.get(socket.id)}
+              parallelPreludeMembership={parallelPreludeMemberships.get(socket.id)}
               materia={materia}
               selectedLoopSocketSet={selectedLoopSocketSet}
               selectedMateriaId={selectedMateriaId}
@@ -462,12 +478,18 @@ interface EdgeLayerProps {
 }
 
 function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, toggleEdgeCondition, toggleLoopExitCondition, openLoopControls, editPolicy, width }: EdgeLayerProps) {
+  const derivedParallelRegions = loopRegions.filter((region) => region.parallelVisuals !== undefined);
   const visibleRoutedEdges = routedEdges.filter(({ edge }) => {
-    const parallelLoop = edge.loopId ? activeLoadout?.loops?.[edge.loopId]?.parallel !== undefined : false;
-    if (parallelLoop && edge.kind === 'loop-exit') return false;
+    if (edge.kind === 'loop-exit' && edge.loopId && derivedParallelRegions.some((region) => region.id === edge.loopId)) return false;
     if (edge.kind === 'normal') {
-      const owningParallelLoop = Object.values(activeLoadout?.loops ?? {}).find((loop) => loop.parallel && loop.consumes?.from === edge.from && loop.sockets.includes(edge.to));
-      if (owningParallelLoop) return false;
+      const replacedByFork = derivedParallelRegions.some((region) => {
+        const loop = activeLoadout?.loops?.[region.id];
+        const visuals = region.parallelVisuals;
+        if (!loop || !visuals || loop.consumes?.from !== edge.from) return false;
+        const entrySocketId = visuals.preludeSocketIds?.[0] ?? visuals.loopSocketIds?.[0];
+        return entrySocketId === edge.to;
+      });
+      if (replacedByFork) return false;
     }
     return true;
   });
@@ -524,7 +546,7 @@ function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, t
             <path d={visuals.barrier.path} />
           </g>,
           ...visuals.fanIn.map((route) => (
-            <g key={route.id} id={route.id} data-testid={`parallel-fan-in-${loop.id}-${route.condition}`} data-parallel-visual-id={route.id} className={`loadout-parallel-symbol loadout-parallel-fan-in loadout-parallel-fan-in-${route.condition}`} role="img" aria-label={`${route.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
+            <g key={route.id} id={route.id} data-testid={`parallel-continuation-${loop.id}`} data-parallel-visual-id={route.id} className="loadout-parallel-symbol loadout-parallel-fan-in" role="img" aria-label={`${route.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
               <path d={route.path} markerEnd="url(#materia-parallel-fan-in-arrow)" />
               <text x={route.labelX} y={route.labelY}>{route.label}</text>
             </g>
@@ -586,18 +608,26 @@ function ParallelLoopStatusDetails({ summary, loopId }: { summary: NonNullable<L
     <div className="loadout-loop-parallel-status" data-testid={`parallel-status-${loopId}`}>
       <span className="loadout-loop-parallel-counts" aria-label={`Parallel loop status: ${aggregate}`}>{aggregate}</span>
       <details className="loadout-loop-parallel-details" data-testid={`parallel-lane-details-${loopId}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}>
-        <summary>Lane details ({summary.counts.total})</summary>
-        <ul aria-label={`Parallel lanes for ${loopId}`}>
+        <summary>Ordered branch details ({summary.counts.total})</summary>
+        <ul aria-label={`Parallel branches for ${loopId}`}>
           {summary.lanes.map((lane) => (
             <li key={`${lane.laneId}:${lane.attempt}`} aria-label={parallelLaneAccessibleLabel(lane)}>
               <strong>{lane.laneId}</strong> <span>{formatParallelLaneStatus(lane)}</span>
-              <small>Artifacts: <code>{lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'pending'}</code>; jj: <code>{lane.workspace?.workspacePath ?? 'pending'}</code></small>
+              <small>Scope: <code>{lane.scope ? `${lane.scope.id} · ${lane.scope.cwd}` : 'pending'}</code>; exports: <code>{lane.scope?.exportNames.join(', ') || 'none'}</code>; artifacts: <code>{lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'pending'}</code></small>
+              {lane.output && <small>Output: <code>{lane.output}</code></small>}
+              {lane.failureReason && <small>Cancellation/failure: {lane.failureReason}</small>}
             </li>
           ))}
         </ul>
       </details>
     </div>
   );
+}
+
+interface ParallelPreludeMembership {
+  loopIds: string[];
+  accent: string;
+  accentSoft: string;
 }
 
 interface SocketCardProps {
@@ -609,6 +639,7 @@ interface SocketCardProps {
   handleSocketClick: (socketId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
   loopExitBadge?: LoopExitBadge;
   loopMembership?: LoopMembership;
+  parallelPreludeMembership?: ParallelPreludeMembership;
   materia: Record<string, PipelineSocket>;
   selectedLoopSocketSet: Set<string>;
   selectedMateriaId?: string;
@@ -624,7 +655,7 @@ interface SocketCardProps {
 function SocketCard(props: SocketCardProps) {
   const {
     activeLoadout, activeLoadoutName, currentMonitorSocket, dragMateria, handleDrop, handleSocketClick,
-    loopExitBadge, loopMembership, materia, selectedLoopSocketSet, selectedMateriaId, socket: graphSocket, socketLayoutDrag,
+    loopExitBadge, loopMembership, parallelPreludeMembership, materia, selectedLoopSocketSet, selectedMateriaId, socket: graphSocket, socketLayoutDrag,
     editPolicy, beginSocketLayoutDrag, cancelSocketLayoutDrag, finishSocketLayoutDrag, moveSocketLayoutDrag,
   } = props;
   const { id, socket, index, x, y } = graphSocket;
@@ -639,12 +670,14 @@ function SocketCard(props: SocketCardProps) {
   const isLoopSelected = selectedLoopSocketSet.has(id);
   const isEntry = isEntrySocket(socket);
   const isActiveMonitorSocket = id === currentMonitorSocket;
-  const socketStyle = loopMembership ? { left: `${socketX}px`, top: `${socketY}px`, '--loop-accent': loopMembership.accent, '--loop-accent-soft': loopMembership.accentSoft } as CSSProperties : { left: `${socketX}px`, top: `${socketY}px` };
+  const accentedRegion = loopMembership ?? parallelPreludeMembership;
+  const socketStyle = accentedRegion ? { left: `${socketX}px`, top: `${socketY}px`, '--loop-accent': accentedRegion.accent, '--loop-accent-soft': accentedRegion.accentSoft } as CSSProperties : { left: `${socketX}px`, top: `${socketY}px` };
 
   return (
-    <button data-testid={`socket-${id}`} className={`materia-socket graph-materia-socket ${selectedMateriaId && editPolicy.canEdit ? 'materia-socket-selectable' : ''} ${isActiveMonitorSocket ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`} style={socketStyle} data-loop-ids={loopMembership?.loopIds.join(' ')} data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')} aria-pressed={isLoopSelected} onClick={(event) => handleSocketClick(id, event)} onPointerDown={(event) => beginSocketLayoutDrag(graphSocket, event)} onPointerMove={moveSocketLayoutDrag} onPointerUp={(event) => finishSocketLayoutDrag(id, event)} onPointerCancel={cancelSocketLayoutDrag} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? (event) => handleDrop(id, event) : undefined} title={!editPolicy.canEdit ? `${socketHoverDetails}\n${editPolicy.reason}` : socketHoverDetails} aria-label={`${socketLabel} socket details${isActiveMonitorSocket ? '; active session socket' : ''}`} aria-readonly={!editPolicy.canEdit} aria-current={isActiveMonitorSocket ? 'step' : undefined}>
+    <button data-testid={`socket-${id}`} className={`materia-socket graph-materia-socket ${selectedMateriaId && editPolicy.canEdit ? 'materia-socket-selectable' : ''} ${isActiveMonitorSocket ? 'materia-socket-active' : ''} ${dragPreview ? 'graph-materia-socket-dragging' : ''} ${isIterator ? 'materia-socket-iterator' : ''} ${isGenerator ? 'materia-socket-generator' : ''} ${loopMembership ? 'materia-socket-loop-member' : ''} ${parallelPreludeMembership ? 'materia-socket-parallel-prelude' : ''} ${loopExitBadge ? 'materia-socket-loop-exit' : ''} ${isLoopSelected ? 'materia-socket-loop-selected' : ''}`} style={socketStyle} data-loop-ids={loopMembership?.loopIds.join(' ')} data-parallel-prelude-ids={parallelPreludeMembership?.loopIds.join(' ')} data-loop-exit-ids={loopExitBadge?.loopIds.join(' ')} aria-pressed={isLoopSelected} onClick={(event) => handleSocketClick(id, event)} onPointerDown={(event) => beginSocketLayoutDrag(graphSocket, event)} onPointerMove={moveSocketLayoutDrag} onPointerUp={(event) => finishSocketLayoutDrag(id, event)} onPointerCancel={cancelSocketLayoutDrag} onDragOver={(event) => { if (editPolicy.canEdit) event.preventDefault(); }} onDrop={editPolicy.canEdit ? (event) => handleDrop(id, event) : undefined} title={!editPolicy.canEdit ? `${socketHoverDetails}\n${editPolicy.reason}` : socketHoverDetails} aria-label={`${socketLabel} socket details${isActiveMonitorSocket ? '; active session socket' : ''}`} aria-readonly={!editPolicy.canEdit} aria-current={isActiveMonitorSocket ? 'step' : undefined}>
       <div className="materia-socket-orb-stage"><div draggable={editPolicy.canEdit && !isEmptySocket(socket)} onDragStart={(event) => dragMateria({ kind: 'socket', materiaId: id, fromLoadout: activeLoadoutName, fromSocket: id }, event)}><Orb color={socketColor(id, index, materia, socket)} label={socketHoverDetails} empty={isEmptySocket(socket)} iterator={isIterator} /></div>{isActiveMonitorSocket && <span className="materia-socket-active-indicator" aria-hidden="true" />}{isIterator && <span className={`materia-iterator-badge graph-iterator-badge ${isGenerator ? 'materia-generator-badge' : ''}`} title={iteratorDetails}>{iteratorBadgeLabel(iteratorDetails)}</span>}</div>
       {isEntry && <span className="entry-rune">Entry</span>}
+      {parallelPreludeMembership && <span className="parallel-prelude-rune" title={`Runs once per parallel branch for ${parallelPreludeMembership.loopIds.join(', ')}`}>Branch prelude</span>}
       {loopExitBadge && <span className="loop-exit-rune" title={loopExitBadge.title} style={{ '--loop-accent': loopExitBadge.accent, '--loop-accent-soft': loopExitBadge.accentSoft } as CSSProperties}>Loop exit</span>}
       <span className="materia-socket-label">{socketLabel}</span>
     </button>

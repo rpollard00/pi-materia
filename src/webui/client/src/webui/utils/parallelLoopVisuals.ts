@@ -1,4 +1,4 @@
-import type { MateriaEdgeCondition } from '../../../../../types.js';
+import type { ParallelBranchRegion } from '../../../../../graph/parallelRegions.js';
 import type { PipelineConfig } from '../../loadoutModel.js';
 import {
   socketCardWidth,
@@ -18,8 +18,8 @@ export function parallelBarrierVisualId(loopId: string): string {
   return `parallel-barrier:${loopId}`;
 }
 
-export function parallelFanInVisualId(loopId: string, condition: MateriaEdgeCondition, routeId?: string): string {
-  return `parallel-fan-in:${loopId}:${routeId ?? condition}`;
+export function parallelFanInVisualId(loopId: string, _legacyCondition?: unknown, _legacyRouteId?: string): string {
+  return `parallel-continuation:${loopId}`;
 }
 
 function rounded(value: number): number {
@@ -30,22 +30,11 @@ function socketCenter(socket: PositionedSocket): { x: number; y: number } {
   return { x: socket.x + socketStageOffsetX + socketStageSize / 2, y: socket.y + socketStageHeight / 2 };
 }
 
-function inboundLoopEdge(loadout: PipelineConfig | undefined, loop: NonNullable<PipelineConfig['loops']>[string]): { from: string; to: string } | undefined {
-  const sockets = loadout?.sockets ?? {};
-  const source = loop.consumes?.from;
-  if (!source || !sockets[source]) return undefined;
-  for (const [from, socket] of Object.entries(sockets)) {
-    if (from !== source) continue;
-    const edge = (socket.edges ?? []).find((candidate) => loop.sockets.includes(candidate.to));
-    if (edge) return { from, to: edge.to };
-  }
-  return undefined;
-}
-
 export function buildParallelLoopVisuals(
   loadout: PipelineConfig | undefined,
   loopId: string,
   loop: NonNullable<PipelineConfig['loops']>[string],
+  region: ParallelBranchRegion,
   positions: Map<string, PositionedSocket>,
   minX: number,
   minY: number,
@@ -58,9 +47,8 @@ export function buildParallelLoopVisuals(
   };
   const memberCenters = loop.sockets.map((socketId) => positions.get(socketId)).filter(Boolean).map((socket) => socketCenter(socket as PositionedSocket));
   const firstCenter = memberCenters[0] ?? { x: minX + socketCardWidth / 2, y: minY + socketStageHeight / 2 };
-  const inbound = inboundLoopEdge(loadout, loop);
-  const sourceCenter = centerFor(inbound?.from, { x: minX - 116, y: firstCenter.y });
-  const entryCenter = centerFor(inbound?.to, firstCenter);
+  const sourceCenter = centerFor(region.generatorSocketId, { x: minX - 116, y: firstCenter.y });
+  const entryCenter = centerFor(region.entrySocketId, firstCenter);
   const forkX = rounded(sourceCenter.x + (entryCenter.x - sourceCenter.x) * 0.58);
   const forkY = rounded(sourceCenter.y + (entryCenter.y - sourceCenter.y) * 0.58);
   const forkPath = `M ${rounded(sourceCenter.x)} ${rounded(sourceCenter.y)} C ${rounded(sourceCenter.x + (forkX - sourceCenter.x) * 0.55)} ${rounded(sourceCenter.y)}, ${rounded(forkX - 22)} ${rounded(forkY)} ${forkX} ${forkY}`;
@@ -71,28 +59,15 @@ export function buildParallelLoopVisuals(
   const barrierTop = rounded(Math.max(minY - 12, barrierY - Math.max(32, (maxY - minY) * 0.35)));
   const barrierBottom = rounded(Math.min(maxY + socketStageHeight + 12, barrierY + Math.max(32, (maxY - minY) * 0.35)));
   const barrierPath = `M ${barrierX} ${barrierTop} L ${barrierX} ${barrierBottom}`;
-  const conditions: MateriaEdgeCondition[] = ['satisfied', 'not_satisfied'];
-  const fanIn = conditions.map((condition, index) => {
-    const route = (loop.exits ?? []).find((candidate) => candidate.from === loop.exit?.from && candidate.condition === condition);
-    const targetSocketId = route?.targetSocketId;
-    const target = centerFor(targetSocketId, { x: barrierX + 104, y: barrierY + (index === 0 ? -28 : 28) });
-    const start = { x: barrierX, y: barrierY + (index === 0 ? -16 : 16) };
-    const controlX = rounded(start.x + (target.x - start.x) * 0.52);
-    const path = `M ${rounded(start.x)} ${rounded(start.y)} C ${controlX} ${rounded(start.y)}, ${controlX} ${rounded(target.y)} ${rounded(target.x)} ${rounded(target.y)}`;
-    return {
-      id: parallelFanInVisualId(loopId, condition, route?.id),
-      condition,
-      ...(targetSocketId ? { targetSocketId } : {}),
-      path,
-      labelX: rounded((start.x + target.x) / 2),
-      labelY: rounded((start.y + target.y) / 2 - 8),
-      label: condition === 'satisfied' ? 'Clean fan-in' : 'Conflict resolver',
-    };
-  });
+  const target = centerFor(region.continuationSocketId, { x: barrierX + 104, y: barrierY });
+  const controlX = rounded(barrierX + (target.x - barrierX) * 0.52);
+  const path = `M ${barrierX} ${barrierY} C ${controlX} ${barrierY}, ${controlX} ${rounded(target.y)} ${rounded(target.x)} ${rounded(target.y)}`;
 
   return {
-    fork: { id: parallelForkVisualId(loopId), x: forkX, y: forkY, path: forkPath, branchesPath: branches, label: 'Parallel fork' },
-    barrier: { id: parallelBarrierVisualId(loopId), x: barrierX, y: barrierY, path: barrierPath, label: 'Parallel barrier' },
-    fanIn,
+    fork: { id: parallelForkVisualId(loopId), x: forkX, y: forkY, path: forkPath, branchesPath: branches, label: `Parallel fork; prelude ${region.preludeSocketIds.join(' → ') || 'none'}` },
+    barrier: { id: parallelBarrierVisualId(loopId), x: barrierX, y: barrierY, path: barrierPath, label: 'Ordered branch barrier' },
+    fanIn: [{ id: parallelFanInVisualId(loopId), targetSocketId: region.continuationSocketId, path, labelX: rounded((barrierX + target.x) / 2), labelY: rounded((barrierY + target.y) / 2 - 8), label: 'Continue after barrier' }],
+    preludeSocketIds: [...region.preludeSocketIds],
+    loopSocketIds: [...region.loopSocketIds],
   };
 }

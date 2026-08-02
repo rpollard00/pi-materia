@@ -5,9 +5,9 @@ import type {
 
 /**
  * Secret-free, monitor-facing view of one parallel lane. The paths are
- * intentionally retained: they let an operator move from a symbolic graph
- * region to the durable child session and jj workspace without exposing the
- * mutable coordinator record itself.
+ * intentionally retained so an operator can move from a symbolic graph
+ * region to the durable child session without exposing the mutable
+ * coordinator record itself.
  */
 export interface ParallelLaneMonitorSummary {
   laneId: string;
@@ -23,16 +23,14 @@ export interface ParallelLaneMonitorSummary {
     artifactRoot: string;
     runDirectory: string;
   };
-  workspace?: {
-    repositoryRoot: string;
-    workspaceRoot: string;
-    workspacePath: string;
-    workspaceName: string;
-    operationId?: string;
-    state?: "active" | "forgotten";
-    revision?: { commitId: string; changeId: string };
+  /** Active terminal scope for this branch. Exports remain opaque. */
+  scope?: {
+    id: string;
+    cwd: string;
+    exportNames: string[];
   };
-  acceptedHead?: { commitId: string; changeId: string };
+  /** Bounded JSON-safe rendering of the branch's terminal handoff. */
+  output?: string;
   failureReason?: string;
   startedAt?: number;
   endedAt?: number;
@@ -49,10 +47,8 @@ export interface ParallelRunMonitorCounts {
   interrupted: number;
   /** Number of lanes in any terminal state. */
   completed: number;
-  /** 1 after fan-in starts or has produced a durable outcome, otherwise 0. */
-  fanIn: number;
-  /** 1 when this run has produced or is handling a conflict, otherwise 0. */
-  conflict: number;
+  /** Number of branches that have reached the intrinsic barrier. */
+  barrierReached: number;
 }
 
 export interface ParallelRunMonitorSummary {
@@ -62,10 +58,13 @@ export interface ParallelRunMonitorSummary {
   phase: MateriaParallelRunState["phase"];
   fanInPhase: MateriaParallelRunState["fanInPhase"];
   planId: string;
-  /** Present only for legacy jj-coupled runs. */
-  baseline?: { commitId: string; changeId: string };
   maxConcurrency: number;
   counts: ParallelRunMonitorCounts;
+  barrier: {
+    phase: "waiting" | "accepted" | "failed";
+    reached: number;
+    total: number;
+  };
   lanes: ParallelLaneMonitorSummary[];
   updatedAt: number;
   endedAt?: number;
@@ -92,8 +91,7 @@ export function summarizeParallelRun(run: MateriaParallelRunState): ParallelRunM
     failed: countStatus(lanes, "failed"),
     interrupted: countStatus(lanes, "interrupted"),
     completed: lanes.filter((lane) => isTerminalLaneStatus(lane.status)).length,
-    fanIn: hasStartedFanIn(run) ? 1 : 0,
-    conflict: hasConflict(run) ? 1 : 0,
+    barrierReached: lanes.filter((lane) => isTerminalLaneStatus(lane.status)).length,
   } satisfies ParallelRunMonitorCounts;
 
   return {
@@ -103,9 +101,15 @@ export function summarizeParallelRun(run: MateriaParallelRunState): ParallelRunM
     phase: run.phase,
     fanInPhase: run.fanInPhase,
     planId: run.planIdentity.planId,
-    ...(run.baseline ? { baseline: { ...run.baseline } } : {}),
     maxConcurrency: run.maxConcurrency,
     counts,
+    barrier: {
+      phase: run.phase === "completed" && run.fanInPhase === "accepted"
+        ? "accepted"
+        : run.phase === "failed" ? "failed" : "waiting",
+      reached: counts.barrierReached,
+      total: counts.total,
+    },
     lanes,
     updatedAt: run.updatedAt,
     ...(run.endedAt !== undefined ? { endedAt: run.endedAt } : {}),
@@ -141,18 +145,14 @@ function summarizeParallelLane(lane: MateriaParallelLaneState): ParallelLaneMoni
     attempt: lane.attempt,
     ...(lane.childCastId !== undefined ? { childCastId: lane.childCastId } : {}),
     ...(lane.childSession ? { childSession: { ...lane.childSession } } : {}),
-    ...(lane.workspace ? {
-      workspace: {
-        repositoryRoot: lane.workspace.repositoryRoot,
-        workspaceRoot: lane.workspace.workspaceRoot,
-        workspacePath: lane.workspace.workspacePath,
-        workspaceName: lane.workspace.workspaceName,
-        ...(lane.workspace.operationId !== undefined ? { operationId: lane.workspace.operationId } : {}),
-        ...(lane.workspace.state !== undefined ? { state: lane.workspace.state } : {}),
-        ...(lane.workspace.revision ? { revision: { ...lane.workspace.revision } } : {}),
+    ...(lane.executionScope ? {
+      scope: {
+        id: lane.executionScope.id,
+        cwd: lane.executionScope.cwd,
+        exportNames: Object.keys(lane.executionScope.exports).sort(),
       },
     } : {}),
-    ...(lane.acceptedHead ? { acceptedHead: { ...lane.acceptedHead } } : {}),
+    ...(lane.terminalOutput !== undefined ? { output: boundedOutput(lane.terminalOutput) } : {}),
     ...(lane.failureReason !== undefined ? { failureReason: lane.failureReason } : {}),
     ...(lane.startedAt !== undefined ? { startedAt: lane.startedAt } : {}),
     ...(lane.endedAt !== undefined ? { endedAt: lane.endedAt } : {}),
@@ -168,22 +168,11 @@ function isTerminalLaneStatus(status: ParallelLaneMonitorSummary["status"]): boo
   return status === "accepted" || status === "failed" || status === "interrupted";
 }
 
-function hasStartedFanIn(run: MateriaParallelRunState): boolean {
-  return run.phase === "fan_in"
-    || run.phase === "resolving"
-    || run.phase === "evaluating"
-    || run.phase === "completed"
-    || run.fanInPhase === "running"
-    || run.fanInPhase === "conflict"
-    || run.fanInPhase === "resolved"
-    || run.fanInPhase === "accepted";
-}
-
-function hasConflict(run: MateriaParallelRunState): boolean {
-  return run.phase === "conflict"
-    || run.phase === "resolving"
-    || run.fanInPhase === "conflict"
-    || run.fanInProvenance?.outcome === "conflict";
+function boundedOutput(value: unknown): string {
+  let rendered: string;
+  try { rendered = JSON.stringify(value) ?? String(value); }
+  catch { rendered = "[unrenderable output]"; }
+  return rendered.length <= 500 ? rendered : `${rendered.slice(0, 499)}…`;
 }
 
 function isMonitorableRun(value: unknown): value is MateriaParallelRunState {
@@ -192,8 +181,7 @@ function isMonitorableRun(value: unknown): value is MateriaParallelRunState {
     && typeof value.runId === "string"
     && Array.isArray(value.queueOrder)
     && isRecord(value.lanes)
-    && isRecord(value.planIdentity)
-    && isRecord(value.baseline);
+    && isRecord(value.planIdentity);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

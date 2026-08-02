@@ -160,28 +160,57 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(details?.open).toBe(true);
   });
 
-  it('renders a parallel badge and symbolic fork/barrier/fan-in markers without lane cards', () => {
+  it('renders a derived parallel region with a branch prelude and replaces its ordinary fork and exit edges', () => {
     const base = renderPanel();
     const baseViewModel = base.props.viewModel;
     base.unmount();
+    const sockets = {
+      'Socket-1': { materia: 'Plan', edges: [{ when: 'always' as const, to: 'Socket-2' }] },
+      'Socket-2': { materia: 'Prepare', edges: [{ when: 'always' as const, to: 'Socket-3' }] },
+      'Socket-3': { materia: 'Build' },
+      'Socket-4': { materia: 'Review' },
+    };
     const activeLoadout = {
       ...baseViewModel.activeLoadout,
-      loops: { parallelWork: { sockets: ['Socket-1', 'Socket-2'], parallel: { planInput: 'state.parallelPlan', maxConcurrency: 2, workspaceMode: 'jj' as const, failurePolicy: 'all_terminal' as const, fanIn: 'ordered' as const } } },
+      sockets,
+      // There is intentionally no loop.parallel override: parallel rendering is
+      // derived from the consuming generator capability.
+      loops: { parallelWork: { sockets: ['Socket-3'], consumes: { from: 'Socket-1' }, exit: { from: 'Socket-3', when: 'satisfied' as const, to: 'Socket-4' } } },
     };
+    const routedEdge = (id: string, from: string, to: string, kind: 'normal' | 'loop-exit', loopId?: string) => ({
+      edge: { id, from, to, when: 'always' as const, kind, ...(loopId ? { loopId, loopExitRouteId: 'exit' } : {}) },
+      path: 'M 10 10 L 20 20', labelX: 15, labelY: 15, labelRotate: 0, routeClass: 'forward' as const,
+    });
     const { getByTestId, queryByTestId } = renderPanel({
       viewModel: {
         ...baseViewModel,
         activeLoadout,
+        materia: {
+          Plan: { materia: 'Plan', generator: true, parallel: true },
+          Prepare: { materia: 'Prepare' }, Build: { materia: 'Build' }, Review: { materia: 'Review' },
+        },
+        loadoutGraph: { width: 620, height: 260, sockets: [
+          { id: 'Socket-1', socket: sockets['Socket-1'], index: 0, x: 24, y: 24 },
+          { id: 'Socket-2', socket: sockets['Socket-2'], index: 1, x: 170, y: 24 },
+          { id: 'Socket-3', socket: sockets['Socket-3'], index: 2, x: 316, y: 24 },
+          { id: 'Socket-4', socket: sockets['Socket-4'], index: 3, x: 462, y: 24 },
+        ], edges: [] } as never,
+        routedEdges: [
+          routedEdge('generator-entry', 'Socket-1', 'Socket-2', 'normal'),
+          routedEdge('prelude-loop', 'Socket-2', 'Socket-3', 'normal'),
+          routedEdge('loop-exit', 'Socket-3', 'Socket-4', 'loop-exit', 'parallelWork'),
+        ],
         loopRegions: [{
-          id: 'parallelWork', label: 'Build → Eval', x: 12, y: 12, width: 280, height: 160,
-          summary: 'Parallel: 2 lanes', cyclePath: 'M 24 24 C 120 4 220 4 300 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)', parallel: true,
+          id: 'parallelWork', label: 'Build', x: 300, y: 12, width: 150, height: 160,
+          summary: 'Parallel: app default', cyclePath: 'M 320 24 C 360 4 400 4 430 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)', parallel: true,
           parallelVisuals: {
             fork: { id: 'parallel-fork:parallelWork', x: 80, y: 80, path: 'M 10 10 L 80 80', branchesPath: 'M 80 80 L 110 60 M 80 80 L 110 80 M 80 80 L 110 100', label: 'Parallel fork' },
-            barrier: { id: 'parallel-barrier:parallelWork', x: 320, y: 80, path: 'M 320 40 L 320 120', label: 'Parallel barrier' },
+            barrier: { id: 'parallel-barrier:parallelWork', x: 450, y: 80, path: 'M 450 40 L 450 120', label: 'Parallel barrier' },
             fanIn: [
-              { id: 'parallel-fan-in:parallelWork:clean', condition: 'satisfied', targetSocketId: 'Socket-3', path: 'M 320 70 L 400 70', labelX: 350, labelY: 60, label: 'Clean fan-in' },
-              { id: 'parallel-fan-in:parallelWork:conflict', condition: 'not_satisfied', targetSocketId: 'Socket-4', path: 'M 320 90 L 400 90', labelX: 350, labelY: 80, label: 'Conflict resolver' },
+              { id: 'parallel-continuation:parallelWork', targetSocketId: 'Socket-4', path: 'M 450 70 L 500 70', labelX: 470, labelY: 60, label: 'Continue after barrier' },
             ],
+            preludeSocketIds: ['Socket-2'],
+            loopSocketIds: ['Socket-3'],
           },
         }],
       },
@@ -190,8 +219,14 @@ describe('LoadoutGraphPanel readonly defaults', () => {
     expect(getByTestId('parallel-badge-parallelWork').textContent).toBe('Parallel');
     expect(getByTestId('parallel-fork-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-fork:parallelWork');
     expect(getByTestId('parallel-barrier-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-barrier:parallelWork');
-    expect(getByTestId('parallel-fan-in-parallelWork-satisfied')).toBeTruthy();
-    expect(getByTestId('parallel-fan-in-parallelWork-not_satisfied')).toBeTruthy();
+    expect(getByTestId('parallel-continuation-parallelWork')).toBeTruthy();
+    const prelude = getByTestId('socket-Socket-2');
+    expect(prelude.className).toContain('materia-socket-parallel-prelude');
+    expect(prelude.getAttribute('data-parallel-prelude-ids')).toBe('parallelWork');
+    expect(within(prelude).getByText('Branch prelude')).toBeTruthy();
+    expect(queryByTestId('edge-Socket-1-Socket-2-edge')).toBeNull();
+    expect(getByTestId('edge-Socket-2-Socket-3-edge')).toBeTruthy();
+    expect(queryByTestId('loop-exit-edge-parallelWork-exit')).toBeNull();
     expect(queryByTestId('parallel-lane-0')).toBeNull();
   });
 

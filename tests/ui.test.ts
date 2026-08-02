@@ -358,13 +358,13 @@ describe("persistent Materia widget formatting", () => {
       phase: "awaiting_lanes",
       fanInPhase: "not_started",
       planId: "plan-1",
-      baseline: { commitId: "base", changeId: "change" },
       maxConcurrency: 2,
-      counts: { total: 5, queued: 1, running: 1, accepted: 1, failed: 1, interrupted: 1, completed: 3, fanIn: 0, conflict: 0 },
+      counts: { total: 5, queued: 1, running: 1, accepted: 1, failed: 1, interrupted: 1, completed: 3, barrierReached: 3 },
+      barrier: { phase: "waiting", reached: 3, total: 5 },
       lanes: [],
       updatedAt: 1,
     } satisfies ParallelRunMonitorSummary;
-    expect(formatParallelRunCompactStatus(summary)).toBe("parallel build q1 r1 a1 f1 i1 fi0 c0 ✓3/5");
+    expect(formatParallelRunCompactStatus(summary)).toBe("parallel build q1 r1 a1 f1 i1 barrier:waiting 3/5");
   });
 
   test("renders compact completion usage without billing disclaimers", () => {

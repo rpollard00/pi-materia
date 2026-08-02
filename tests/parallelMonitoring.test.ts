@@ -28,7 +28,7 @@ function run() {
 }
 
 describe("parallel monitor summaries", () => {
-  test("preserves ordered lane identity and exposes artifact/workspace pointers", () => {
+  test("preserves ordered branch identity and exposes scope-neutral status", () => {
     const state = run();
     state.lanes["lane-api"] = {
       ...state.lanes["lane-api"]!,
@@ -41,18 +41,13 @@ describe("parallel monitor summaries", () => {
         artifactRoot: "/tmp/child-api/artifacts",
         runDirectory: "/tmp/child-api/run",
       },
-      workspace: {
-        backend: "jj",
-        parentCastId: "cast-1",
-        loopId: "build",
-        laneId: "lane-api",
-        repositoryRoot: "/repo",
-        workspaceRoot: "/tmp/materia",
-        workspacePath: "/tmp/materia/lane-api",
-        workspaceName: "materia-cast-1-build-lane-api",
-        revision: { commitId: "head-api", changeId: "change-api" },
+      executionScope: {
+        id: "scope-api",
+        cwd: "/tmp/branch-api",
+        state: {},
+        exports: { integration: { producer: "test", value: { opaque: true } } },
       },
-      acceptedHead: { commitId: "head-api", changeId: "change-api" },
+      terminalOutput: { satisfied: true },
       updatedAt: 20,
     };
     state.lanes["lane-ui"] = { ...state.lanes["lane-ui"]!, status: "running", updatedAt: 21 };
@@ -60,18 +55,19 @@ describe("parallel monitor summaries", () => {
     state.updatedAt = 21;
 
     const summary = summarizeParallelRun(state);
-    expect(summary.counts).toEqual({ total: 2, queued: 0, running: 1, accepted: 1, failed: 0, interrupted: 0, completed: 1, fanIn: 0, conflict: 0 });
+    expect(summary.counts).toEqual({ total: 2, queued: 0, running: 1, accepted: 1, failed: 0, interrupted: 0, completed: 1, barrierReached: 1 });
+    expect(summary.barrier).toEqual({ phase: "waiting", reached: 1, total: 2 });
     expect(summary.lanes.map((lane) => lane.laneId)).toEqual(["lane-api", "lane-ui"]);
     expect(summary.lanes[0]).toMatchObject({
       attempt: 2,
       childCastId: "child-api",
       childSession: { artifactRoot: "/tmp/child-api/artifacts" },
-      workspace: { workspacePath: "/tmp/materia/lane-api" },
-      acceptedHead: { commitId: "head-api" },
+      scope: { id: "scope-api", cwd: "/tmp/branch-api", exportNames: ["integration"] },
+      output: '{"satisfied":true}',
     });
   });
 
-  test("marks fan-in and conflicts without changing lane completion counts", () => {
+  test("reports intrinsic barrier completion without exposing VCS conflict state", () => {
     const state = run();
     for (const lane of Object.values(state.lanes)) lane.status = "accepted";
     state.phase = "resolving";
@@ -93,6 +89,10 @@ describe("parallel monitor summaries", () => {
       completedAt: 21,
     };
 
-    expect(summarizeParallelRun(state).counts).toMatchObject({ accepted: 2, completed: 2, fanIn: 1, conflict: 1 });
+    const summary = summarizeParallelRun(state);
+    expect(summary.counts).toMatchObject({ accepted: 2, completed: 2, barrierReached: 2 });
+    expect(summary.barrier).toEqual({ phase: "waiting", reached: 2, total: 2 });
+    expect(summary).not.toHaveProperty("baseline");
+    expect(summary.counts).not.toHaveProperty("conflict");
   });
 });
