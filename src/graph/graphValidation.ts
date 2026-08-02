@@ -88,6 +88,13 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
     const regions = deriveParallelBranchRegions(normalized, { isParallelGeneratorSocket: derivedParallelPredicate });
     if (!regions.ok) {
       for (const issue of regions.issues) errors.push({ code: "invalid-loop", source: issue.path, message: issue.message });
+    } else {
+      for (const region of regions.value) {
+        validateParallelChildSafety(normalized, errors, region.generatorSocketId, [
+          ...region.preludeSocketIds.map((socketId, index) => ({ socketId, source: `parallelRegions.${region.generatorSocketId}.prelude[${index}]` })),
+          ...region.loopSocketIds.map((socketId, index) => ({ socketId, source: `loops.${region.loopId}.sockets[${index}]` })),
+        ], validationOptions);
+      }
     }
   } else {
     validateParallelRegionInteractions(normalized, errors, socketIds);
@@ -471,8 +478,6 @@ function validateParallelLoopTopology(
     }
   }
 
-  validateParallelChildSafety(graph, errors, loopId, loopMemberSockets, options);
-
   const fanInRoutes = configuredExits.filter((route) => route?.from === terminalSource);
   const cleanRoute = fanInRoutes.find((route) => route.condition === "satisfied");
   const conflictRoute = fanInRoutes.find((route) => route.condition === "not_satisfied");
@@ -504,18 +509,18 @@ function validateParallelLoopTopology(
 function validateParallelChildSafety(
   graph: MateriaPipelineConfig,
   errors: MateriaGraphValidationError[],
-  loopId: string,
-  loopMemberSockets: string[],
+  generatorSocketId: string,
+  childSockets: readonly { socketId: string; source: string }[],
   options: MateriaGraphValidationOptions,
 ): void {
   if (!options.materia && !options.isParallelSafeSocket) return;
-  for (const [index, socketId] of loopMemberSockets.entries()) {
+  for (const { socketId, source } of childSockets) {
     if (options.isParallelSafeSocket && !options.isParallelSafeSocket(socketId)) {
       errors.push({
         code: "invalid-loop",
-        source: `loops.${loopId}.sockets[${index}]`,
+        source,
         from: socketId,
-        message: `Parallel loop "${loopId}" cannot execute child socket "${socketId}": its materia is not declared parallel-safe for a workspace-local child.`,
+        message: `Parallel region from generator "${generatorSocketId}" cannot execute child socket "${socketId}" concurrently: its materia does not declare parallelSafe: true. Concurrent scopes may intentionally share one cwd.`,
       });
     }
     if (!options.materia) continue;
@@ -524,20 +529,20 @@ function validateParallelChildSafety(
     if (typeof materiaId !== "string" || materiaId.trim().length === 0) {
       errors.push({
         code: "invalid-loop",
-        source: `loops.${loopId}.sockets[${index}].materia`,
+        source: `${source}.materia`,
         from: socketId,
-        message: `Parallel loop "${loopId}" child socket "${socketId}" must reference a materia definition.`,
+        message: `Parallel region from generator "${generatorSocketId}" child socket "${socketId}" must reference a materia definition.`,
       });
       continue;
     }
-    const result = validateParallelSafeMateria(materiaId, options.materia[materiaId], `loops.${loopId}.sockets[${index}]`);
+    const result = validateParallelSafeMateria(materiaId, options.materia[materiaId], source);
     if (!result.ok) {
       for (const issue of result.issues) {
         errors.push({
           code: "invalid-loop",
           source: issue.path,
           from: socketId,
-          message: `Parallel loop "${loopId}" child socket "${socketId}" (${JSON.stringify(materiaId)}) is not parallel-safe: ${issue.message}.`,
+          message: `Parallel region from generator "${generatorSocketId}" child socket "${socketId}" (${JSON.stringify(materiaId)}) is not concurrency-safe: ${issue.message}.`,
         });
       }
     }

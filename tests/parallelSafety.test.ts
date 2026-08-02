@@ -7,21 +7,16 @@ const parallelGraph = (): MateriaPipelineConfig => ({
   entry: "Socket-1",
   sockets: {
     "Socket-1": { materia: "Planner", edges: [{ when: "always", to: "Socket-2" }] },
-    "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
-    "Socket-3": { materia: "Eval", edges: [{ when: "always", to: "Socket-2" }] },
-    "Socket-4": { materia: "Join" },
-    "Socket-5": { materia: "Resolve" },
+    "Socket-2": { materia: "Setup", edges: [{ when: "always", to: "Socket-3" }] },
+    "Socket-3": { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
+    "Socket-4": { materia: "Eval", edges: [{ when: "always", to: "Socket-3" }] },
+    "Socket-5": { materia: "Join" },
   },
   loops: {
     work: {
-      sockets: ["Socket-2", "Socket-3"],
+      sockets: ["Socket-3", "Socket-4"],
       consumes: { from: "Socket-1", output: "workItems" },
-      exit: { from: "Socket-3", when: "satisfied", to: "end" },
-      parallel: { planInput: "state.parallelPlan", maxConcurrency: 2, workspaceMode: "jj", failurePolicy: "all_terminal", fanIn: "ordered" },
-      exits: [
-        { id: "clean", from: "Socket-3", condition: "satisfied", targetSocketId: "Socket-4" },
-        { id: "conflict", from: "Socket-3", condition: "not_satisfied", targetSocketId: "Socket-5" },
-      ],
+      exit: { from: "Socket-4", when: "satisfied", to: "Socket-5" },
     },
   },
 });
@@ -30,6 +25,7 @@ const agent = (parallelSafe?: boolean): MateriaConfig => ({ type: "agent", tools
 
 const safeCatalog: Record<string, MateriaConfig> = {
   Planner: agent(true),
+  Setup: { type: "utility", command: ["prepare"], parallelSafe: true },
   Build: agent(true),
   Eval: agent(true),
   Join: agent(true),
@@ -37,30 +33,40 @@ const safeCatalog: Record<string, MateriaConfig> = {
 };
 
 describe("parallel child materia safety", () => {
-  test("requires an explicit workspace-local opt-in for custom materia", () => {
+  test("requires explicit permission and warns that cwd isolation is not implied", () => {
     expect(validateParallelSafeMateria("Custom", agent()).ok).toBe(false);
-    expect(parallelSafetyIssuesForMateria("Custom", agent())[0]?.path).toBe("materia.Custom.parallelSafe");
+    const issue = parallelSafetyIssuesForMateria("Custom", agent())[0];
+    expect(issue?.path).toBe("materia.Custom.parallelSafe");
+    expect(issue?.message).toContain("multiple scopes may share one cwd");
     expect(validateParallelSafeMateria("Custom", agent(true)).ok).toBe(true);
-    expect(validateParallelSafeMateria("My-Publisher", { type: "utility", utility: "publish", parallelSafe: true }).ok).toBe(false);
-    expect(validateParallelSafeMateria("Custom-Publisher", { type: "utility", command: ["publish"], parallelSafe: true }).ok).toBe(true);
   });
 
-  test("rejects interactive and known parent-shared operations even when opted in", () => {
+  test("trusts opted-in utilities to enforce scope-specific safety", () => {
+    expect(validateParallelSafeMateria("Publisher", { type: "utility", utility: "publish", parallelSafe: true }).ok).toBe(true);
+    expect(validateParallelSafeMateria("Blackbelt-Maintain", { type: "utility", script: { name: "blackbelt-maintain.mjs" }, parallelSafe: true }).ok).toBe(true);
+    expect(validateParallelSafeMateria("Publisher", { type: "utility", utility: "publish" }).ok).toBe(false);
+  });
+
+  test("continues to reject interactive and multi-turn child behavior", () => {
     expect(parallelSafetyIssuesForMateria("Planner", { ...agent(true), multiTurn: true })[0]?.message).toContain("multi-turn/user-interactive");
-    expect(parallelSafetyIssuesForMateria("Blackbelt-Maintain", { type: "utility", script: { name: "blackbelt-maintain.mjs" }, parallelSafe: true })[0]?.message).toContain("parent-shared");
+    expect(parallelSafetyIssuesForMateria("Prompt", { ...agent(true), requiresUserInput: true })[0]?.message).toContain("multi-turn/user-interactive");
   });
 
-  test("reports the exact offending loop socket through graph validation", () => {
-    const materia = { ...safeCatalog, Eval: agent(false) };
+  test("reports exact prelude and loop sockets for intrinsic parallel regions", () => {
+    const materia = { ...safeCatalog, Setup: { ...safeCatalog.Setup, parallelSafe: false }, Eval: agent(false) };
     const result = validatePipelineGraph(parallelGraph(), {
       materia,
-      isGeneratorSocket: (socketId) => socketId === "Socket-1",
+      isParallelGeneratorSocket: (socketId) => socketId === "Socket-1",
     });
     expect(result.ok).toBe(false);
     expect(result.errors).toContainEqual(expect.objectContaining({
-      source: "loops.work.sockets[1].parallelSafe",
-      from: "Socket-3",
+      source: "parallelRegions.Socket-1.prelude[0].parallelSafe",
+      from: "Socket-2",
     }));
-    expect(result.errors.find((error) => error.from === "Socket-3")?.message).toContain("Eval");
+    expect(result.errors).toContainEqual(expect.objectContaining({
+      source: "loops.work.sockets[1].parallelSafe",
+      from: "Socket-4",
+    }));
+    expect(result.errors.find((error) => error.from === "Socket-4")?.message).toContain("Eval");
   });
 });

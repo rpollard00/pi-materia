@@ -884,7 +884,7 @@ export interface MateriaDefinitionMetadata {
   generator?: boolean;
   /** Enables intrinsic parallel generation. Valid only with generator: true. */
   parallel?: boolean;
-  /** Explicitly permits execution in an isolated, workspace-local parallel child. */
+  /** Explicitly permits concurrent child execution; scopes are not guaranteed cwd isolation. */
   parallelSafe?: boolean;
   /** User-controlled lock state for editable materia definitions. */
   lockState?: MateriaUserLockState;

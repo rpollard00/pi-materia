@@ -41,7 +41,7 @@ export interface MateriaDefinitionCommon {
   generator?: boolean;
   /** Enables intrinsic parallel generation. Valid only with generator: true. */
   parallel?: boolean;
-  /** Explicitly permits execution in an isolated, workspace-local parallel child. */
+  /** Explicitly permits concurrent child execution; scopes are not guaranteed cwd isolation. */
   parallelSafe?: boolean;
   /** Obsolete metadata; generator: true is the canonical domain flag. */
   generates?: MateriaGeneratorMetadata;

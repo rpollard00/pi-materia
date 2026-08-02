@@ -5,7 +5,7 @@ export interface ParallelSafetyMateriaLike {
   id?: string;
   type?: "agent" | "utility" | string;
   multiTurn?: boolean;
-  /** Custom utility/agent declarations are trusted configuration, not a sandbox. */
+  /** Trusted permission for concurrent child execution, not an isolation guarantee. */
   parallelSafe?: boolean;
   utility?: string;
   command?: string[];
@@ -22,57 +22,7 @@ export interface ParallelChildSocketCapability {
   materia?: ParallelSafetyMateriaLike;
 }
 
-/**
- * Built-in operations whose behavior is parent/repository scoped. These are
- * denied even when a caller supplies a permissive custom declaration: a
- * declaration opts unknown/custom code into the workspace-local contract, but
- * does not turn a known parent integration operation into a lane operation.
- */
-export const KNOWN_PARENT_SHARED_MATERIA_IDS = new Set([
-  "blackbelt-bootstrap",
-  "blackbelt-maintain",
-  "blackbelt-gh-pr",
-  "blackbelt-ado-pr",
-  "mime-bootstrap",
-  "mime-maintain",
-  "mime-gh-pr",
-  "mime-ado-pr",
-  "ignore-artifacts",
-  "maintain",
-  "gitmaintain",
-  "git-maintain",
-  "bookmark",
-  "publish",
-  "integration",
-  "integration-eval",
-  "parent-integration",
-  "fan-in",
-  "resolver",
-]);
-
-/** Known aliases/scripts are checked as well as materia ids because users may rename definitions. */
-const KNOWN_PARENT_SHARED_UTILITY_ALIASES = new Set([
-  "bookmark",
-  "bookmark-advance",
-  "integrate",
-  "parent-integrate",
-  "parent-integration",
-  "publish",
-  "pull-request",
-]);
-const KNOWN_PARENT_SHARED_SCRIPT_NAMES = new Set([
-  "blackbelt-bootstrap.mjs",
-  "blackbelt-maintain.mjs",
-  "blackbelt-gh-pr.mjs",
-  "blackbelt-ado-pr.mjs",
-  "mime-bootstrap.mjs",
-  "mime-maintain.mjs",
-  "mime-gh-pr.mjs",
-  "mime-ado-pr.mjs",
-  "ensure-ignored.mjs",
-]);
-
-/** Validate one materia definition for use in a parallel child workspace. */
+/** Validate one materia definition for concurrent child execution. */
 export function validateParallelSafeMateria(
   materiaId: string,
   materia: ParallelSafetyMateriaLike | undefined,
@@ -96,15 +46,7 @@ export function parallelSafetyIssuesForMateria(
   if (materia.multiTurn === true || materia.interactive === true || materia.userInteractive === true || materia.requiresUserInput === true) {
     issues.push({
       path: `${path}.multiTurn`,
-      message: `materia ${JSON.stringify(materiaId)} is multi-turn/user-interactive and cannot execute in a parallel child workspace`,
-    });
-    return issues;
-  }
-
-  if (isKnownParentSharedOperation(materiaId, materia)) {
-    issues.push({
-      path,
-      message: `materia ${JSON.stringify(materiaId)} is a known parent-shared operation (bookmark advancement, publishing, or parent integration) and must remain in the parent workflow`,
+      message: `materia ${JSON.stringify(materiaId)} is multi-turn/user-interactive and cannot execute concurrently in a parallel child`,
     });
     return issues;
   }
@@ -112,7 +54,7 @@ export function parallelSafetyIssuesForMateria(
   if (materia.parallelSafe !== true) {
     issues.push({
       path: `${path}.parallelSafe`,
-      message: `materia ${JSON.stringify(materiaId)} must explicitly declare parallelSafe: true for workspace-local parallel child execution`,
+      message: `materia ${JSON.stringify(materiaId)} must explicitly declare parallelSafe: true for concurrent child execution; this permission does not guarantee cwd isolation, and multiple scopes may share one cwd`,
     });
   }
   return issues;
@@ -133,14 +75,6 @@ export function validateParallelChildCapabilities(
     issues.push(...parallelSafetyIssuesForMateria(socket.materiaId, socket.materia, socketPath));
   }
   return issues.length > 0 ? { ok: false, issues } : { ok: true, value: sockets };
-}
-
-export function isKnownParentSharedOperation(materiaId: string, materia: ParallelSafetyMateriaLike): boolean {
-  const id = materiaId.trim().toLowerCase();
-  if (KNOWN_PARENT_SHARED_MATERIA_IDS.has(id)) return true;
-  const utility = typeof materia.utility === "string" ? materia.utility.trim().toLowerCase() : "";
-  const script = typeof materia.script?.name === "string" ? materia.script.name.trim().toLowerCase() : "";
-  return KNOWN_PARENT_SHARED_UTILITY_ALIASES.has(utility) || KNOWN_PARENT_SHARED_SCRIPT_NAMES.has(script);
 }
 
 /** Return whether a referenced definition can run in a parallel child. */
