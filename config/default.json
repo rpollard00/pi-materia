@@ -785,6 +785,15 @@
       "utility": "vcs.spawnJjWorkspace",
       "parallelSafe": true
     },
+    "Integrate-JJ-Workspaces": {
+      "type": "utility",
+      "label": "Integrate-JJ-Workspaces",
+      "description": "Consumes ordered intrinsic fan-in scope exports, verifies owned jj workspace heads, and activates a deterministic clean or conflicted integration workspace for post-integration review.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "utility": "vcs.integrateJjWorkspaces"
+    },
     "Blackbelt-GH-PR": {
       "type": "utility",
       "label": "Blackbelt-GH-PR",

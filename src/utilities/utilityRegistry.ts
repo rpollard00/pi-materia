@@ -5,6 +5,7 @@ import path from "node:path";
 import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
 import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import { spawnJjWorkspaceScope } from "../infrastructure/spawnJjWorkspace.js";
+import { integrateJjWorkspaceExports } from "../infrastructure/integrateJjWorkspaces.js";
 
 export type BuiltInUtilityInput = {
   cwd: string;
@@ -37,6 +38,7 @@ const registry: Record<string, BuiltInUtility> = {
   "project.ensureIgnored": ensureIgnored,
   "vcs.detect": detectVcs,
   "vcs.spawnJjWorkspace": spawnJjWorkspace,
+  "vcs.integrateJjWorkspaces": integrateJjWorkspaces,
 };
 
 export function hasBuiltInUtility(alias: string | undefined): alias is keyof typeof registry {
@@ -93,6 +95,26 @@ async function spawnJjWorkspace(input: BuiltInUtilityInput): Promise<string> {
     satisfied: true,
     context: `Spawn-JJ-Workspace: created owned workspace ${spawned.workspace.workspaceName} with branch-local bookmark ${spawned.bookmarkName}.`,
     scopeTransition: { kind: "replace", scope: spawned.scope },
+  });
+}
+
+async function integrateJjWorkspaces(input: BuiltInUtilityInput): Promise<string> {
+  const integrated = await integrateJjWorkspaceExports({
+    cwd: input.cwd,
+    castId: input.castId,
+    socketId: input.socketId,
+    executionScope: createExecutionScope(input.executionScope),
+    state: input.state,
+  });
+  const revision = integrated.integration.integrationRevision!;
+  const outcome = integrated.integration.outcome;
+  return stringifyDeterministicHandoffOutput({
+    satisfied: true,
+    context: outcome === "conflict"
+      ? `Integrate-JJ-Workspaces: materialized ${integrated.sourceCount} ordered workspace(s) at conflicted integration ${revision.commitId}.`
+      : `Integrate-JJ-Workspaces: cleanly materialized ${integrated.sourceCount} ordered workspace(s) at ${revision.commitId}.`,
+    state: { jjWorkspaceIntegration: integrated.scope.state.jjWorkspaceIntegration },
+    scopeTransition: { kind: "replace", scope: integrated.scope },
   });
 }
 

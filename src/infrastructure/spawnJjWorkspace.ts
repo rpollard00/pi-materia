@@ -58,6 +58,7 @@ export async function spawnJjWorkspaceScope(
     backend: "jj",
     owner,
     repositoryRoot: workspace.repositoryRoot,
+    workspaceRoot: workspace.workspaceRoot,
     workspacePath: workspace.workspacePath,
     workspaceName: workspace.workspaceName,
     manifestPath: workspace.manifestPath,

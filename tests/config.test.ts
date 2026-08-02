@@ -994,6 +994,7 @@ describe("config loadouts", () => {
       ["Blackbelt-Bootstrap", "json"],
       ["Blackbelt-Maintain", "json"],
       ["Spawn-JJ-Workspace", "json"],
+      ["Integrate-JJ-Workspaces", "json"],
       ["Blackbelt-GH-PR", "json"],
       ["Commit-Sigil", "json"],
       ["Normalize-Parallel-Streams", "json"],

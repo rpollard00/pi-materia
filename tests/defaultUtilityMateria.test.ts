@@ -178,6 +178,22 @@ describe("bundled utility materia defaults", () => {
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
 
+  test("Integrate-JJ-Workspaces is a reusable ordered integration utility materia", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Integrate-JJ-Workspaces"];
+
+    expect(materia).toMatchObject({
+      type: "utility",
+      label: "Integrate-JJ-Workspaces",
+      group: "Utility",
+      parse: "json",
+      utility: "vcs.integrateJjWorkspaces",
+    });
+    expect(materia?.description).toContain("ordered intrinsic fan-in");
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+    expect((materia as { script?: unknown }).script).toBeUndefined();
+  });
+
   test("Blackbelt-Maintain has correct shipped-utility config shape, parse, color, and metadata", async () => {
     const config = await loadDefaultConfig();
     const materia = config.materia?.["Blackbelt-Maintain"];

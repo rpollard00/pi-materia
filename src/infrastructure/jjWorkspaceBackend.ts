@@ -159,6 +159,8 @@ export interface JjWorkspaceRemovalResult {
 
 export interface JjFanInLaneInput {
   laneId: string;
+  /** Actual producer-owned workspace identity (which may be a child cast). */
+  owner?: JjWorkspaceOwner;
   streamIndex: number;
   queueIndex: number;
   workItemIndexes: readonly number[];
@@ -325,7 +327,7 @@ export class JjWorkspaceBackend {
         if (!workspaceReference) throw new JjWorkspaceError("fan_in_workspace_missing", `Parallel lane ${JSON.stringify(lane.laneId)} has no workspace reference.`);
         const manifest = await this.#loadOwnedReference(workspaceReference);
         this.#validateManifestOwnership(manifest, {
-          owner: { parentCastId: input.parentCastId, loopId: input.loopId, laneId: lane.laneId },
+          owner: lane.owner ?? { parentCastId: input.parentCastId, loopId: input.loopId, laneId: lane.laneId },
           repositoryRoot: capability.repositoryRoot,
           workspaceRoot: manifest.workspaceRoot,
           workspacePath: manifest.workspacePath,
