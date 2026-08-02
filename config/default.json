@@ -774,6 +774,16 @@
         "runtime": "node"
       }
     },
+    "Spawn-JJ-Workspace": {
+      "type": "utility",
+      "label": "Spawn-JJ-Workspace",
+      "description": "Creates one ownership-checked external jj workspace from the active execution scope, provisions branch-local Blackbelt state, and activates the workspace as a replacement scope with opaque integration and cleanup exports.",
+      "group": "Utility",
+      "color": "materia-color-black-gray",
+      "parse": "json",
+      "utility": "vcs.spawnJjWorkspace",
+      "parallelSafe": true
+    },
     "Blackbelt-GH-PR": {
       "type": "utility",
       "label": "Blackbelt-GH-PR",

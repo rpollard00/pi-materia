@@ -66,6 +66,12 @@ describe("bundled utility materia defaults", () => {
       script: { kind: "shippedUtility", name: "blackbelt-maintain.mjs", runtime: "node" },
       parse: "json",
     });
+    expect(config.materia?.["Spawn-JJ-Workspace"]).toMatchObject({
+      type: "utility",
+      utility: "vcs.spawnJjWorkspace",
+      parse: "json",
+      parallelSafe: true,
+    });
     expect(config.materia?.["Mime-Bootstrap"]).toMatchObject({
       type: "utility",
       script: { kind: "shippedUtility", name: "mime-bootstrap.mjs", runtime: "node" },
@@ -153,6 +159,23 @@ describe("bundled utility materia defaults", () => {
     expect(allowedColors.has(materia?.color as string)).toBe(true);
     expect((materia as { assign?: unknown }).assign).toBeUndefined();
     expect((materia as { command?: unknown }).command).toBeUndefined();
+  });
+
+  test("Spawn-JJ-Workspace is a reusable concurrent-safe utility materia", async () => {
+    const config = await loadDefaultConfig();
+    const materia = config.materia?.["Spawn-JJ-Workspace"];
+
+    expect(materia).toMatchObject({
+      type: "utility",
+      label: "Spawn-JJ-Workspace",
+      group: "Utility",
+      parse: "json",
+      utility: "vcs.spawnJjWorkspace",
+      parallelSafe: true,
+    });
+    expect(materia?.description).toContain("active execution scope");
+    expect((materia as { command?: unknown }).command).toBeUndefined();
+    expect((materia as { script?: unknown }).script).toBeUndefined();
   });
 
   test("Blackbelt-Maintain has correct shipped-utility config shape, parse, color, and metadata", async () => {

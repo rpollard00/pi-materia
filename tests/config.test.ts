@@ -993,6 +993,7 @@ describe("config loadouts", () => {
       ["Detect-VCS", "json"],
       ["Blackbelt-Bootstrap", "json"],
       ["Blackbelt-Maintain", "json"],
+      ["Spawn-JJ-Workspace", "json"],
       ["Blackbelt-GH-PR", "json"],
       ["Commit-Sigil", "json"],
       ["Normalize-Parallel-Streams", "json"],

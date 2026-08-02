@@ -66,6 +66,7 @@ export function buildUtilityInput(state: MateriaCastState, socket: UtilityResolv
   const cursorName = loop?.cursor ?? (loop ? `${socket.id}Index` : undefined);
   return {
     cwd: state.activeScope.cwd,
+    executionScope: state.activeScope,
     runDir: state.runDir,
     request: state.request,
     castId: state.castId,

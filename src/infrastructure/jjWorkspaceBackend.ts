@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, readdir } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -873,22 +874,19 @@ export class JjWorkspaceBackend {
     const rootManifestPath = path.join(root, JJ_WORKSPACE_ROOT_MANIFEST);
     const manifestsRoot = path.join(root, JJ_WORKSPACE_MANIFEST_DIRECTORY);
     await assertNoSymlinkAncestors(root);
-    if (await exists(rootManifestPath)) {
-      const rootManifestStat = await lstat(rootManifestPath);
-      if (rootManifestStat.isSymbolicLink() || !rootManifestStat.isFile()) throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ownership marker ${JSON.stringify(rootManifestPath)} is not a regular file.`);
-      const raw = await readFile(rootManifestPath, "utf8");
-      let marker: unknown;
-      try { marker = JSON.parse(raw); } catch { throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ownership marker ${JSON.stringify(rootManifestPath)} is invalid.`); }
-      if (!isRecord(marker) || marker.backend !== "jj" || marker.version !== JJ_WORKSPACE_MANIFEST_VERSION) throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ${JSON.stringify(root)} is owned by an incompatible backend.`);
-    } else {
+    if (!(await exists(rootManifestPath))) {
       const existingEntries = await readdir(root);
-      if (existingEntries.length > 0) throw new JjWorkspaceError("workspace_root_unowned", `Workspace root ${JSON.stringify(root)} is non-empty and has no ownership marker.`);
-      await writeJsonAtomically(rootManifestPath, {
+      // A concurrent process may publish ownership between the first lookup
+      // and this listing. Recheck the marker before classifying the now
+      // non-empty directory as foreign.
+      if (existingEntries.length > 0 && !(await exists(rootManifestPath))) throw new JjWorkspaceError("workspace_root_unowned", `Workspace root ${JSON.stringify(root)} is non-empty and has no ownership marker.`);
+      if (existingEntries.length === 0) await publishWorkspaceRootMarker(rootManifestPath, {
         version: JJ_WORKSPACE_MANIFEST_VERSION,
         backend: "jj",
         createdAt: this.#now(),
       });
     }
+    await validateWorkspaceRootMarker(root, rootManifestPath);
     await mkdir(manifestsRoot, { recursive: true });
     this.#knownWorkspaceRoots.add(root);
     const manifestsStat = await lstat(manifestsRoot);
@@ -1058,6 +1056,48 @@ export class JjWorkspaceBackend {
     await previous;
     try { return await task(); } finally { release(); }
   }
+}
+
+async function publishWorkspaceRootMarker(markerPath: string, marker: object): Promise<void> {
+  // Publish a fully-written marker with one atomic hard-link operation. The
+  // candidate lives beside the root, so concurrent initializers still observe
+  // an empty unowned root and race on the same exclusive destination instead
+  // of mistaking another process's temporary file for foreign contents.
+  const root = path.dirname(markerPath);
+  const candidate = path.join(path.dirname(root), `.${path.basename(root)}.ownership-${process.pid}-${randomUUID()}.tmp`);
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(candidate, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify(marker)}\n`, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    try {
+      await link(candidate, markerPath);
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      // Another process won. Its hard-linked candidate was also completely
+      // written and synced before publication; validation happens below.
+    }
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await unlink(candidate).catch((error) => {
+      if (!isNotFound(error)) throw error;
+    });
+  }
+}
+
+async function validateWorkspaceRootMarker(root: string, markerPath: string): Promise<void> {
+  const stat = await lstat(markerPath);
+  if (stat.isSymbolicLink() || !stat.isFile()) throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ownership marker ${JSON.stringify(markerPath)} is not a regular file.`);
+  const raw = await readFile(markerPath, "utf8");
+  let marker: unknown;
+  try { marker = JSON.parse(raw); } catch { throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ownership marker ${JSON.stringify(markerPath)} is invalid.`); }
+  if (!isRecord(marker) || marker.backend !== "jj" || marker.version !== JJ_WORKSPACE_MANIFEST_VERSION) throw new JjWorkspaceError("workspace_root_unsafe", `Workspace root ${JSON.stringify(root)} is owned by an incompatible backend.`);
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return isRecord(error) && error.code === "EEXIST";
 }
 
 interface RevisionDetails {

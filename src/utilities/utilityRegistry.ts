@@ -3,6 +3,8 @@ import { accessSync, constants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { stringifyDeterministicHandoffOutput } from "../handoff/handoffContract.js";
+import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
+import { spawnJjWorkspaceScope } from "../infrastructure/spawnJjWorkspace.js";
 
 export type BuiltInUtilityInput = {
   cwd: string;
@@ -10,6 +12,7 @@ export type BuiltInUtilityInput = {
   request: string;
   castId: string;
   socketId: string;
+  executionScope: ExecutionScope;
   params: Record<string, unknown>;
   state: unknown;
   item: unknown;
@@ -33,6 +36,7 @@ const registry: Record<string, BuiltInUtility> = {
   },
   "project.ensureIgnored": ensureIgnored,
   "vcs.detect": detectVcs,
+  "vcs.spawnJjWorkspace": spawnJjWorkspace,
 };
 
 export function hasBuiltInUtility(alias: string | undefined): alias is keyof typeof registry {
@@ -70,6 +74,26 @@ async function ensureIgnored(input: BuiltInUtilityInput): Promise<string> {
   }
 
   return stringifyDeterministicHandoffOutput({ ok: true, root, file: ignoreFile, patterns, added, unchanged: patterns.filter((pattern) => !added.includes(pattern)) });
+}
+
+async function spawnJjWorkspace(input: BuiltInUtilityInput): Promise<string> {
+  const executionScope = createExecutionScope(input.executionScope);
+  const workspaceRoot = input.params.workspaceRoot;
+  if (workspaceRoot !== undefined && (typeof workspaceRoot !== "string" || workspaceRoot.trim().length === 0)) {
+    throw new Error("vcs.spawnJjWorkspace params.workspaceRoot must be a non-empty string when provided.");
+  }
+  const spawned = await spawnJjWorkspaceScope({
+    cwd: input.cwd,
+    castId: input.castId,
+    socketId: input.socketId,
+    executionScope,
+    ...(typeof workspaceRoot === "string" ? { workspaceRoot } : {}),
+  });
+  return stringifyDeterministicHandoffOutput({
+    satisfied: true,
+    context: `Spawn-JJ-Workspace: created owned workspace ${spawned.workspace.workspaceName} with branch-local bookmark ${spawned.bookmarkName}.`,
+    scopeTransition: { kind: "replace", scope: spawned.scope },
+  });
 }
 
 async function detectVcs(input: BuiltInUtilityInput): Promise<string> {
