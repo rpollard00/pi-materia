@@ -1,7 +1,7 @@
 import { resolveArtifactRoot } from "../config/config.js";
 import { isShippedUtilityScriptRef } from "../config/shippedUtilities.js";
 import { assertValidPipelineGraph } from "../graph/graphValidation.js";
-import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isGeneratorMateria, isParallelGeneratorMateria } from "../graph/generator.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIds, loopSockets } from "../loadout/loadoutAccessors.js";
 import { prepareLoadoutForRuntime } from "../loadout/loadoutNormalization.js";
 import { formatToolScopeSpec, validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
@@ -41,6 +41,7 @@ export function resolvePipeline(config: PiMateriaConfig): ResolvedMateriaPipelin
   assertValidPipelineGraph(effective.pipeline, {
     materia: config.materia,
     isGeneratorSocket: (socketId) => isGeneratorPipelineSocket(config, effective.pipeline, socketId),
+    isParallelGeneratorSocket: (socketId) => isParallelGeneratorPipelineSocket(config, effective.pipeline, socketId),
   });
   const sockets = Object.fromEntries(
     loadoutSocketIds(effective.pipeline).map((id) => [id, resolveSocket(config, effective, id, `${pipelineSource(effective)}.sockets.${id}`)]),
@@ -252,6 +253,11 @@ function validateObsoleteGeneratorDeclaration(name: string, generates: unknown):
 function isGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, socketId: string): boolean {
   const socket = getLoadoutSocket(pipeline, socketId);
   return Boolean(socket && isMateriaSocket(socket) && isGeneratorMateria(config.materia[socket.materia]));
+}
+
+function isParallelGeneratorPipelineSocket(config: PiMateriaConfig, pipeline: MateriaPipelineConfig, socketId: string): boolean {
+  const socket = getLoadoutSocket(pipeline, socketId);
+  return Boolean(socket && isMateriaSocket(socket) && isParallelGeneratorMateria(config.materia[socket.materia]));
 }
 
 function validateGeneratorSocketContracts(config: PiMateriaConfig, effective: EffectiveMateriaPipelineConfig): void {

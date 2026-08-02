@@ -1,6 +1,8 @@
 import { HANDOFF_EDGE_CONDITIONS } from "../handoff/handoffContract.js";
 import { validateParallelSafeMateria } from "../domain/parallelSafety.js";
 import { validateMateriaLoopParallelConfig } from "../domain/parallelLoop.js";
+import { deriveParallelBranchRegions } from "./parallelRegions.js";
+import { isParallelGeneratorMateria } from "./generator.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSocketIdSet, loopSockets, materializeCanonicalSockets } from "../loadout/loadoutAccessors.js";
 import { classifyGraphTarget, formatInvalidSocketIdMessage, isCanonicalSocketId } from "../domain/socket.js";
 import type { MateriaAdvanceConfig, MateriaConfig, MateriaEdgeCondition, MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopExitConfig, MateriaLoopExitRouteConfig, MateriaPipelineConfig, MateriaPipelineSocketConfig } from "../types.js";
@@ -28,6 +30,8 @@ export interface MateriaGraphValidationOptions {
   materia?: Record<string, MateriaConfig>;
   /** Optional direct child-safety predicate for adapters that resolve materia elsewhere. */
   isParallelSafeSocket?: (socketId: string) => boolean;
+  /** Parallel capability predicate. Regions are derived from these generators, never from loop metadata. */
+  isParallelGeneratorSocket?: (socketId: string) => boolean;
   /** Optional parallel-plan producer predicate for normalizer utilities. */
   isParallelPlanProducerSocket?: (socketId: string) => boolean;
   /** Alias for callers that model the normalizer explicitly. */
@@ -59,6 +63,17 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
   const normalized = normalizePipelineGraph(graph);
   const errors: MateriaGraphValidationError[] = [];
   const socketIds = loadoutSocketIdSet(normalized);
+  const catalogParallelPredicate = options.materia
+    ? (socketId: string) => {
+        const materiaId = getLoadoutSocket(normalized, socketId)?.materia;
+        return typeof materiaId === "string" && isParallelGeneratorMateria(options.materia?.[materiaId]);
+      }
+    : undefined;
+  const derivedParallelPredicate = options.isParallelGeneratorSocket
+    ?? (catalogParallelPredicate && [...socketIds].some(catalogParallelPredicate) ? catalogParallelPredicate : undefined);
+  const validationOptions = derivedParallelPredicate
+    ? { ...options, isParallelGeneratorSocket: derivedParallelPredicate }
+    : options;
 
   for (const id of socketIds) validateSocketId(errors, id, `sockets.${id}`);
   validateSocketReference(errors, socketIds, graph.entry, "entry");
@@ -68,8 +83,15 @@ export function validatePipelineGraph(graph: MateriaPipelineConfig, options: Mat
     validateSocketLinks(id, socket, errors, socketIds);
     if (errors.length === errorCountBeforeSocket) validateOutgoingEdgeConditions(id, socket.edges ?? [], errors);
   }
-  validateLoops(normalized, errors, socketIds, options);
-  validateParallelRegionInteractions(normalized, errors, socketIds);
+  validateLoops(normalized, errors, socketIds, validationOptions);
+  if (derivedParallelPredicate) {
+    const regions = deriveParallelBranchRegions(normalized, { isParallelGeneratorSocket: derivedParallelPredicate });
+    if (!regions.ok) {
+      for (const issue of regions.issues) errors.push({ code: "invalid-loop", source: issue.path, message: issue.message });
+    }
+  } else {
+    validateParallelRegionInteractions(normalized, errors, socketIds);
+  }
 
   // Materia graphs are workflow state machines, not DAGs: transitions may
   // intentionally revisit earlier sockets (for example Build -> Eval -> Maintain
@@ -171,9 +193,12 @@ function validateLoops(graph: MateriaPipelineConfig, errors: MateriaGraphValidat
     const exitIsValid = validateLoopExit(errors, socketIds, loopId, sockets, loop.exit);
     validateLoopExitRoutes(errors, socketIds, loopId, sockets, loop.exits);
     const parallelMetadataIsValid = parallelMetadataIssues.length === 0;
-    if (loop.parallel && parallelMetadataIsValid && loopSocketsAreValid) {
+    const derivedParallelConsumer = Boolean(loop.consumes && options.isParallelGeneratorSocket?.(loop.consumes.from));
+    if (!options.isParallelGeneratorSocket && loop.parallel && parallelMetadataIsValid && loopSocketsAreValid) {
+      // Compatibility validation for callers that have not supplied materia
+      // capability information. Runtime resolution always uses derived regions.
       validateParallelLoopTopology(graph, errors, loopId, sockets, loop.consumes, loop.exit, loop.exits, options);
-    } else if (!loop.parallel && loop.consumes && consumesFromIsValid && loopSocketsAreValid) {
+    } else if (!derivedParallelConsumer && loop.consumes && consumesFromIsValid && loopSocketsAreValid) {
       validateLoopTopology(graph, errors, loopId, sockets, loop.consumes.from, options);
     }
     if (loop.consumes && loopSocketsAreValid && exitIsValid) validateExecutableLoopSemantics(graph, errors, loopId, sockets, loop.consumes, loop.exit);

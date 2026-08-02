@@ -785,7 +785,7 @@ export interface MateriaLoopConfig {
   iterator?: MateriaForeachConfig;
   /** Optional documented exit edge/condition. */
   exit?: MateriaLoopExitConfig;
-  /** Optional experimental parallel coordinator metadata. Omitted means sequential execution. */
+  /** Optional concurrency override used only when a consuming generator declares parallel: true. */
   parallel?: MateriaLoopParallelConfig;
   /**
    * Canonical loop-owned routes followed after the loop exits.

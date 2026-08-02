@@ -18,6 +18,7 @@ import type {
 } from "../application/parallelArtifacts.js";
 import { addUsage } from "../telemetry/usage.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
+import { parallelBranchRegionForEntry } from "../graph/parallelRegions.js";
 import {
   applyParallelFanInProvenanceToCastState,
   applyParallelFinalizationToCastState,
@@ -2112,16 +2113,12 @@ function validateDispatchConfig(config: EffectiveParallelConcurrencyConfig): voi
   }
 }
 
-/** Find the opt-in loop owning a socket, without inferring graph routes. */
+/** Find the capability-derived region whose branch entry is this socket. */
 export function parallelLoopForSocket(
   state: MateriaCastState,
   socketId: string,
 ): { loopId: string; config: MateriaLoopParallelConfig } | undefined {
-  for (const [loopId, loop] of Object.entries(state.pipeline.loops ?? {})) {
-    if (loop.parallel && Array.isArray(loop.sockets) && loop.sockets.includes(socketId)) {
-      return { loopId, config: loop.parallel };
-    }
-  }
-  return undefined;
+  const region = parallelBranchRegionForEntry(state.pipeline, socketId);
+  return region ? { loopId: region.loopId, config: region.concurrency ?? {} } : undefined;
 }
 

@@ -21,7 +21,8 @@ export function resolveParallelMaxConcurrency(app: ParallelismConfig, loop?: Loo
 
 /**
  * Validate the persisted shape without coupling callers to a particular
- * config adapter. `undefined` is valid because parallel execution is opt-in.
+ * config adapter. `undefined` uses the app bound; generator capability, not
+ * this loop-local override, determines whether execution is parallel.
  */
 export function validateMateriaLoopParallelConfig(value: unknown, path = "parallel"): DomainIssue[] {
   if (value === undefined) return [];
