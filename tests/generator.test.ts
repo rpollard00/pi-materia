@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { canonicalGeneratorConfigFor, isGeneratorMateria } from "../src/graph/generator.js";
+import { canonicalGeneratorConfigFor, isGeneratorMateria, isParallelGeneratorMateria } from "../src/graph/generator.js";
 
 import type { MateriaConfig } from "../src/types.js";
 
@@ -8,6 +8,7 @@ describe("generator helpers", () => {
     const materia: MateriaConfig = { tools: "readOnly", prompt: "Plan", generator: true };
 
     expect(isGeneratorMateria(materia)).toBe(true);
+    expect(isParallelGeneratorMateria(materia)).toBe(false);
     expect(canonicalGeneratorConfigFor(materia)).toEqual({
       output: "workItems",
       listType: "array",
@@ -16,6 +17,12 @@ describe("generator helpers", () => {
       cursor: "workItemIndex",
       done: "end",
     });
+  });
+
+  test("only enables parallel generation when both canonical capabilities are true", () => {
+    expect(isParallelGeneratorMateria({ generator: true, parallel: true })).toBe(true);
+    expect(isParallelGeneratorMateria({ generator: true })).toBe(false);
+    expect(isParallelGeneratorMateria({ parallel: true })).toBe(false);
   });
 
   test("does not activate legacy generates as runtime generator semantics", () => {

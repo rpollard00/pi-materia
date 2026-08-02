@@ -656,7 +656,7 @@
       "color": "materia-color-blue",
       "parse": "json",
       "generator": true,
-      "parallelPlanner": true,
+      "parallel": true,
       "lockState": "locked"
     },
     "Build": {

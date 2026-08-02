@@ -20,7 +20,7 @@ export interface HandoffValidationOptions {
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
   /** True only when this socket's materia is explicitly enabled as a parallel planner. */
-  parallelPlanner?: boolean;
+  parallel?: boolean;
 }
 
 export interface HandoffValidationIssue {
@@ -46,7 +46,7 @@ export function validateHandoffJsonOutput(value: unknown, options: HandoffValida
   const socketId = options.socketId ?? "unknown";
   const socketLabel = `socket "${socketId}"`;
   const requirements = options.requirements ?? (options.socket
-    ? deriveSocketOutputRequirements({ socket: options.socket, socketId, workItemsProducer: options.workItemsProducer, parallelPlanner: options.parallelPlanner })
+    ? deriveSocketOutputRequirements({ socket: options.socket, socketId, workItemsProducer: options.workItemsProducer, parallel: options.parallel })
     : undefined);
   const issues: HandoffValidationIssue[] = [];
 

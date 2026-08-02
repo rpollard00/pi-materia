@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelGeneratorMateria } from "../graph/generator.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import type {
   MateriaAgentFinalizationState,
@@ -94,7 +94,7 @@ export class AgentFinalizationRuntime<Session extends object = object> {
         socket: effectiveResolvedSocketConfig(agentSocket),
         socketId: agentSocket.id,
         workItemsProducer,
-        parallelPlanner: isParallelPlannerMateria(agentSocket.materia),
+        parallel: isParallelGeneratorMateria(agentSocket.materia),
       }),
       workItemsProducer,
       allowEventSideChannel: true,

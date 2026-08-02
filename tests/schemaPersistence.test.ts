@@ -4,9 +4,11 @@ import { describe, expect, test } from "bun:test";
 import { loadConfig, loadProfileConfig, saveMateriaConfigPatch } from "../src/config/config.js";
 import {
   domainLoadoutToPipelineConfig,
+  normalizePersistedConfigForApplication,
   normalizePersistedLoadoutForApplication,
   parsePersistedLoadout,
   pipelineConfigToDomainLoadout,
+  serializeCurrentPersistedConfig,
   serializePersistedLoadout,
   validatePersistedHandoffPayload,
 } from "../src/schema/persistence.js";
@@ -14,6 +16,21 @@ import {
 const materia = { Build: { type: "agent", tools: "coding", prompt: "build" }, Check: { type: "agent", tools: "none", prompt: "check" } };
 
 describe("schema/persistence adapters", () => {
+  test("migrates legacy parallel planner metadata and only serializes the canonical capability", () => {
+    const normalized = normalizePersistedConfigForApplication({
+      materia: {
+        Plan: { type: "agent", tools: "readOnly", prompt: "Plan", generator: true, parallelPlanner: true },
+      },
+    } as never);
+
+    expect(normalized.materia?.Plan).toMatchObject({ generator: true, parallel: true });
+    expect("parallelPlanner" in (normalized.materia?.Plan ?? {})).toBe(false);
+
+    const serialized = serializeCurrentPersistedConfig(normalized);
+    expect(serialized.materia?.Plan).toMatchObject({ generator: true, parallel: true });
+    expect("parallelPlanner" in (serialized.materia?.Plan ?? {})).toBe(false);
+  });
+
   test("requires canonical sockets payloads", () => {
     const parsed = parsePersistedLoadout({
       entry: "Socket-1",

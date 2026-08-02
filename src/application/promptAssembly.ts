@@ -1,4 +1,4 @@
-import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelGeneratorMateria } from "../graph/generator.js";
 import {
   formatEventEmissionContextText,
   formatHandoffContractDocText,
@@ -63,7 +63,7 @@ export function jsonHandoffContractInstruction(socket: ResolvedMateriaSocket): s
     socket: effectiveResolvedSocketConfig(socket),
     socketId: socket.id,
     workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
-    parallelPlanner: isParallelPlannerMateria(socket.materia),
+    parallel: isParallelGeneratorMateria(socket.materia),
   });
   return formatHandoffJsonFinalInstruction(requirements);
 }
@@ -168,8 +168,8 @@ export function formatCurrentWorkItemForPrompt(workItem: unknown, fallbackLabel?
 
 export function generatorJsonAdapterContextInstruction(state: MateriaCastState, socket: ResolvedMateriaAgentSocket): string | undefined {
   const generator = canonicalGeneratorConfigFor(socket.materia);
-  const parallelPlanner = isParallelPlannerMateria(socket.materia);
-  if (!generator && !parallelPlanner) return undefined;
+  const parallel = isParallelGeneratorMateria(socket.materia);
+  if (!generator && !parallel) return undefined;
   if (isMultiTurnResolvedAgentSocket(socket) && state.multiTurnFinalizing !== true) return undefined;
   const upstreamWorkItems = getPath(state.data, HANDOFF_WORK_ITEMS_FIELD);
   const toolBacked = isToolBackedFinalizationActive(state, socket);
@@ -182,7 +182,7 @@ export function generatorJsonAdapterContextInstruction(state: MateriaCastState, 
       ? `Call ${AGENT_HANDOFF_TOOL_NAMES.addWorkItem} once per final work item in order; do not place generated units in textual JSON or other fields.`
       : `Emit top-level ${HANDOFF_WORK_ITEMS_FIELD} as an array of work-item objects; do not place generated units in other fields.`,
     "Each generated work item must contain only title:string and context:string; put all item-specific guidance in the workItem.context text string.",
-    parallelPlanner ? "Parallel planning is enabled for this socket: also emit the required top-level parallelSchedule sidecar with version 1 and ordered streams of workItemIndexes. Stream indexes must cover every work item exactly once; do not copy lane metadata into workItems." : undefined,
+    parallel ? "Parallel planning is enabled for this socket: also emit the required top-level parallelSchedule sidecar with version 1 and ordered streams of workItemIndexes. Stream indexes must cover every work item exactly once; do not copy lane metadata into workItems." : undefined,
     Array.isArray(upstreamWorkItems) ? `Upstream generated workItems JSON for this generator stage:\n${JSON.stringify(upstreamWorkItems, null, 2)}` : undefined,
     "If upstream workItems are present, consume them as input context and transform/refine them into a new top-level workItems array.",
   ].filter(Boolean).join("\n");
@@ -418,13 +418,13 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
     socket: effectiveResolvedSocketConfig(socket),
     socketId: socket.id,
     workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
-    parallelPlanner: isParallelPlannerMateria(socket.materia),
+    parallel: isParallelGeneratorMateria(socket.materia),
   });
   const exposureMode = activeMultiTurn ? "/materia continue finalization" : "single-turn JSON sockets";
   return [
     "Canonical handoff contract context:",
     `Synthetic context exposure policy: include this concise contract summary only for ${exposureMode} that are already expected to produce final JSON. Do not expose it during multi-turn refinement; refinement turns must remain conversational until /materia continue. The authoritative final-output instructions are still injected separately by prompt assembly.`,
-    formatHandoffContractDocText({ renderableTextIntent: requirements.renderableTextIntent, parallelPlanner: requirements.parallelScheduleProducer }),
+    formatHandoffContractDocText({ renderableTextIntent: requirements.renderableTextIntent, parallel: requirements.parallelScheduleProducer }),
   ].join("\n\n");
 }
 
@@ -452,7 +452,7 @@ export function syntheticEventEmissionContext(state: MateriaCastState): string |
     socket: effectiveResolvedSocketConfig(socket),
     socketId: socket.id,
     workItemsProducer: Boolean(canonicalGeneratorConfigFor(socket.materia)),
-    parallelPlanner: isParallelPlannerMateria(socket.materia),
+    parallel: isParallelGeneratorMateria(socket.materia),
   });
   return formatEventEmissionContextText({ renderableTextIntent: requirements.renderableTextIntent });
 }

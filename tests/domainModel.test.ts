@@ -76,6 +76,23 @@ describe("pure materia/loadout domain", () => {
     expect(inferredType.ok).toBe(true);
   });
 
+  test("requires parallel generation to be an explicit generator capability and migrates its legacy marker", () => {
+    const ordinary = normalizeMateriaCatalog({ Plan: { tools: "readOnly", prompt: "Plan", generator: true } });
+    expect(ordinary.ok).toBe(true);
+    if (ordinary.ok) expect(ordinary.value.Plan.parallel).toBeUndefined();
+
+    const invalid = normalizeMateriaCatalog({ Plan: { tools: "readOnly", prompt: "Plan", parallel: true } });
+    expect(invalid.ok).toBe(false);
+    if (!invalid.ok) expect(invalid.issues).toContainEqual({ path: "materia.Plan.parallel", message: "parallel: true requires generator: true" });
+
+    const migrated = normalizeMateriaCatalog({ Plan: { tools: "readOnly", prompt: "Plan", generator: true, parallelPlanner: true } });
+    expect(migrated.ok).toBe(true);
+    if (migrated.ok) {
+      expect(migrated.value.Plan.parallel).toBe(true);
+      expect("parallelPlanner" in migrated.value.Plan).toBe(false);
+    }
+  });
+
   test("validates loadout socket references and routing conditions", () => {
     const loadout: Loadout = {
       entry: "Socket-1",

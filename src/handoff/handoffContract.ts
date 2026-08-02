@@ -181,7 +181,7 @@ export interface HandoffContractDocOptions {
    */
   renderableTextIntent?: boolean;
   /** Include the experimental sidecar only for an explicitly enabled planner. */
-  parallelPlanner?: boolean;
+  parallel?: boolean;
 }
 
 /**
@@ -202,7 +202,7 @@ export function formatHandoffContractDocText(options?: HandoffContractDocOptions
     : "generated work, graph routing, downstream prompt context, and artifacts";
   const fields = handoffFieldList(renderableTextIntent);
   const textParagraph = renderableTextIntent ? HANDOFF_TEXT_DOC_PARAGRAPH : HANDOFF_NO_TEXT_DOC_PARAGRAPH;
-  const parallelParagraph = options?.parallelPlanner
+  const parallelParagraph = options?.parallel
     ? "This socket is an explicitly enabled parallel planner. It may emit the version-1 top-level parallelSchedule sidecar: streams are ordered objects with unique non-empty names and workItemIndexes into the canonical workItems array. Every work item must appear exactly once; the sidecar is consumed by the deterministic normalizer and is not generic downstream context."
     : undefined;
 

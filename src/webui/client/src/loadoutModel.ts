@@ -160,7 +160,7 @@ export interface MateriaBehaviorConfig {
   assign?: Record<string, string>;
   foreach?: { items: string; as?: string; cursor?: string; done?: string };
   generator?: boolean;
-  parallelPlanner?: boolean;
+  parallel?: boolean;
   parallelSafe?: boolean;
   generates?: { output: string; items?: string; listType: 'array'; itemType: string; as?: string; cursor?: string; done?: string };
   [key: string]: unknown;
@@ -209,7 +209,7 @@ const materiaBehaviorKeys = new Set([
   'assign',
   'foreach',
   'generator',
-  'parallelPlanner',
+  'parallel',
   'parallelSafe',
   'generates',
   'model',

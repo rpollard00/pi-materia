@@ -11,7 +11,7 @@ import { assertValidPipelineGraph, normalizePipelineGraph } from "../graph/graph
 import { normalizeConfigLoadoutsForLoad, prepareConfigLoadoutsForSave, prepareLoadoutForSave } from "../loadout/loadoutNormalization.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
-import { normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
+import { normalizeMateriaParallelCapabilities, normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
 import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaFinalizationConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
@@ -269,7 +269,10 @@ export async function saveMateriaConfigPatch(cwd: string, patch: MateriaConfigPa
   rejectProtectedMateriaDeletes(patch, existing);
   rejectLockedMateriaContentSaves(patch, existing);
   const next = mergeConfigPatch(existing, patch);
-  if (next.materia) validateMateria(next.materia as Record<string, MateriaConfig>);
+  if (next.materia) {
+    next.materia = normalizeMateriaParallelCapabilities(next.materia as Record<string, unknown>) as PiMateriaConfig["materia"];
+    validateMateria(next.materia as Record<string, MateriaConfig>);
+  }
   next.loadouts = normalizeLoadoutsForSave(next.loadouts, next.materia as Record<string, MateriaConfig> | undefined);
   const materialized = withoutDeletedLoadoutMarkers(next);
   ensureCurrentLoadoutIdentity(materialized, target);
@@ -619,6 +622,7 @@ async function mergeConfigLayers(layers: Partial<PiMateriaConfig>[]): Promise<Pi
   let config = { ...base } as PiMateriaConfig;
   for (const parsed of overrides) config = mergeConfig(config, parsed, defaultLoadoutNames);
   if (!isPlainObject(config.materia)) throw new Error(`Materia config must define top-level "materia" behavior definitions.`);
+  config.materia = normalizeMateriaParallelCapabilities(config.materia as unknown as Record<string, unknown>) as PiMateriaConfig["materia"];
   validateMateria(config.materia);
   validateCompactionConfig(config.compaction);
   validateFinalizationConfig(config.finalization);
@@ -1105,9 +1109,7 @@ function validateMateria(materiaConfig: Record<string, MateriaConfig>): void {
     if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
       throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
     }
-    if (materia.parallelPlanner !== undefined && typeof materia.parallelPlanner !== "boolean") {
-      throw new Error(`Materia "${name}" has invalid parallelPlanner. Expected a boolean when configured.`);
-    }
+    validateParallelGeneratorMarker(name, materia.generator, materia.parallel);
     validateLegacyGeneratorDeclaration(name, materia.generates);
   }
 }
@@ -1134,9 +1136,7 @@ function validateUtilityMateria(name: string, materia: Record<string, unknown>):
   if (materia.generator !== undefined && typeof materia.generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
   }
-  if (materia.parallelPlanner !== undefined && typeof materia.parallelPlanner !== "boolean") {
-    throw new Error(`Materia "${name}" has invalid parallelPlanner. Expected a boolean when configured.`);
-  }
+  validateParallelGeneratorMarker(name, materia.generator, materia.parallel);
   validateLegacyGeneratorDeclaration(name, materia.generates);
 }
 
@@ -1148,6 +1148,15 @@ function validateLegacyGeneratorDeclaration(name: string, generates: unknown): v
 function validateMateriaParseMode(name: string, parse: unknown): void {
   if (parse === undefined) return;
   if (parse !== "text" && parse !== "json") throw new Error(`Materia "${name}" has unsupported parse mode "${String(parse)}". Expected "text" or "json".`);
+}
+
+function validateParallelGeneratorMarker(name: string, generator: unknown, parallel: unknown): void {
+  if (parallel !== undefined && typeof parallel !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid parallel. Expected a boolean when configured.`);
+  }
+  if (parallel === true && generator !== true) {
+    throw new Error(`Materia "${name}" configures parallel: true without generator: true. Parallel generation requires generator: true.`);
+  }
 }
 
 function validateParallelSafeMarker(name: string, parallelSafe: unknown): void {

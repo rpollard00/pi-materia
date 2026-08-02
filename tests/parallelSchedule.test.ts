@@ -24,7 +24,7 @@ function plannerRequirements() {
     socket: plannerSocket,
     socketId: "Planner",
     workItemsProducer: true,
-    parallelPlanner: true,
+    parallel: true,
   });
 }
 

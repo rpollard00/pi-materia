@@ -739,6 +739,30 @@ describe("utility pipeline sockets", () => {
     expect(() => resolvePipeline(config)).toThrow(/obsolete generates metadata.*generator: true.*workItems/s);
   });
 
+  test("resolvePipeline validates parallel generator capability for agent and utility materia", () => {
+    const resolveWithMateria = (materia: unknown) => resolvePipeline({
+      ...baseConfig,
+      loadouts: { Test: { entry: "Socket-1", sockets: { "Socket-1": { materia: "subject" } } } },
+      materia: { subject: materia as never },
+    });
+
+    expect(() => resolveWithMateria({ tools: "readOnly", prompt: "Plan.", parallel: true })).toThrow(
+      /Materia "subject" configures parallel: true without generator: true/,
+    );
+    expect(() => resolveWithMateria({ type: "utility", command: ["node", "task.js"], parallel: true })).toThrow(
+      /Materia "subject" configures parallel: true without generator: true/,
+    );
+    expect(() => resolveWithMateria({ tools: "readOnly", prompt: "Plan.", generator: true, parallel: "yes" })).toThrow(
+      /Materia "subject" has invalid parallel\. Expected a boolean/,
+    );
+    expect(() => resolveWithMateria({ type: "utility", command: ["node", "task.js"], generator: true, parallel: "yes" })).toThrow(
+      /Materia "subject" has invalid parallel\. Expected a boolean/,
+    );
+
+    expect(resolveWithMateria({ tools: "readOnly", prompt: "Plan.", generator: true, parallel: true }).entry.materia).toMatchObject({ generator: true, parallel: true });
+    expect(resolveWithMateria({ type: "utility", command: ["node", "task.js"], generator: true, parallel: true }).entry.materia).toMatchObject({ generator: true, parallel: true });
+  });
+
   test("rejects malformed multiTurn values on materia", () => {
     const config: PiMateriaConfig = {
       ...baseConfig,

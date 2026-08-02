@@ -149,7 +149,9 @@ export function normalizePersistedLoadoutForApplication(value: unknown, materia:
 }
 
 export function parseCurrentPersistedConfig(config: CurrentPersistedConfig): Partial<PiMateriaConfig> {
-  const materia = isPlainObject(config.materia) ? config.materia as PiMateriaConfig["materia"] : undefined;
+  const materia = isPlainObject(config.materia)
+    ? normalizeMateriaParallelCapabilities(config.materia) as PiMateriaConfig["materia"]
+    : undefined;
   const budget = normalizeBudgetConfig(config.budget);
   return {
     ...(config.artifactDir !== undefined ? { artifactDir: config.artifactDir } : {}),
@@ -176,7 +178,7 @@ export function serializeCurrentPersistedConfig(config: Partial<PiMateriaConfig>
     ...(config.loadouts !== undefined ? { loadouts: Object.fromEntries(Object.entries(config.loadouts as Record<string, MateriaPipelineConfig | null>).map(([name, loadout]) => [name, loadout === null ? null : serializePipelineLoadout(loadout)])) } : {}),
     ...(config.activeLoadoutId !== undefined ? { activeLoadoutId: config.activeLoadoutId } : {}),
     ...(config.activeLoadout !== undefined ? { activeLoadout: config.activeLoadout } : {}),
-    ...(config.materia !== undefined ? { materia: cloneRecord(config.materia) } : {}),
+    ...(config.materia !== undefined ? { materia: normalizeMateriaParallelCapabilities(config.materia) } : {}),
     ...(config.eventing !== undefined ? { eventing: config.eventing === undefined ? null : cloneRecord(config.eventing) as EventingConfig } : {}),
   };
 }
@@ -190,6 +192,22 @@ export function serializeCurrentProfileConfig(profile: MateriaProfileConfig): Cu
     ...(profile.defaultSaveTarget !== undefined ? { defaultSaveTarget: profile.defaultSaveTarget } : {}),
     ...(profile.roleGeneration !== undefined ? { roleGeneration: cloneRecord(profile.roleGeneration) } : {}),
   };
+}
+
+/**
+ * Canonicalize the experimental parallelPlanner marker at persistence
+ * boundaries. Canonical parallel always wins and the legacy key is never
+ * returned, so subsequent saves cannot write it back.
+ */
+export function normalizeMateriaParallelCapabilities(value: Record<string, unknown>): Record<string, MateriaConfig | null> {
+  return Object.fromEntries(Object.entries(value).map(([id, raw]) => {
+    if (!isPlainObject(raw)) return [id, raw as MateriaConfig | null];
+    const { parallelPlanner, ...definition } = raw;
+    if (definition.parallel === undefined && parallelPlanner !== undefined && parallelPlanner !== false) {
+      definition.parallel = parallelPlanner;
+    }
+    return [id, cloneRecord(definition) as unknown as MateriaConfig];
+  }));
 }
 
 export function validatePersistedHandoffPayload(value: unknown, path = "handoff"): DomainResult<HandoffObject> {

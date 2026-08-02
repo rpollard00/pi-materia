@@ -196,6 +196,7 @@ function validateAgentMateriaEntry(name: string, materia: MateriaConfig): assert
   validateParallelSafeMarker(name, rawMateria.parallelSafe);
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
+  validateParallelGeneratorMarker(name, rawMateria.generator, rawMateria.parallel);
   validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
 }
 
@@ -210,12 +211,22 @@ function validateUtilityMateriaEntry(name: string, rawMateria: Record<string, un
   validateParallelSafeMarker(name, rawMateria.parallelSafe);
   validateMateriaParseMode(name, rawMateria.parse);
   validateGeneratorMarker(name, rawMateria.generator);
+  validateParallelGeneratorMarker(name, rawMateria.generator, rawMateria.parallel);
   validateObsoleteGeneratorDeclaration(name, rawMateria.generates);
 }
 
 function validateGeneratorMarker(name: string, generator: unknown): void {
   if (generator !== undefined && typeof generator !== "boolean") {
     throw new Error(`Materia "${name}" has invalid generator. Expected a boolean when configured.`);
+  }
+}
+
+function validateParallelGeneratorMarker(name: string, generator: unknown, parallel: unknown): void {
+  if (parallel !== undefined && typeof parallel !== "boolean") {
+    throw new Error(`Materia "${name}" has invalid parallel. Expected a boolean when configured.`);
+  }
+  if (parallel === true && generator !== true) {
+    throw new Error(`Materia "${name}" configures parallel: true without generator: true. Parallel generation requires generator: true.`);
   }
 }
 

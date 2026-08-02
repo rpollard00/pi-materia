@@ -189,13 +189,13 @@ export function useLoadoutGraphMutationController({
       },
       isParallelPlanProducerSocket: (socketId) => {
         const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
-        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallelPlanner?: boolean } : undefined;
-        return definition?.parallelPlanner === true;
+        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallel?: boolean } : undefined;
+        return definition?.parallel === true;
       },
       isNormalizerSocket: (socketId) => {
         const referenced = extractMateriaReference(activeLoadout.sockets?.[socketId]);
-        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallelPlanner?: boolean } : undefined;
-        return definition?.parallelPlanner === true;
+        const definition = referenced ? materia[referenced.materia] as PipelineSocket & { parallel?: boolean } : undefined;
+        return definition?.parallel === true;
       },
       materia: materia as never,
     });

@@ -45,7 +45,7 @@ export interface SocketOutputRequirementsInput {
   /** True when normalized graph semantics identify this socket as a workItems-producing generator/planner. */
   workItemsProducer?: boolean;
   /** True only for a materia explicitly enabled as the parallel planner. */
-  parallelPlanner?: boolean;
+  parallel?: boolean;
   /**
    * Explicit renderable-text intent metadata. When true, the socket expects a
    * top-level renderable `text` payload even when no assignment consumes
@@ -105,7 +105,7 @@ export function deriveSocketOutputRequirements(input: SocketOutputRequirementsIn
 
   const consumedPayloadPaths = deriveConsumedPayloadPaths(input.socket.assign);
   const renderableTextIntent = deriveRenderableTextIntent(consumedPayloadPaths, input.renderableTextIntent);
-  const parallelScheduleProducer = input.parallelPlanner === true;
+  const parallelScheduleProducer = input.parallel === true;
   const requiredFields = new Map<string, SocketOutputFieldRequirement>();
 
   if (socketConsumesSatisfied(input.socket)) {

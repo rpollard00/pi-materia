@@ -1,4 +1,4 @@
-import { canonicalGeneratorConfigFor, isParallelPlannerMateria } from "../graph/generator.js";
+import { canonicalGeneratorConfigFor, isParallelGeneratorMateria } from "../graph/generator.js";
 import { recordParallelFinalization } from "../domain/parallelRun.js";
 import type { MateriaParallelFinalizationProvenance, MateriaParallelRevisionIdentity } from "../domain/parallelRunTypes.js";
 import {
@@ -43,7 +43,7 @@ export function applyGenericHandoffEnvelope(state: MateriaCastState, parsed: unk
   // normalizer. Keep it in an explicit state slot, never in the generic
   // handoff envelope/context mirror; prompt assembly redacts this slot from
   // ordinary downstream agent context.
-  if (isParallelPlannerMateria(socket?.materia) && isParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD])) {
+  if (isParallelGeneratorMateria(socket?.materia) && isParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD])) {
     state.data[PARALLEL_SCHEDULE_FIELD] = cloneParallelSchedule(parsed[PARALLEL_SCHEDULE_FIELD]);
   }
 }
@@ -131,5 +131,5 @@ function hasOwn(value: Record<string, unknown>, field: string): boolean {
 
 function shouldAdoptEnvelopeWorkItems(state: MateriaCastState, socket?: ResolvedMateriaSocket): boolean {
   if (!Array.isArray(state.data.workItems) || state.data.workItems.length === 0) return true;
-  return Boolean(socket && (canonicalGeneratorConfigFor(socket.materia)?.output === "workItems" || isParallelPlannerMateria(socket.materia)));
+  return Boolean(socket && (canonicalGeneratorConfigFor(socket.materia)?.output === "workItems" || isParallelGeneratorMateria(socket.materia)));
 }

@@ -813,7 +813,7 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8")) as {
       activeLoadout?: string;
       loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown }> }>;
-      materia?: Record<string, { lockState?: string; generator?: boolean; parallelPlanner?: boolean; parallelSafe?: boolean }>;
+      materia?: Record<string, { lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean }>;
     };
     const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
     expect(rawDefault.activeLoadout).toBe("Full-Auto");
@@ -828,7 +828,7 @@ describe("config loadouts", () => {
     for (const id of ["Parallel-Plan", "Parallel-Integration-Eval", "Parallel-Resolver"]) {
       expect(rawDefault.materia?.[id]?.lockState, id).toBe("locked");
     }
-    expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallelPlanner: true });
+    expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
     for (const id of ["Build", "Auto-Eval", "Parallel-Lane-Checkpoint"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
     }
@@ -853,7 +853,7 @@ describe("config loadouts", () => {
       loaded.config.activeLoadout = "Parallel-Experimental";
       const pipeline = resolvePipeline(loaded.config);
       expect(pipeline.entry.id).toBe("Socket-1");
-      expect(pipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallelPlanner: true });
+      expect(pipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallel: true });
       expect(pipeline.sockets["Socket-5"].materiaId).toBe("Normalize-Parallel-Streams");
       expect(pipeline.loops?.parallelWork?.parallel).toMatchObject({ planInput: "state.parallelPlan", maxConcurrency: 2, workspaceMode: "jj" });
       expect(pipeline.loops?.parallelWork?.exits).toEqual(expect.arrayContaining([
