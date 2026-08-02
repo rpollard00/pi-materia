@@ -6,6 +6,7 @@ import { applyEventingEnvOverlay, clearStaleQuestDefaultLoadoutPreference, getUs
 import { resolveShippedUtilityScriptPath } from "../src/config/shippedUtilities.js";
 import { resolveToolScope } from "../src/domain/toolScope.js";
 import { HANDOFF_CONTRACT_PROMPT_TEXT } from "../src/handoff/handoffContract.js";
+import { parallelLoopForSocket } from "../src/runtime/parallelDispatcher.js";
 import { effectiveResolvedSocketConfig } from "../src/runtime/resolvedMateria.js";
 import { getEffectivePipelineConfig, renderGrid, resolvePipeline } from "../src/runtime/pipeline.js";
 import { paletteColors } from "../src/webui/client/src/loadoutModel.js";
@@ -812,14 +813,18 @@ describe("config loadouts", () => {
   test("ships the opt-in locked parallel workflow without changing the active default", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8")) as {
       activeLoadout?: string;
-      loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown }> }>;
-      materia?: Record<string, { lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean }>;
+      loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown; consumes?: { from?: string }; exit?: { to?: string } }> }>;
+      materia?: Record<string, { lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean; type?: string; tools?: string; parse?: string }>;
     };
     const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
     expect(rawDefault.activeLoadout).toBe("Full-Auto");
     expect(experimental).toMatchObject({ id: "default:parallel-experimental", lockState: "locked" });
     expect(rawDefault.parallelism).toEqual({ maxConcurrency: 2 });
-    expect(experimental?.loops?.parallelWork?.parallel).toEqual({});
+    expect(experimental?.loops?.parallelWork).toMatchObject({
+      consumes: { from: "Socket-4" },
+      exit: { to: "Socket-9" },
+    });
+    expect(experimental?.loops?.parallelWork?.parallel).toBeUndefined();
     for (const id of ["Parallel-Plan", "Integration-Review"]) {
       expect(rawDefault.materia?.[id]?.lockState, id).toBe("locked");
     }
@@ -827,7 +832,7 @@ describe("config loadouts", () => {
     expect(rawDefault.materia?.["Parallel-Resolver"]).toBeUndefined();
     expect(rawDefault.materia?.["Integration-Review"]).toMatchObject({ type: "agent", tools: "coding", parse: "json" });
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
-    for (const id of ["Build", "Auto-Eval", "Parallel-Lane-Checkpoint"]) {
+    for (const id of ["Spawn-JJ-Workspace", "Build", "Auto-Eval", "Blackbelt-Maintain"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
     }
 
@@ -852,22 +857,54 @@ describe("config loadouts", () => {
       const pipeline = resolvePipeline(loaded.config);
       expect(pipeline.entry.id).toBe("Socket-1");
       expect(pipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallel: true });
-      expect(pipeline.sockets["Socket-5"].materiaId).toBe("Normalize-Parallel-Streams");
-      expect(pipeline.loops?.parallelWork?.parallel).toEqual({});
-      expect(loaded.config.parallelism).toEqual({ maxConcurrency: 2 });
-      expect(pipeline.loops?.parallelWork?.exits).toEqual(expect.arrayContaining([
+      expect(pipeline.sockets["Socket-5"].materiaId).toBe("Spawn-JJ-Workspace");
+      expect(pipeline.loops?.parallelWork?.parallel).toBeUndefined();
+      // Runtime activation comes from the generator-derived region; absent
+      // loop metadata means app-default concurrency, not sequential execution.
+      expect(parallelLoopForSocket({ pipeline } as any, "Socket-5")).toEqual({ loopId: "parallelWork" });
+      expect(parallelLoopForSocket({ pipeline } as any, "Socket-6")).toBeUndefined();
+      expect(pipeline.loops?.parallelWork).toMatchObject({
+        consumes: { from: "Socket-4", output: "workItems" },
+        exit: { from: "Socket-8", when: "satisfied", to: "Socket-9" },
+      });
+      expect(pipeline.loops?.parallelWork?.exits).toEqual([
         expect.objectContaining({ condition: "satisfied", targetSocketId: "Socket-9" }),
-        expect.objectContaining({ condition: "not_satisfied", targetSocketId: "Socket-9" }),
+      ]);
+      expect(loaded.config.parallelism).toEqual({ maxConcurrency: 2 });
+      expect(pipeline.sockets["Socket-8"].materiaId).toBe("Blackbelt-Maintain");
+      expect(pipeline.sockets["Socket-9"].materiaId).toBe("Integrate-JJ-Workspaces");
+      expect(pipeline.sockets["Socket-10"].materia).toMatchObject({ type: "agent", tools: "coding" });
+      expect(pipeline.sockets["Socket-10"].socket.edges).toEqual(expect.arrayContaining([
+        expect.objectContaining({ when: "satisfied", to: "Socket-11" }),
+        expect.objectContaining({ when: "not_satisfied", to: "Socket-10" }),
       ]));
-      expect(pipeline.sockets["Socket-9"].materia).toMatchObject({ type: "agent", tools: "coding" });
-      expect(pipeline.sockets["Socket-9"].socket.edges).toEqual(expect.arrayContaining([
-        expect.objectContaining({ when: "satisfied", to: "Socket-10" }),
-        expect.objectContaining({ when: "not_satisfied", to: "Socket-9" }),
-      ]));
-      expect(pipeline.sockets["Socket-10"].materiaId).toBe("Parallel-Finalize");
-      expect(pipeline.sockets["Socket-6"].materia).toMatchObject({ parallelSafe: true });
-      expect(pipeline.sockets["Socket-7"].materia).toMatchObject({ parallelSafe: true });
-      expect(pipeline.sockets["Socket-8"].materia).toMatchObject({ parallelSafe: true });
+      expect(pipeline.sockets["Socket-11"].materiaId).toBe("Finalize-JJ-Workspace");
+      expect(pipeline.sockets["Socket-12"].socket.materia).toBe("Narrate");
+      for (const id of ["Socket-5", "Socket-6", "Socket-7", "Socket-8"]) {
+        expect(pipeline.sockets[id].materia, id).toMatchObject({ parallelSafe: true });
+      }
+
+      // The workspace utilities are not coupled to intrinsic dispatch. In the
+      // equivalent ordinary-generator composition, one workspace is spawned
+      // before planning and the generator enters the work loop directly.
+      delete loaded.config.materia["Parallel-Plan"].parallel;
+      const sequentialLoadout = loaded.config.loadouts!["Parallel-Experimental"]!;
+      sequentialLoadout.sockets["Socket-3"]!.edges = [{ when: "always", to: "Socket-5" }];
+      sequentialLoadout.sockets["Socket-5"]!.edges = [{ when: "always", to: "Socket-4" }];
+      sequentialLoadout.sockets["Socket-4"]!.edges = [{ when: "always", to: "Socket-6" }];
+      const sequential = resolvePipeline(loaded.config);
+      expect(sequential.sockets["Socket-4"].materia).toMatchObject({ generator: true });
+      expect(sequential.sockets["Socket-4"].materia.parallel).toBeUndefined();
+      expect(["Socket-5", "Socket-8", "Socket-9", "Socket-10", "Socket-11", "Socket-12"].map(
+        (id) => sequential.sockets[id].socket.materia,
+      )).toEqual([
+        "Spawn-JJ-Workspace",
+        "Blackbelt-Maintain",
+        "Integrate-JJ-Workspaces",
+        "Integration-Review",
+        "Finalize-JJ-Workspace",
+        "Narrate",
+      ]);
     } finally {
       if (previous === undefined) delete process.env.PI_MATERIA_PROFILE_DIR;
       else process.env.PI_MATERIA_PROFILE_DIR = previous;

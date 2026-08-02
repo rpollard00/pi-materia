@@ -251,10 +251,10 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
     const hasItem = setCurrentItem(state, socket);
     const loop = loopIteratorForSocket(state.pipeline, socket.id);
 
-    // An opted-in loop is entered once by the parent coordinator. The
-    // dispatcher owns all member sockets after this boundary; returning here
-    // is what prevents the parent from starting the first lane socket as a
-    // normal sequential socket.
+    // An intrinsically derived parallel region is entered once by the parent
+    // coordinator. The dispatcher owns its prelude and loop sockets after this
+    // boundary; returning here prevents the parent from starting the first
+    // branch socket as a normal sequential socket.
     const parallelRegion = parallelLoopForSocket(state, socket.id);
     if (parallelRegion) {
       if (!deps.parallel) {

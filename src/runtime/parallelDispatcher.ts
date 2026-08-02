@@ -654,11 +654,14 @@ export class ParallelLoopDispatcher {
   }
 }
 
-export function parallelLoopForSocket(state: MateriaCastState, socketId: string): { loopId: string; config: NonNullable<MateriaCastState["pipeline"]["loops"]>[string]["parallel"] } | undefined {
+export function parallelLoopForSocket(state: MateriaCastState, socketId: string): {
+  loopId: string;
+  config?: NonNullable<MateriaCastState["pipeline"]["loops"]>[string]["parallel"];
+} | undefined {
   const region = parallelBranchRegionForEntry(state.pipeline, socketId);
   if (!region) return undefined;
   const config = state.pipeline.loops?.[region.loopId]?.parallel;
-  return config ? { loopId: region.loopId, config } : undefined;
+  return { loopId: region.loopId, ...(config ? { config } : {}) };
 }
 
 export function createParallelLoopDispatcher(deps: ParallelLoopDispatcherDependencies): ParallelLoopDispatcher { return new ParallelLoopDispatcher(deps); }

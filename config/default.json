@@ -465,33 +465,18 @@
       "loops": {
         "parallelWork": {
           "consumes": {
-            "from": "Socket-5",
+            "from": "Socket-4",
             "output": "workItems"
           },
           "exit": {
             "from": "Socket-8",
             "when": "satisfied",
-            "to": "end"
+            "to": "Socket-9"
           },
-          "parallel": {},
           "sockets": [
             "Socket-6",
             "Socket-7",
             "Socket-8"
-          ],
-          "exits": [
-            {
-              "id": "parallel-integration-clean",
-              "from": "Socket-8",
-              "condition": "satisfied",
-              "targetSocketId": "Socket-9"
-            },
-            {
-              "id": "parallel-integration-conflict",
-              "from": "Socket-8",
-              "condition": "not_satisfied",
-              "targetSocketId": "Socket-9"
-            }
           ]
         }
       },
@@ -538,7 +523,7 @@
         },
         "Socket-5": {
           "socketKind": "normal",
-          "materia": "Normalize-Parallel-Streams",
+          "materia": "Spawn-JJ-Workspace",
           "edges": [
             {
               "when": "always",
@@ -575,7 +560,7 @@
         },
         "Socket-8": {
           "socketKind": "normal",
-          "materia": "Parallel-Lane-Checkpoint",
+          "materia": "Blackbelt-Maintain",
           "edges": [
             {
               "when": "always",
@@ -585,31 +570,41 @@
         },
         "Socket-9": {
           "socketKind": "normal",
-          "materia": "Integration-Review",
-          "parse": "json",
+          "materia": "Integrate-JJ-Workspaces",
           "edges": [
             {
-              "when": "satisfied",
+              "when": "always",
               "to": "Socket-10"
-            },
-            {
-              "when": "not_satisfied",
-              "to": "Socket-9",
-              "maxTraversals": 3
             }
           ]
         },
         "Socket-10": {
           "socketKind": "normal",
-          "materia": "Parallel-Finalize",
+          "materia": "Integration-Review",
+          "parse": "json",
           "edges": [
             {
-              "when": "always",
+              "when": "satisfied",
               "to": "Socket-11"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-10",
+              "maxTraversals": 3
             }
           ]
         },
         "Socket-11": {
+          "socketKind": "normal",
+          "materia": "Finalize-JJ-Workspace",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-12"
+            }
+          ]
+        },
+        "Socket-12": {
           "socketKind": "normal",
           "materia": "Narrate",
           "parse": "text"
