@@ -764,10 +764,11 @@
     "Blackbelt-Maintain": {
       "type": "utility",
       "label": "Blackbelt-Maintain",
-      "description": "Autonomously checkpoint accepted work items using jj only (no git fallback). Reads state.blackbeltBootstrap.bookmarkName and advances the blackbelt/ bookmark with each checkpoint.",
+      "description": "Autonomously checkpoint accepted work items using jj only (no git fallback). Uses the active execution scope cwd and branch-local Blackbelt bookmark, rejecting parallel use of a shared cast bookmark.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
+      "parallelSafe": true,
       "script": {
         "kind": "shippedUtility",
         "name": "blackbelt-maintain.mjs",

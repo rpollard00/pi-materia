@@ -4,8 +4,10 @@
  *
  * Input scope (tightly constrained):
  *   - item.title          → jj describe message
- *   - cwd                 → working directory for jj commands
- *   - state.blackbeltBootstrap.bookmarkName → bootstrap-owned bookmark target
+ *   - executionScope.cwd → working directory for jj commands
+ *   - executionScope.state.blackbeltBootstrap.bookmarkName → scope-owned bookmark
+ *
+ * Legacy direct invocations without executionScope continue to use cwd/state.
  *
  * Explicitly NOT coupled to:
  *   - Runtime cast status (phase, active, failedReason, socketState, etc.)
@@ -33,15 +35,28 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB — handles large repos with many 
 try {
   const input = await readStdinJson();
   const title = input.item != null && typeof input.item === "object" ? input.item.title : null;
-  const cwd = typeof input.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd();
+  const scope = resolveActiveScope(input);
+  const cwd = scope?.cwd ?? (typeof input.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd());
 
-  // Determine bookmark name early so every result context can include it.
-  // Bootstrap owns bookmark naming; maintain must not invent replacements.
-  const bookmarkName = resolveBookmarkName(input);
+  // Scope-local bookmark state is authoritative when present. The cast-level
+  // bootstrap state remains a compatibility fallback for sequential base
+  // scopes; parallel safety below rejects that shared fallback in branches.
+  const bookmarkName = resolveBookmarkName(input, scope);
   if (bookmarkName === null) {
     writeStdoutJson({
       satisfied: false,
-      context: "Blackbelt-Maintain: missing state.blackbeltBootstrap.bookmarkName. Run Blackbelt-Bootstrap first so maintain can advance the bootstrap-owned bookmark.",
+      context: scope
+        ? "Blackbelt-Maintain: missing executionScope.state.blackbeltBootstrap.bookmarkName. Provision the active scope before maintenance."
+        : "Blackbelt-Maintain: missing state.blackbeltBootstrap.bookmarkName. Run Blackbelt-Bootstrap first so maintain can advance the bootstrap-owned bookmark.",
+    });
+    process.exit(0);
+  }
+
+  const unsafeReason = unsafeParallelInvocation(input, scope, bookmarkName);
+  if (unsafeReason !== null) {
+    writeStdoutJson({
+      satisfied: false,
+      context: `Blackbelt-Maintain: unsafe parallel invocation: ${unsafeReason} [bookmark: ${bookmarkName}]`,
     });
     process.exit(0);
   }
@@ -118,11 +133,41 @@ async function moveBookmark(bookmarkName, cwd) {
   }
 }
 
-function resolveBookmarkName(input) {
-  const state = input.state != null && typeof input.state === "object" ? input.state : {};
-  const bbState = state.blackbeltBootstrap != null && typeof state.blackbeltBootstrap === "object" ? state.blackbeltBootstrap : {};
-  if (typeof bbState.bookmarkName === "string" && bbState.bookmarkName.trim().length > 0) {
-    return bbState.bookmarkName.trim();
+function resolveActiveScope(input) {
+  const scope = input.executionScope;
+  if (scope == null || typeof scope !== "object" || Array.isArray(scope)) return null;
+  if (typeof scope.cwd !== "string" || scope.cwd.trim().length === 0) return null;
+  return scope;
+}
+
+function bookmarkFromState(state) {
+  const record = state != null && typeof state === "object" && !Array.isArray(state) ? state : {};
+  const bbState = record.blackbeltBootstrap != null && typeof record.blackbeltBootstrap === "object" && !Array.isArray(record.blackbeltBootstrap)
+    ? record.blackbeltBootstrap
+    : {};
+  return typeof bbState.bookmarkName === "string" && bbState.bookmarkName.trim().length > 0
+    ? bbState.bookmarkName.trim()
+    : null;
+}
+
+function resolveBookmarkName(input, scope) {
+  return bookmarkFromState(scope?.state) ?? bookmarkFromState(input.state);
+}
+
+function unsafeParallelInvocation(input, scope, bookmarkName) {
+  const state = input.state != null && typeof input.state === "object" && !Array.isArray(input.state) ? input.state : {};
+  const parallel = (state.parallelRun != null && typeof state.parallelRun === "object")
+    || (state.parallelLane != null && typeof state.parallelLane === "object");
+  if (!parallel) return null;
+  if (scope === null) return "parallel maintenance requires an explicit active execution scope";
+
+  const inheritedBookmark = bookmarkFromState(state);
+  // Production child casts intentionally omit the parent's bootstrap state.
+  // In that shape, an explicit active scope with its own bookmark is the only
+  // bookmark authority and is safe to maintain. Reject only a bookmark that
+  // can actually be identified as the shared cast bookmark.
+  if (inheritedBookmark !== null && inheritedBookmark === bookmarkName) {
+    return "the active scope still uses the shared cast bookmark; provision a branch-local scope and bookmark first";
   }
   return null;
 }

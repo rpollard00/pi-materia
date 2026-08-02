@@ -416,6 +416,126 @@ describe("Blackbelt utility scripts", () => {
     expect(lines.some((l) => l === "new")).toBe(true);
   });
 
+  test("maintain uses active-scope cwd and branch-local bookmark state", async () => {
+    const fake = await makeFakeJj();
+    const scopeCwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-scope-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        cwd: path.join(scopeCwd, "wrong-cast-cwd"),
+        state: {
+          blackbeltBootstrap: { bookmarkName: "blackbelt/shared-cast" },
+          parallelRun: { laneId: "lane-api" },
+        },
+        executionScope: {
+          id: "cast:parent:base:branch:loop:lane-api:jj-workspace:api",
+          cwd: scopeCwd,
+          state: { blackbeltBootstrap: { bookmarkName: "blackbelt/branch-api" } },
+          exports: {},
+        },
+        item: { title: "fix: branch checkpoint" },
+      },
+      { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, JJ_DIRTY: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
+    expect(result.json.context).toContain("blackbelt/branch-api");
+    const commands = await readFile(fake.log, "utf8");
+    expect(commands).toContain("describe -m fix: branch checkpoint");
+    expect(commands).toContain("bookmark set blackbelt/branch-api --revision @");
+    expect(commands.trim().endsWith("new")).toBe(true);
+  });
+
+  test("maintain accepts a production parallel child with only a scope-local bookmark", async () => {
+    const fake = await makeFakeJj();
+    const scopeCwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-child-scope-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        state: {
+          parallelRun: { runId: "parallel-run", loopId: "work-loop" },
+          parallelLane: { laneId: "lane-api", streamIndex: 0 },
+        },
+        executionScope: {
+          id: "cast:child:base:branch:work-loop:lane-api:jj-workspace:api",
+          cwd: scopeCwd,
+          state: { blackbeltBootstrap: { bookmarkName: "blackbelt/branch-api" } },
+          exports: {
+            "jj.workspace.integration": {
+              producer: "Spawn-JJ-Workspace",
+              value: { bookmarkName: "blackbelt/branch-api", workspacePath: scopeCwd },
+            },
+          },
+        },
+        item: { title: "fix: production child checkpoint" },
+      },
+      { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, JJ_DIRTY: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
+    expect(result.json.context).toContain("blackbelt/branch-api");
+    const commands = await readFile(fake.log, "utf8");
+    expect(commands).toContain("describe -m fix: production child checkpoint");
+    expect(commands).toContain("bookmark set blackbelt/branch-api --revision @");
+    expect(commands.trim().endsWith("new")).toBe(true);
+  });
+
+  test("maintain preserves cast bootstrap fallback for a sequential base scope", async () => {
+    const fake = await makeFakeJj();
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-base-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        cwd,
+        state: { blackbeltBootstrap: { bookmarkName: "blackbelt/sequential" } },
+        executionScope: {
+          id: "cast:sequential:base",
+          cwd,
+          state: {},
+          exports: {},
+        },
+        item: { title: "fix: sequential checkpoint" },
+      },
+      { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, JJ_DIRTY: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
+    expect(result.json.context).toContain("blackbelt/sequential");
+    expect(await readFile(fake.log, "utf8")).toContain("bookmark set blackbelt/sequential --revision @");
+  });
+
+  test("maintain rejects a parallel branch that still uses the shared cast bookmark", async () => {
+    const fake = await makeFakeJj();
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-shared-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        cwd,
+        state: {
+          blackbeltBootstrap: { bookmarkName: "blackbelt/shared-cast" },
+          parallelRun: { laneId: "lane-api" },
+        },
+        executionScope: {
+          id: "cast:parent:base:branch:loop:lane-api",
+          cwd,
+          state: { blackbeltBootstrap: { bookmarkName: "blackbelt/shared-cast" } },
+          exports: {},
+        },
+        item: { title: "fix: unsafe checkpoint" },
+      },
+      { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, JJ_DIRTY: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(false);
+    expect(result.json.context).toContain("unsafe parallel invocation");
+    expect(result.json.context).toContain("branch-local scope and bookmark");
+    expect(await readFile(fake.log, "utf8")).toBe("");
+  });
+
   test("maintain refuses to invent a bookmark when bootstrap state is missing", async () => {
     const fake = await makeFakeJj();
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-cwd-"));

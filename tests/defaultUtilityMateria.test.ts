@@ -187,6 +187,7 @@ describe("bundled utility materia defaults", () => {
     expect(materia?.label).toBe("Blackbelt-Maintain");
     expect(materia?.group).toBe("Utility");
     expect(materia?.parse).toBe("json");
+    expect(materia?.parallelSafe).toBe(true);
     expect(materia?.script).toEqual({ kind: "shippedUtility", name: "blackbelt-maintain.mjs", runtime: "node" });
     expect(typeof materia?.description).toBe("string");
     expect((materia?.description as string).includes("checkpoint")).toBe(true);
