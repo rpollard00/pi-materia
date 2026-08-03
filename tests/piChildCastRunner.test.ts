@@ -90,6 +90,24 @@ describe("Pi child cast runner", () => {
     });
   });
 
+  test("accepts the terminal marker from stderr when print mode redirects extension stdout", async () => {
+    let child!: FakeChild;
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        child = new FakeChild();
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 150,
+    });
+    await runner.start(input());
+    child.stderr.write('{"type":"pi_materia_child_terminal","result":{"status":"succeeded","accepted":true,"endedAt":151}}\n');
+    child.finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect((await runner.observe({ childCastId: "child-1" }))?.snapshot.terminalResult).toMatchObject({ status: "succeeded", accepted: true });
+  });
+
   test("bounds stderr and terminates the process tree on abort", async () => {
     let child!: FakeChild;
     const runner = createPiChildCastRunner({

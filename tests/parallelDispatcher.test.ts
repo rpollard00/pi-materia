@@ -59,6 +59,25 @@ async function flush(childRunner: ReturnType<typeof createFakeChildCastRunner>) 
 }
 
 describe("workspace-neutral parallel loop dispatcher", () => {
+  test("notifies the parent session when parallel lanes are queued and spawned", async () => {
+    const state = makeState();
+    const notifications: string[] = [];
+    const { childRunner, dispatcher: subject } = dispatcher();
+    await subject.dispatch({
+      pi: {} as any,
+      ctx: { ui: { notify: (message: string) => notifications.push(message) } } as any,
+      state,
+      socket: {} as any,
+      loopId: "build",
+      config: { maxConcurrency: 2 },
+    });
+
+    expect(notifications[0]).toContain('parallel loop "build" started');
+    expect(notifications[0]).toContain("The parent will continue automatically");
+    expect(notifications.filter((message) => message.includes("spawned parallel lane"))).toHaveLength(2);
+    expect(childRunner.listSnapshots()).toHaveLength(2);
+  });
+
   test("clones the base execution scope for each bounded branch and permits a shared cwd", async () => {
     const state = makeState();
     const { childRunner, dispatcher: subject } = dispatcher();

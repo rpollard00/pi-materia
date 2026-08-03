@@ -214,6 +214,9 @@ export class ParallelLoopDispatcher {
         queueOrder: run.queueOrder,
         maxConcurrency: run.maxConcurrency,
       });
+      if (run.queueOrder.length > 0) {
+        notifyParallelUser(input.ctx, `pi-materia parallel loop "${input.loopId}" started: ${run.queueOrder.length} lane${run.queueOrder.length === 1 ? "" : "s"} queued (up to ${run.maxConcurrency} concurrent). The parent will continue automatically at the barrier; no /materia continue is needed.`, "info");
+      }
     } catch (error) {
       if (!this.#cancelRequested) throw error;
       interrupted = true;
@@ -434,6 +437,7 @@ export class ParallelLoopDispatcher {
         onTerminal: (result) => this.#handleChildTerminal(input, state, prepared.stream, active, result),
       });
       await this.#appendEvent(state, "parallel_lane_started", { parentCastId: state.castId, loopId: input.loopId, runId: this.#run?.runId, laneId: lane.laneId, streamIndex: prepared.stream.streamIndex, attempt, childCastId, executionScope: { id: scope.id, cwd: scope.cwd, exportNames: Object.keys(scope.exports).sort() }, ...(artifactPaths ? { artifactPaths } : {}) });
+      notifyParallelUser(input.ctx, `pi-materia spawned parallel lane "${prepared.stream.name}" for loop "${input.loopId}".`, "info");
     } catch (error) {
       this.#active.delete(lane.laneId);
       await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${parallelErrorMessage(error)}` }).catch(() => undefined);
@@ -776,6 +780,17 @@ function sameNumbers(left: readonly number[], right: readonly number[]): boolean
 function sameJson(left: unknown, right: unknown): boolean { try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; } }
 function validateDispatchConfig(config: EffectiveParallelConcurrencyConfig): void { if (!Number.isSafeInteger(config.maxConcurrency) || config.maxConcurrency < 1) throw new Error("parallel maxConcurrency must be a positive safe integer"); }
 function isTerminalLaneStatus(status: string): boolean { return status === "accepted" || status === "failed" || status === "interrupted"; }
+
+/** User-facing progress is best effort so the coordinator remains testable with a minimal context. */
+function notifyParallelUser(ctx: ExtensionContext, message: string, level: "info" | "warning" | "error"): void {
+  const ui = (ctx as unknown as { ui?: { notify?: (text: string, severity: "info" | "warning" | "error") => void } }).ui;
+  try {
+    ui?.notify?.(message, level);
+  } catch {
+    // Progress notification must never turn a completed child launch into a
+    // coordinator failure when the host session is being replaced.
+  }
+}
 function aggregateParallelLaneFailureReason(run: MateriaParallelRunState): string { return boundedFailureReason(`Parallel fan-in skipped because not all branches were accepted: ${run.queueOrder.filter((id) => run.lanes[id]?.status !== "accepted").map((id) => `${id} (${run.lanes[id]?.status ?? "missing"}${run.lanes[id]?.failureReason ? `: ${run.lanes[id]!.failureReason}` : ""})`).join("; ")}.`); }
 function boundedFailureReason(value: string, max = 1_000): string { const text = value.trim() || "parallel execution failed"; return text.length <= max ? text : `${text.slice(0, max - 1)}…`; }
 function toParallelDiagnostic(value: unknown): ParallelLaneDiagnosticArtifact { const record = isRecord(value) ? value : {}; return { code: boundedFailureReason(typeof record.code === "string" ? record.code : "child_diagnostic", 120), message: boundedFailureReason(typeof record.message === "string" ? record.message : "Child emitted a diagnostic."), severity: record.severity === "info" || record.severity === "error" ? record.severity : "warning", occurredAt: typeof record.occurredAt === "number" ? record.occurredAt : Date.now() }; }

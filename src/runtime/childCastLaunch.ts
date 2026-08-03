@@ -43,13 +43,35 @@ export async function runChildCastLaunch(
     },
   );
 
-  // startSocket dispatches the first turn asynchronously. Keeping the child
-  // command in the print-mode request until Pi is idle gives the subprocess a
-  // real lifetime that covers the complete sequential child graph.
-  await ctx.waitForIdle();
-  const state = adapters.states.loadActive(ctx);
+  // startSocket and agent-end advancement can queue the next prompt on a
+  // zero-delay timer. A single waitForIdle() only waits for the turn that was
+  // active when the command started; it can return in the small gap before a
+  // deferred prompt is dispatched. Keep the child process alive until its
+  // persisted cast is actually terminal so the parent never mistakes an
+  // in-flight lane for a failed child.
+  const state = await waitForChildCastTerminal(ctx, () => adapters.states.loadActive(ctx));
   const result = terminalResult(state);
   emitChildTerminal(result);
+}
+
+/**
+ * Wait for the whole sequential child cast, not merely the current Pi turn.
+ *
+ * `waitForIdle()` is intentionally turn-scoped in Pi. Between automatic
+ * socket turns pi-materia may have an active persisted cast while Pi is
+ * briefly idle, so yield once after each idle observation to let deferred
+ * advancement dispatch its next turn.
+ */
+export async function waitForChildCastTerminal(
+  ctx: Pick<ExtensionCommandContext, "waitForIdle">,
+  loadState: () => MateriaCastState | undefined,
+): Promise<MateriaCastState | undefined> {
+  while (true) {
+    await ctx.waitForIdle();
+    const state = loadState();
+    if (!state || !state.active) return state;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 export async function readChildLaunchSpec(file: string): Promise<ChildCastLaunchSpec> {
@@ -109,9 +131,10 @@ function terminalResult(state: MateriaCastState | undefined): ChildTerminalPaylo
 }
 
 function emitChildTerminal(result: ChildTerminalPayload): void {
-  // JSON mode reserves stdout for JSONL. This marker is intentionally a
-  // single JSON record so the parent can distinguish an accepted cast from a
-  // clean but non-terminal Pi process exit.
+  // JSON mode reserves stdout for JSONL. The host's stdout guard may redirect
+  // this direct extension write to stderr, so the parent accepts the marker on
+  // either channel. It remains a single JSON record so the parent can
+  // distinguish an accepted cast from a clean but non-terminal process exit.
   process.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result, ...(result.usage !== undefined ? { usage: result.usage } : {}) })}\n`);
 }
 

@@ -105,6 +105,12 @@ interface MutableChildRecord {
   stdoutCapture: BoundedCapture;
   stderrCapture: BoundedCapture;
   stdoutParser: JsonLineParser;
+  /**
+   * Print mode takes over process.stdout and redirects direct extension writes
+   * to stderr. Accept the child terminal marker there as well as on stdout.
+   */
+  stderrParser: JsonLineParser;
+  stderrTerminalLine?: string;
   stdoutWrite: Promise<void>;
   stderrWrite: Promise<void>;
   close: Promise<void>;
@@ -383,6 +389,13 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
         occurredAt: this.#now(),
         details: { maxBytes: this.#maxJsonLineBytes },
       })),
+      stderrParser: new JsonLineParser(this.#maxJsonLineBytes, (line) => this.#handleStderrLine(preparedRecord, line), () => this.#addDiagnostic(preparedRecord, {
+        code: "child_stderr_line_too_large",
+        severity: "warning",
+        message: "Child stderr contained an oversized JSONL record; it was ignored.",
+        occurredAt: this.#now(),
+        details: { maxBytes: this.#maxJsonLineBytes },
+      })),
       stdoutWrite: Promise.resolve(),
       stderrWrite: Promise.resolve(),
       close,
@@ -436,6 +449,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     process.stderr?.on("data", (chunk: Buffer | string) => {
       const text = record.stderrCapture.push(chunk);
       record.stderrWrite = record.stderrWrite.then(() => appendFile(record.stderrPath, text)).catch(() => undefined);
+      record.stderrParser.push(chunk);
     });
     process.once("error", (error) => {
       this.#addDiagnostic(record, {
@@ -449,6 +463,17 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       record.stdoutParser.end();
       void this.#handleClose(record, code, signal);
     });
+  }
+
+  #handleStderrLine(record: MutableChildRecord | undefined, line: string): void {
+    if (!record || line.length === 0 || record.snapshot.terminalResult) return;
+    const parsed = parsePiJsonEventLine(line);
+    if (!parsed) return;
+    const terminal = terminalFromEvent(parsed, this.#now);
+    if (!terminal) return;
+    record.lastOutput = terminal.output;
+    record.stderrTerminalLine = line;
+    this.#finish(record, terminal);
   }
 
   #handleStdoutLine(record: MutableChildRecord | undefined, line: string): void {
@@ -499,10 +524,14 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   }
 
   async #handleClose(record: MutableChildRecord, code: number | null, signal: NodeJS.Signals | null): Promise<void> {
+    record.stderrParser.end();
     await Promise.all([record.stdoutWrite, record.stderrWrite]);
     if (record.settledClose) return;
     const endedAt = this.#now();
     const stderr = record.stderrCapture.text();
+    const diagnosticStderr = record.stderrTerminalLine
+      ? stderr.split(/\r?\n/).filter((line) => line !== record.stderrTerminalLine).join("\n")
+      : stderr;
     if (record.stdoutCapture.truncated) {
       this.#addDiagnostic(record, {
         code: "child_stdout_truncated",
@@ -521,11 +550,11 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
         details: { artifact: record.stderrPath, maxBytes: this.#maxStderrBytes },
       });
     }
-    if (stderr.trim()) {
+    if (diagnosticStderr.trim()) {
       this.#addDiagnostic(record, {
         code: "child_stderr",
         severity: code === 0 ? "warning" : "error",
-        message: boundedMessage(stderr.replace(/\s+/g, " "), 800),
+        message: boundedMessage(diagnosticStderr.replace(/\s+/g, " "), 800),
         occurredAt: endedAt,
         details: {
           artifact: record.stderrPath,

@@ -429,6 +429,11 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand === "continue") {
+        const activeCast = adapters.states.loadActive(ctx);
+        if (activeCast?.active && activeCast.socketState === "running_parallel") {
+          ctx.ui.notify(`pi-materia parallel work for cast ${activeCast.castId} is still running. The parent will continue automatically when all lanes reach the barrier; /materia continue is not needed.`, "info");
+          return;
+        }
         try {
           await castExecutionUseCases.continueCast(pi, ctx);
         } catch (error) {
