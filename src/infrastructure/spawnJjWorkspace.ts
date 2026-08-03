@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
 import path from "node:path";
 import {
   createJjWorkspaceBackend,
@@ -22,7 +20,6 @@ export interface SpawnJjWorkspaceInput {
 
 export interface SpawnJjWorkspaceDeps {
   backend?: Pick<JjWorkspaceBackend, "createWorkspace">;
-  setBookmark?: (bookmarkName: string, cwd: string) => Promise<void>;
 }
 
 /**
@@ -33,7 +30,7 @@ export interface SpawnJjWorkspaceDeps {
 export async function spawnJjWorkspaceScope(
   input: SpawnJjWorkspaceInput,
   deps: SpawnJjWorkspaceDeps = {},
-): Promise<{ scope: ExecutionScope; workspace: JjWorkspaceRecord; bookmarkName: string }> {
+): Promise<{ scope: ExecutionScope; workspace: JjWorkspaceRecord }> {
   assertInput(input);
   if (path.resolve(input.cwd) !== path.resolve(input.executionScope.cwd)) {
     throw new Error("Spawn-JJ-Workspace cwd must match the active execution scope cwd.");
@@ -49,9 +46,6 @@ export async function spawnJjWorkspaceScope(
     laneId: input.executionScope.id,
     ...(input.workspaceRoot ? { workspaceRoot: input.workspaceRoot } : {}),
   });
-  const bookmarkName = branchBookmarkName(workspace);
-  await (deps.setBookmark ?? setJjBookmark)(bookmarkName, workspace.cwd);
-
   const owner = { ...workspace.owner };
   const integration = {
     version: 1,
@@ -65,7 +59,6 @@ export async function spawnJjWorkspaceScope(
     baseline: { ...workspace.baseline },
     revision: { ...workspace.revision },
     operationId: workspace.operationId,
-    bookmarkName,
   };
   const cleanup = {
     version: 1,
@@ -79,7 +72,6 @@ export async function spawnJjWorkspaceScope(
   const scopeId = `${input.executionScope.id}:jj-workspace:${encodeURIComponent(workspace.workspaceName)}`;
   return {
     workspace,
-    bookmarkName,
     scope: {
       id: scopeId,
       cwd: workspace.cwd,
@@ -90,8 +82,7 @@ export async function spawnJjWorkspaceScope(
           root: workspace.repositoryRoot,
           available: { jj: true },
           initialized: false,
-          newWorkingCommit: false,
-          bookmarkName,
+          newWorkingCommit: true,
         },
       },
       exports: {
@@ -101,37 +92,6 @@ export async function spawnJjWorkspaceScope(
       },
     },
   };
-}
-
-export function branchBookmarkName(workspace: Pick<JjWorkspaceRecord, "repositoryRoot" | "workspaceName" | "owner">): string {
-  const digest = createHash("sha256")
-    .update(`${workspace.repositoryRoot}\0${workspace.workspaceName}\0${workspace.owner.parentCastId}\0${workspace.owner.loopId}\0${workspace.owner.laneId}`)
-    .digest("hex")
-    .slice(0, 16);
-  return `blackbelt/workspace-${digest}`;
-}
-
-async function setJjBookmark(bookmarkName: string, cwd: string): Promise<void> {
-  const attempts = [
-    ["bookmark", "set", bookmarkName, "--revision", "@"],
-    ["bookmark", "create", bookmarkName, "--revision", "@"],
-    ["bookmark", "move", bookmarkName, "--to", "@"],
-  ];
-  let lastError = "unknown jj error";
-  for (const args of attempts) {
-    const result = await runJj(args, cwd);
-    if (result.code === 0) return;
-    lastError = result.stderr.trim() || result.stdout.trim() || `exit code ${result.code}`;
-  }
-  throw new Error(`Spawn-JJ-Workspace could not provision ${bookmarkName}: ${lastError}`);
-}
-
-function runJj(args: string[], cwd: string): Promise<{ code: number; stdout: string; stderr: string }> {
-  return new Promise((resolve) => {
-    execFile("jj", args, { cwd, shell: false, timeout: 30_000, maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-      resolve({ code: error && typeof error.code === "number" ? error.code : error ? 1 : 0, stdout: String(stdout ?? ""), stderr: String(stderr ?? "") });
-    });
-  });
 }
 
 function assertInput(input: SpawnJjWorkspaceInput): void {

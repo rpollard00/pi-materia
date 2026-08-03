@@ -5,7 +5,6 @@ import path from "node:path";
 import {
   JJ_WORKSPACE_CLEANUP_EXPORT,
   JJ_WORKSPACE_INTEGRATION_EXPORT,
-  branchBookmarkName,
   createJjWorkspaceBackend,
   spawnJjWorkspaceScope,
   type JjCommandExecutor,
@@ -19,12 +18,11 @@ describe("Spawn-JJ-Workspace", () => {
     const active = createExecutionScope({
       id: "cast:child:base:branch:build:lane-a",
       cwd: "/repo",
-      state: { retained: true },
+      state: { retained: true, blackbeltBootstrap: { ok: true, bookmarkName: "blackbelt/cast-bookmark" } },
       exports: { retained: { producer: "earlier", value: { value: 1 } } },
     });
     const record = workspaceRecord();
     let createInput: JjWorkspaceCreateInput | undefined;
-    let bookmark: { name: string; cwd: string } | undefined;
     const result = await spawnJjWorkspaceScope({
       cwd: "/repo",
       castId: "child-cast",
@@ -37,7 +35,6 @@ describe("Spawn-JJ-Workspace", () => {
           return record;
         },
       },
-      async setBookmark(name, cwd) { bookmark = { name, cwd }; },
     });
 
     expect(createInput).toMatchObject({
@@ -46,25 +43,27 @@ describe("Spawn-JJ-Workspace", () => {
       loopId: "spawn-workspace",
       laneId: active.id,
     });
-    expect(bookmark).toEqual({ name: branchBookmarkName(record), cwd: record.cwd });
     expect(result.scope.cwd).toBe(record.cwd);
+    expect(result).not.toHaveProperty("bookmarkName");
     expect(result.scope.id).toContain(active.id);
     expect(result.scope.state).toMatchObject({
       retained: true,
-      blackbeltBootstrap: { ok: true, root: "/repo", bookmarkName: result.bookmarkName },
+      blackbeltBootstrap: { ok: true, root: "/repo", newWorkingCommit: true },
     });
+    expect(result.scope.state.blackbeltBootstrap).not.toHaveProperty("bookmarkName");
     expect(result.scope.exports.retained).toEqual(active.exports.retained);
     expect(result.scope.exports[JJ_WORKSPACE_INTEGRATION_EXPORT]).toMatchObject({
       producer: "Spawn-JJ-Workspace",
-      value: { workspacePath: record.workspacePath, manifestPath: record.manifestPath, bookmarkName: result.bookmarkName },
+      value: { workspacePath: record.workspacePath, manifestPath: record.manifestPath },
     });
+    expect(result.scope.exports[JJ_WORKSPACE_INTEGRATION_EXPORT]?.value).not.toHaveProperty("bookmarkName");
     expect(result.scope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]).toMatchObject({
       producer: "Spawn-JJ-Workspace",
       value: { workspaceRoot: record.workspaceRoot, workspacePath: record.workspacePath, manifestPath: record.manifestPath },
     });
     // Scope construction must not mutate or redirect the source working copy.
     expect(active.cwd).toBe("/repo");
-    expect(active.state).toEqual({ retained: true });
+    expect(active.state).toEqual({ retained: true, blackbeltBootstrap: { ok: true, bookmarkName: "blackbelt/cast-bookmark" } });
     expect(active.exports).toEqual({ retained: { producer: "earlier", value: { value: 1 } } });
   });
 
@@ -100,7 +99,7 @@ describe("Spawn-JJ-Workspace", () => {
       id: `cast:child:base:branch:lane-${index}`,
       cwd: repositoryRoot,
     }));
-    const bookmarks = new Set<string>();
+    const commands: string[][] = [];
 
     const results = await Promise.all(scopes.map((executionScope, index) => spawnJjWorkspaceScope({
       cwd: repositoryRoot,
@@ -109,13 +108,15 @@ describe("Spawn-JJ-Workspace", () => {
       executionScope,
       workspaceRoot,
     }, {
-      backend: createJjWorkspaceBackend({ workspaceRoot, command }),
-      async setBookmark(name) { bookmarks.add(name); },
+      backend: createJjWorkspaceBackend({ workspaceRoot, command: async (input) => {
+        commands.push([...input.args]);
+        return command(input);
+      } }),
     })));
 
     expect(new Set(results.map(({ workspace }) => workspace.workspacePath)).size).toBe(4);
     expect(tracked.size).toBe(4);
-    expect(bookmarks.size).toBe(4);
+    expect(commands.some((args) => args.includes("bookmark"))).toBe(false);
     expect(await readdir(repositoryRoot)).toEqual(baseEntries);
     expect(scopes.map(({ cwd }) => cwd)).toEqual(Array(4).fill(repositoryRoot));
   });
@@ -149,9 +150,8 @@ else if (args[0] === "op") process.stdout.write("operation\\n");
         const executionScope = createExecutionScope({ id: "branch-" + index, cwd });
         const result = await spawnJjWorkspaceScope({ cwd, castId: "cast", socketId: "spawn-" + index, executionScope, workspaceRoot: process.env.TEST_WORKSPACE_ROOT }, {
           backend: createJjWorkspaceBackend({ workspaceRoot: process.env.TEST_WORKSPACE_ROOT, jjExecutable: process.env.TEST_FAKE_JJ }),
-          async setBookmark() {},
         });
-        console.log(JSON.stringify({ workspacePath: result.workspace.workspacePath, bookmarkName: result.bookmarkName }));
+        console.log(JSON.stringify({ workspacePath: result.workspace.workspacePath, hasBookmarkName: "bookmarkName" in result }));
       `;
       return Bun.spawn([process.execPath, "-e", source], {
         env: { ...process.env, TEST_REPOSITORY_ROOT: repositoryRoot, TEST_WORKSPACE_ROOT: workspaceRoot, TEST_FAKE_JJ: fakeJj },
@@ -169,11 +169,11 @@ else if (args[0] === "op") process.stdout.write("operation\\n");
       ]);
       expect(stderr).toBe("");
       expect(exitCode).toBe(0);
-      return JSON.parse(stdout) as { workspacePath: string; bookmarkName: string };
+      return JSON.parse(stdout) as { workspacePath: string; hasBookmarkName: boolean };
     }));
 
     expect(new Set(outputs.map(({ workspacePath }) => workspacePath)).size).toBe(outputs.length);
-    expect(new Set(outputs.map(({ bookmarkName }) => bookmarkName)).size).toBe(outputs.length);
+    expect(outputs.every(({ hasBookmarkName }) => !hasBookmarkName)).toBe(true);
     expect(await readdir(repositoryRoot)).toEqual([]);
   }, 20_000);
 

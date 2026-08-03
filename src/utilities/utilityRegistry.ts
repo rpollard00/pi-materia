@@ -96,7 +96,7 @@ async function spawnJjWorkspace(input: BuiltInUtilityInput): Promise<string> {
   });
   return stringifyDeterministicHandoffOutput({
     satisfied: true,
-    context: `Spawn-JJ-Workspace: created owned workspace ${spawned.workspace.workspaceName} with branch-local bookmark ${spawned.bookmarkName}.`,
+    context: `Spawn-JJ-Workspace: created owned bookmarkless checkpoint workspace ${spawned.workspace.workspaceName}.`,
     scopeTransition: { kind: "replace", scope: spawned.scope },
   });
 }
