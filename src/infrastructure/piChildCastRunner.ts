@@ -31,7 +31,6 @@ import {
   clone,
   createBoundedCapture,
   createChildConfig,
-  extractEventOutput,
   hasProcessExited,
   isRecord,
   JsonLineParser,
@@ -110,17 +109,19 @@ interface MutableChildRecord {
    * to stderr. Accept the child terminal marker there as well as on stdout.
    */
   stderrParser: JsonLineParser;
-  stderrTerminalLine?: string;
+  stderrTerminalSeen: boolean;
+  stderrHadNonTerminalOutput: boolean;
   stdoutWrite: Promise<void>;
   stderrWrite: Promise<void>;
   close: Promise<void>;
   resolveClose: () => void;
   settledClose: boolean;
+  /** Full terminal data is private to the terminal channel, never snapshots. */
+  terminalResult?: ChildCastTerminalResult;
   abortRequested?: ChildCastAbortInput & { requestedAt: number };
   observers: Map<number, ChildCastObserver>;
   nextSequence: number;
   nextObserverId: number;
-  lastOutput?: unknown;
   launch?: PiChildLaunchInvocation;
 }
 
@@ -201,7 +202,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     for (const event of record.snapshot.events) {
       if (event.sequence > afterSequence) void callObserver(observer.onEvent, clone(event));
     }
-    if (record.snapshot.terminalResult) void callObserver(observer.onTerminal, clone(record.snapshot.terminalResult));
+    if (record.terminalResult) void callObserver(observer.onTerminal, clone(record.terminalResult));
     return {
       childCastId: input.childCastId,
       unsubscribe: () => record.observers.delete(observerId),
@@ -211,7 +212,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   async resume(input: ResumeChildCastInput): Promise<ChildCastStartResult> {
     const existing = this.#records.get(input.childCastId);
     if (!existing) throw new Error(`Unknown child cast ${JSON.stringify(input.childCastId)}.`);
-    if (existing.process && !hasProcessExited(existing.process) && !existing.snapshot.terminalResult) {
+    if (existing.process && !hasProcessExited(existing.process) && !existing.terminalResult) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} is already active.`);
     }
     if (existing.snapshot.status === "succeeded" && existing.snapshot.accepted) {
@@ -237,11 +238,6 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     replacement.nextObserverId = existing.nextObserverId;
     replacement.snapshot.updatedAt = this.#now();
     this.#records.set(input.childCastId, replacement);
-    this.#emit(replacement, {
-      type: "resumed",
-      payload: { mode: input.mode ?? "resume" },
-      occurredAt: replacement.snapshot.updatedAt,
-    });
     try {
       await this.#launch(replacement, inputForLaunch);
     } catch (error) {
@@ -254,7 +250,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   async abort(input: ChildCastAbortInput): Promise<ChildCastAbortResult> {
     const record = this.#records.get(input.childCastId);
     if (!record) return { childCastId: input.childCastId, status: "not_found", aborted: false };
-    if (record.snapshot.terminalResult) {
+    if (record.terminalResult) {
       return {
         childCastId: input.childCastId,
         status: "already_terminal",
@@ -291,7 +287,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 
     await terminateProcessTree(record.process, this.#killGraceMs);
     await record.close.catch(() => undefined);
-    if (!record.snapshot.terminalResult) {
+    if (!record.terminalResult) {
       this.#finish(record, {
         status: "interrupted",
         accepted: false,
@@ -398,6 +394,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       })),
       stdoutWrite: Promise.resolve(),
       stderrWrite: Promise.resolve(),
+      stderrTerminalSeen: false,
+      stderrHadNonTerminalOutput: false,
       close,
       resolveClose,
       settledClose: false,
@@ -437,7 +435,6 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       specPath: record.launchSpecPath,
       ...(record.configPath ? { configPath: record.configPath } : {}),
     };
-    this.#emit(record, { type: "started", occurredAt: this.#now() });
     record.snapshot.status = "running";
     record.snapshot.updatedAt = this.#now();
 
@@ -466,18 +463,36 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   }
 
   #handleStderrLine(record: MutableChildRecord | undefined, line: string): void {
-    if (!record || line.length === 0 || record.snapshot.terminalResult) return;
+    if (!record || line.length === 0 || record.terminalResult) return;
+    const leadingType = leadingJsonEventType(line);
+    if (leadingType !== undefined && !TERMINAL_EVENT_TYPES.has(leadingType)) {
+      record.stderrHadNonTerminalOutput = true;
+      return;
+    }
     const parsed = parsePiJsonEventLine(line);
-    if (!parsed) return;
+    if (!parsed) {
+      record.stderrHadNonTerminalOutput = true;
+      return;
+    }
     const terminal = terminalFromEvent(parsed, this.#now);
-    if (!terminal) return;
-    record.lastOutput = terminal.output;
-    record.stderrTerminalLine = line;
+    if (!terminal) {
+      record.stderrHadNonTerminalOutput = true;
+      return;
+    }
+    record.stderrTerminalSeen = true;
     this.#finish(record, terminal);
   }
 
   #handleStdoutLine(record: MutableChildRecord | undefined, line: string): void {
-    if (!record || line.length === 0) return;
+    // Once a terminal marker settles the record, do not parse duplicate or
+    // buffered lines at all. The first marker is the sole terminal delivery.
+    if (!record || line.length === 0 || record.terminalResult) return;
+    // Pi's highest-volume records put `type` first. Reject known content-bearing
+    // records from a short prefix so their messages/tool data are never parsed,
+    // cloned, or admitted to child telemetry.
+    const leadingType = leadingJsonEventType(line);
+    if (leadingType !== undefined && DISCARDED_CHILD_EVENT_TYPES.has(leadingType)) return;
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
@@ -487,7 +502,6 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
         severity: "warning",
         message: "Child stdout contained a non-JSON line; it was ignored.",
         occurredAt: this.#now(),
-        details: { excerpt: boundedMessage(line, 240) },
       });
       return;
     }
@@ -501,26 +515,33 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       return;
     }
     const event = parsed as Record<string, unknown>;
-    const usage = childUsage(event.usage
-      ?? (isRecord(event.result) ? event.result.usage : undefined)
-      ?? (isRecord(event.message) ? event.message.usage : undefined));
-    const streamEvent: Omit<ChildCastStreamEvent, "childCastId" | "sequence" | "occurredAt"> & { occurredAt?: number } = {
-      type: parsed.type,
-      ...(Object.prototype.hasOwnProperty.call(parsed, "payload") ? { payload: clone(parsed.payload) } : { payload: clone(parsed) }),
-      ...(typeof parsed.socketId === "string" ? { socketId: parsed.socketId } : {}),
-      ...(typeof parsed.workItemId === "string" ? { workItemId: parsed.workItemId } : {}),
-      ...(usage ? { usage } : {}),
-      ...(typeof parsed.occurredAt === "number" ? { occurredAt: parsed.occurredAt } : {}),
-    };
-    this.#emit(record, streamEvent);
-    if (usage) record.snapshot.usage = clone(usage);
-    const terminal = terminalFromEvent(parsed, this.#now);
-    if (terminal && !record.snapshot.terminalResult) {
-      record.lastOutput = terminal.output;
+    const terminal = terminalFromEvent(event, this.#now);
+    if (terminal) {
+      // The complete result is delivered through the terminal channel only;
+      // never project the marker or its payload into the replay event stream.
       this.#finish(record, terminal);
-    } else if (parsed.type === "message_end" || parsed.type === "agent_end") {
-      record.lastOutput = extractEventOutput(parsed);
+      return;
     }
+
+    const rawUsage = event.usage
+      ?? (isRecord(event.result) ? event.result.usage : undefined)
+      ?? (isRecord(event.message) ? event.message.usage : undefined);
+    const usage = childUsage(rawUsage);
+    if (!usage) return;
+    // Pi reports flat message_end usage per message, not per session. Project a
+    // cumulative checkpoint so dispatcher deltas cannot regress when a later
+    // message is smaller. Nested usage is already aggregate-shaped.
+    const checkpoint = isRecord(rawUsage) && !isRecord(rawUsage.tokens)
+      ? addUsage(record.snapshot.usage, usage)
+      : usage;
+    record.snapshot.usage = clone(checkpoint);
+    this.#emit(record, {
+      type: "usage_checkpoint",
+      usage: checkpoint,
+      ...(typeof event.socketId === "string" ? { socketId: event.socketId } : {}),
+      ...(typeof event.workItemId === "string" ? { workItemId: event.workItemId } : {}),
+      ...(typeof event.occurredAt === "number" ? { occurredAt: event.occurredAt } : {}),
+    });
   }
 
   async #handleClose(record: MutableChildRecord, code: number | null, signal: NodeJS.Signals | null): Promise<void> {
@@ -529,9 +550,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     if (record.settledClose) return;
     const endedAt = this.#now();
     const stderr = record.stderrCapture.text();
-    const diagnosticStderr = record.stderrTerminalLine
-      ? stderr.split(/\r?\n/).filter((line) => line !== record.stderrTerminalLine).join("\n")
-      : stderr;
+    const hasDiagnosticStderr = record.stderrHadNonTerminalOutput
+      || (!record.terminalResult && stderr.trim().length > 0 && !record.stderrTerminalSeen);
     if (record.stdoutCapture.truncated) {
       this.#addDiagnostic(record, {
         code: "child_stdout_truncated",
@@ -550,11 +570,11 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
         details: { artifact: record.stderrPath, maxBytes: this.#maxStderrBytes },
       });
     }
-    if (diagnosticStderr.trim()) {
+    if (hasDiagnosticStderr) {
       this.#addDiagnostic(record, {
         code: "child_stderr",
         severity: code === 0 ? "warning" : "error",
-        message: boundedMessage(diagnosticStderr.replace(/\s+/g, " "), 800),
+        message: "Child process wrote diagnostic output; inspect the bounded stderr artifact.",
         occurredAt: endedAt,
         details: {
           artifact: record.stderrPath,
@@ -562,7 +582,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
         },
       });
     }
-    if (!record.snapshot.terminalResult) {
+    if (!record.terminalResult) {
       const aborted = record.abortRequested;
       const interrupted = aborted !== undefined || signal === "SIGTERM" || signal === "SIGKILL" || signal === "SIGINT";
       this.#finish(record, interrupted
@@ -582,15 +602,13 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
               status: "succeeded",
               accepted: false,
               endedAt,
-              output: record.lastOutput,
               message: "Child Pi session exited without an explicit terminal result.",
             }
           : {
               status: "failed",
               accepted: false,
               endedAt,
-              error: boundedMessage(stderr.trim() || `Child Pi session exited with code ${code ?? "unknown"}.`, 1_000),
-              output: record.lastOutput,
+              error: `Child Pi session exited with code ${code ?? "unknown"}; inspect the bounded stderr artifact.`,
             });
     }
     record.settledClose = true;
@@ -626,18 +644,14 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   }
 
   #finish(record: MutableChildRecord, result: ChildCastTerminalResult): void {
-    if (record.snapshot.terminalResult) return;
+    if (record.terminalResult) return;
+    record.terminalResult = clone(result);
     record.snapshot.status = result.status;
     record.snapshot.accepted = result.accepted;
     if (result.executionScope) record.snapshot.executionScope = cloneExecutionScope(result.executionScope);
-    record.snapshot.terminalResult = clone(result);
+    if (result.usage) record.snapshot.usage = clone(result.usage);
     record.snapshot.updatedAt = result.endedAt;
     if (record.snapshot.abort && result.abortReason) record.snapshot.abort.completedAt = result.endedAt;
-    this.#emit(record, {
-      type: "terminal",
-      payload: result,
-      occurredAt: result.endedAt,
-    });
     for (const observer of record.observers.values()) void callObserver(observer.onTerminal, clone(result));
   }
 
@@ -650,6 +664,48 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 }
 
 export type PiChildCastRunnerPort = PiChildCastRunner;
+
+const DISCARDED_CHILD_EVENT_TYPES = new Set([
+  "message_update",
+  "tool_execution_update",
+  "entry_appended",
+  "message",
+  "turn",
+  "tool",
+  "session",
+]);
+const TERMINAL_EVENT_TYPES = new Set(["pi_materia_child_terminal", "child_terminal", "terminal"]);
+
+function addUsage(left: ChildCastUsage, right: ChildCastUsage): ChildCastUsage {
+  return {
+    tokens: {
+      input: left.tokens.input + right.tokens.input,
+      output: left.tokens.output + right.tokens.output,
+      cacheRead: left.tokens.cacheRead + right.tokens.cacheRead,
+      cacheWrite: left.tokens.cacheWrite + right.tokens.cacheWrite,
+      total: left.tokens.total + right.tokens.total,
+    },
+    cost: {
+      input: left.cost.input + right.cost.input,
+      output: left.cost.output + right.cost.output,
+      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
+      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
+      total: left.cost.total + right.cost.total,
+    },
+  };
+}
+
+/** Read only a leading JSON string `type` value without parsing the payload. */
+function leadingJsonEventType(line: string): string | undefined {
+  const match = /^\s*\{\s*"type"\s*:\s*("(?:\\.|[^"\\])*")/.exec(line.slice(0, 512));
+  if (!match) return undefined;
+  try {
+    const type: unknown = JSON.parse(match[1]);
+    return typeof type === "string" ? type : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function legacyChildScope(input: StartChildCastInput) {
   return { id: `child:${encodeURIComponent(input.identity.childCastId)}:base`, cwd: input.cwd, state: {}, exports: {} };

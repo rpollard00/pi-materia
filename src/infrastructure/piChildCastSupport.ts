@@ -184,16 +184,33 @@ export function extractEventOutput(event: Record<string, unknown>): unknown {
 }
 
 export function childUsage(value: unknown): ChildCastUsage | undefined {
-  if (!isRecord(value) || !isRecord(value.tokens) || !isRecord(value.cost)) return undefined;
-  if (!numericUsage(value.tokens) || !numericUsage(value.cost)) return undefined;
-  return {
-    tokens: clone(value.tokens) as UsageTokens,
-    cost: clone(value.cost) as UsageCost,
-  };
+  if (!isRecord(value)) return undefined;
+
+  // Materia terminal markers use the nested aggregate shape. Pi message_end
+  // records use the flat Usage shape with totalTokens and a nested cost. In
+  // both cases copy only the five documented finite scalars: provider-added
+  // metadata must never become parent telemetry.
+  const tokenSource = isRecord(value.tokens) ? value.tokens : value;
+  const tokenTotalKey = isRecord(value.tokens) ? "total" : "totalTokens";
+  if (!isRecord(value.cost)) return undefined;
+  const tokens = usageScalars(tokenSource, tokenTotalKey);
+  const cost = usageScalars(value.cost, "total");
+  return tokens && cost ? { tokens, cost } : undefined;
 }
 
-function numericUsage(value: Record<string, unknown>): boolean {
-  return ["input", "output", "cacheRead", "cacheWrite", "total"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key]));
+function usageScalars(value: Record<string, unknown>, totalKey: string): UsageTokens | UsageCost | undefined {
+  const input = finiteScalar(value.input);
+  const output = finiteScalar(value.output);
+  const cacheRead = finiteScalar(value.cacheRead);
+  const cacheWrite = finiteScalar(value.cacheWrite);
+  const total = finiteScalar(value[totalKey]);
+  return input === undefined || output === undefined || cacheRead === undefined || cacheWrite === undefined || total === undefined
+    ? undefined
+    : { input, output, cacheRead, cacheWrite, total };
+}
+
+function finiteScalar(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 export function createChildConfig(compiled: ChildCastCompiledLoadout, artifactRoot: string): Record<string, unknown> {

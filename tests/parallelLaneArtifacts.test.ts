@@ -44,7 +44,8 @@ describe("parallel lane artifact store", () => {
       store.appendEvent({ ...input, event: { provenance: { childSequence: 2 }, event: { childCastId: "child-1", sequence: 2, type: "second", occurredAt: 2 } } }),
     ]);
     await store.writeUsage({ ...input, usage });
-    await store.writeTerminalResult({ ...input, result: { status: "succeeded", accepted: true, endedAt: 3 }, usage });
+    const terminalOutput = { result: "complete-child-output", detail: "x".repeat(128_000) };
+    await store.writeTerminalResult({ ...input, result: { status: "succeeded", accepted: true, endedAt: 3, output: terminalOutput }, usage });
     await store.writeDiagnostics({
       ...input,
       diagnostics: Array.from({ length: 30 }, (_, index) => ({ code: `diagnostic-${index}`, message: "x".repeat(2_000), severity: "warning" as const, occurredAt: index })),
@@ -54,7 +55,9 @@ describe("parallel lane artifact store", () => {
     expect(JSON.parse(await readFile(paths.laneManifestPath, "utf8")).paths.eventStreamPath).toBe(paths.eventStreamPath);
     const events = (await readFile(paths.eventStreamPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(events.map((event) => event.event.sequence)).toEqual([1, 2]);
-    expect(JSON.parse(await readFile(paths.terminalResultPath, "utf8"))).toMatchObject({ result: { accepted: true }, usage });
+    const terminalArtifact = JSON.parse(await readFile(paths.terminalResultPath, "utf8"));
+    expect(terminalArtifact).toMatchObject({ result: { accepted: true }, usage });
+    expect(terminalArtifact.result.output).toEqual(terminalOutput);
     const diagnostics = JSON.parse(await readFile(paths.diagnosticsPath, "utf8"));
     expect(diagnostics.diagnostics).toHaveLength(24);
     expect(diagnostics.diagnostics.every((entry: { message: string }) => entry.message.length <= 1_000)).toBe(true);
