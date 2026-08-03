@@ -1,6 +1,6 @@
 # Utility Materia
 
-Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, or other repeatable steps that should be visible in the loadout and removable by editing config. The opt-in parallel loop contract is defined in [Parallel loop orchestration semantics](parallel-loop-orchestration.md).
+Utility sockets are deterministic Materia pipeline sockets that run configured local utilities instead of starting a Pi agent/LLM turn. Use them for setup, discovery, code generation, checks, scope transitions, or other repeatable steps that should be visible in the loadout and removable by editing config. Intrinsic parallel generation and universal execution scopes are defined in [Parallel generation and scoped execution](parallel-loop-orchestration.md).
 
 Agent sockets still render prompts and wait for Pi assistant output. Utility sockets skip the agent turn, write artifacts, optionally parse their output, apply `assign`, route through `edges`, participate in `foreach`, and update the same manifest/event log as agent sockets.
 
@@ -19,6 +19,7 @@ Canonical utility sockets reference reusable top-level utility materia; executab
   "description"?: string,
   "group"?: string,
   "color"?: string,
+  "utility"?: string,           // registered built-in alias, for example vcs.spawnJjWorkspace
   "command"?: string[],         // explicit local command and args
   "script"?: {                  // shipped utility script resolved through the user profile
     "kind": "shippedUtility",
@@ -29,13 +30,15 @@ Canonical utility sockets reference reusable top-level utility materia; executab
   "parse"?: "text" | "json",    // default/text preserves stdout; json parses stdout
   "assign"?: { [target: string]: string },
   "timeoutMs"?: number,
-  "generator"?: boolean
+  "generator"?: boolean,
+  "parallel"?: boolean,       // requires generator: true
+  "parallelSafe"?: boolean    // explicit trust for concurrent child execution
 }
 ```
 
-A utility materia must configure either `command` or `script`. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Runtime sockets reference top-level utility materia such as `Ignore-Artifacts`, `Detect-VCS`, or `Blackbelt-Bootstrap`.
+A utility materia configures one executable source: a registered built-in `utility` alias, an explicit `command`, or a shipped `script`. Built-in aliases include `vcs.spawnJjWorkspace`, `vcs.integrateJjWorkspaces`, and `vcs.finalizeJjWorkspace`; an unknown alias fails rather than falling back to a shell command. Commands are string arrays only; pi-materia does not invoke a shell and does not auto-discover project scripts. Runtime sockets reference top-level utility materia such as `Ignore-Artifacts`, `Detect-VCS`, or `Blackbelt-Bootstrap`.
 
-Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name": "...mjs" }`. On config load, pi-materia syncs packaged scripts to the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities`, or `PI_MATERIA_PROFILE_DIR/utilities` when overridden), records hashes in `.pi-materia-shipped-utilities.json`, and resolves execution to that profile copy. If a user-modified profile script would be overwritten during an update, the modified file is preserved and the new packaged script is written under a hash-suffixed filename that the manifest points to. Relative command script paths from non-shipped config files are still resolved from the directory containing the owning config file, while every spawned process cwd remains the target project directory.
+Shipped defaults use the typed script locator `{ "kind": "shippedUtility", "name": "...mjs" }`. On config load, pi-materia syncs packaged scripts to the active profile utilities directory (`${XDG_CONFIG_HOME:-~/.config}/pi/pi-materia/utilities`, or `PI_MATERIA_PROFILE_DIR/utilities` when overridden), records hashes in `.pi-materia-shipped-utilities.json`, and resolves execution to that profile copy. If a user-modified profile script would be overwritten during an update, the modified file is preserved and the new packaged script is written under a hash-suffixed filename that the manifest points to. Relative command script paths from non-shipped config files are still resolved from the directory containing the owning config file. Every invocation runs in the current active execution scope's `cwd`, which is initially the target project directory but may be replaced by a utility scope transition.
 
 Common mechanics:
 
@@ -46,11 +49,28 @@ Common mechanics:
 
 ## JSON stdin/stdout protocol
 
-For command utilities, pi-materia starts the configured process with cwd set to the target project and writes one JSON object to stdin:
+For command utilities, pi-materia starts the configured process with cwd set to the **active execution scope's** `cwd` and writes one JSON object to stdin. `executionScope` is the current active snapshot; `baseScope` is the immutable cast origin. They can have different ids, cwd values, state, and exports after a scope transition.
 
 ```json
 {
-  "cwd": "/path/to/project",
+  "cwd": "/tmp/pi-materia/workspaces/lane-api",
+  "executionScope": {
+    "id": "cast:example:base:branch:work:lane-api",
+    "cwd": "/tmp/pi-materia/workspaces/lane-api",
+    "state": { "blackbeltBootstrap": { "bookmarkName": "blackbelt/api" } },
+    "exports": {
+      "jjWorkspace": {
+        "producer": "Spawn-JJ-Workspace",
+        "value": { "workspaceName": "lane-api" }
+      }
+    }
+  },
+  "baseScope": {
+    "id": "cast:example:base",
+    "cwd": "/path/to/project",
+    "state": {},
+    "exports": {}
+  },
   "runDir": "/path/to/project/.pi/pi-materia/2026-05-01T00-00-00-000Z",
   "request": "original user request",
   "castId": "2026-05-01T00-00-00-000Z",
@@ -74,6 +94,32 @@ The command writes its result to stdout. With `parse: "json"`, stdout must be va
 Utility JSON is deterministic script output, not an agent handoff. Scripts may return structured data for explicit `assign` paths, and when a utility is configured to patch shared runtime state directly that structured patch belongs under a top-level `state` object. Do not model utility output as a broad agent envelope; agent-authored handoffs are limited to `workItems`, `satisfied`, and `context`. Agent [finalization strategy](finalization-configuration.md#deterministic-utility-example) never routes utilities through handoff tools, even when `tool_backed` is configured globally.
 
 Utility JSON output may also include an optional `event` array for structured runtime event emission. The `event` field is a side-channel processed and stripped before state extraction — it does not affect `state.*` patches, routing, or handoff semantics. See [Runtime Eventing Contract](runtime-eventing.md).
+
+A utility may additionally return a typed, utility-only `scopeTransition` separate from agent handoffs and ordinary `state` patches. The exact replacement form is:
+
+```json
+{
+  "scopeTransition": {
+    "kind": "replace",
+    "scope": {
+      "id": "stable-producer-owned-scope-id",
+      "cwd": "/absolute/replacement/cwd",
+      "state": {},
+      "exports": {
+        "result": { "producer": "My-Utility", "value": { "opaque": true } }
+      }
+    }
+  }
+}
+```
+
+`scope.id` and `scope.cwd` are required non-empty strings; `state` and `exports` are optional JSON-safe records (shown explicitly for clarity), and every export has a non-empty `producer` plus an opaque bounded `value`. To reactivate the immutable persisted base scope, return exactly:
+
+```json
+{ "scopeTransition": { "kind": "base" } }
+```
+
+No additional keys are accepted in either transition form. Runtime validates and strips this control result, persists the replacement scope, and activates it before the next socket. Agent and utility sockets then use the replacement `cwd`. A replacement may not mutate the base scope; use the `base` form to return to it. Agents cannot author scope transitions.
 
 ## stdout, stderr, exit codes, and timeouts
 
@@ -223,31 +269,11 @@ Utility materia marked `generator: true` follow the same top-level `workItems` /
 
 A utility materia may set `generator: true` when a deterministic script should produce generated work items for loop regions. Generator utility output is normalized to `parse: "json"` and must expose top-level `workItems` from stdout JSON. Generated work item entries use the same minimal item shape as agent generator output: `title:string` plus `context:string`.
 
-### Parallel scheduling sidecar
+### Intrinsic parallel utility generators
 
-The experimental parallel mode composes a planner's canonical `workItems`
-output with a versioned `parallelSchedule` sidecar. The sidecar is planner
-only: an ordinary utility generator must not opt into scheduling merely by
-printing that field. A planner explicitly enabled for the parallel region may
-emit ordered streams whose entries are indexes into `workItems`; it must not
-copy lane metadata into each item or mutate the canonical `{ title, context }`
-shape.
+A utility generator may set `parallel: true` only with `generator: true`. It then emits canonical `workItems` plus the same versioned `parallelSchedule` used by agent generators. Core—not a normalizer utility—requires every declared stream to have a non-empty `workItemIndexes` array, validates exact item coverage, preserves ordered streams, derives collision-safe lane ids and plan identity, and atomically commits the work items and normalized plan. Invalid schedules fail before any child starts. A non-parallel generator must not emit `parallelSchedule`.
 
-A deterministic normalizer consumes the two outputs before any lane starts. It
-validates supported version, unique non-empty stream names, in-range indexes,
-and exactly-once assignment of every item. It preserves `workItems` unchanged
-and emits the normalized plan under `state.parallelPlan`, including stable lane
-identities and stream order. Invalid schedules produce actionable
-`satisfied:false`/`context` feedback and create no child workspace or
-subprocess. The sidecar is not placed in generic downstream agent context.
-
-Parallel child loops may use deterministic utilities only when their
-materia definition explicitly sets `parallelSafe: true`, declaring the
-operation workspace-local and child-safe. Bookmark advancement, publishing,
-parent integration, interactive utilities, and other known shared-state
-operations remain parent-only. Utility commands are trusted local code, not a
-sandbox; the parallel safety declaration is a graph validation boundary rather
-than a security boundary.
+A utility copied into a branch prelude or stream loop must explicitly set `parallelSafe: true`. This grants trusted concurrent-child execution; it does not assert that cwd is isolated. Multiple branch scopes may share one cwd, so utilities must enforce any filesystem, process, bookmark, or service-specific safety themselves. Interactive and multi-turn behavior remains invalid in children.
 
 Utility scripts should not emit broad agent-envelope fields such as `summary`, `guidance`, `decisions`, `risks`, `feedback`, or `missing`. When deterministic structured data is needed in shared runtime state, put it under a separate top-level `state` object (for example, `{ "state": { "planMetadata": { "source": "script" } }, "workItems": [...] }`) or map script-owned output with explicit `assign` entries. Do not use generated-output aliases such as `tasks`.
 
@@ -284,7 +310,7 @@ The `bookmarkName` is a deterministic git-ref-safe name under the `blackbelt/` p
 
 For each invocation, the utility:
 1. Reads the current work item title from `input.item.title`.
-2. Resolves the bookmark name from `state.blackbeltBootstrap.bookmarkName`; if that bootstrap state is absent, returns `satisfied: false` with actionable context to run `Blackbelt-Bootstrap` instead of generating a replacement bookmark.
+2. Resolves the bookmark from active-scope `state.blackbeltBootstrap.bookmarkName` (or the ordinary cast bootstrap state on a sequential base scope). A workspace-spawn transition provisions branch-local bootstrap state. Parallel invocation retaining an actual shared base bookmark is rejected rather than checkpointing shared state.
 3. Checks for dirty changes with `jj diff --summary`. If the working commit is clean, it returns `satisfied: true` as a no-op (no empty checkpoints).
 4. If dirty, runs `jj describe -m <title>`, moves the session bookmark to the described commit (before `jj new` so a post-new failure cannot leave a stale bookmark), then runs `jj new` to open a fresh empty working commit for the next task.
 

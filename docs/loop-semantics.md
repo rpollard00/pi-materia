@@ -1,6 +1,6 @@
 # Loop semantics
 
-This is the developer reference for generator-driven loop exits. The structured contract keeps current-item flow, cursor advancement, and post-loop routing separate. The opt-in parallel extension is specified in [Parallel loop orchestration semantics](parallel-loop-orchestration.md).
+This is the developer reference for generator-driven loop exits. The structured contract keeps current-item flow, cursor advancement, and post-loop routing separate. Intrinsic parallel generation is specified in [Parallel generation and scoped execution](parallel-loop-orchestration.md).
 
 ## Runtime model
 
@@ -60,25 +60,13 @@ If Maintain returns `{ "satisfied": false }`, `advance.when` does not run and th
 
 A final satisfied item routes to `Socket-7`; otherwise the loop terminates at `end` unless another matching route is configured.
 
-## Parallel loop regions (experimental)
+## Parallel generator consumers
 
-An ordinary loop serializes its items in the parent cast. An opt-in parallel
-loop instead consumes a normalized planner plan: each ordered stream runs the
-complete loop subgraph in one persistent jj child workspace, while the parent
-waits as a coordinator and never traverses member sockets itself.
+An ordinary generator's consuming loop serializes items in the parent cast. When the producer materia has both `generator: true` and `parallel: true`, core derives a parallel region for its one deterministic consuming loop. Loop-level `parallel.maxConcurrency` is only an optional override of the app bound; it does not enable parallelism.
 
-The child still applies the same item cursor, `satisfied`/`not_satisfied`,
-retry-edge, and no-advance rules described below. A lane is accepted only when
-all of its items reach the child terminal state. All lanes must be accepted
-before jj fan-in; a failed or interrupted lane prevents partial fan-in and is
-revivable without rerunning successful lanes. Clean fan-in follows the
-satisfied post-integration route, while a structural jj conflict follows the
-configured not-satisfied resolver route.
+Each stream child executes any generator-to-loop prelude once, then applies the same cursor, `satisfied`/`not_satisfied`, retry-edge, advancement, and no-advance rules to that stream's ordered items. Original work-item indexes are retained. The parent waits at an intrinsic all-terminal barrier and never traverses copied sockets itself.
 
-Omit parallel metadata to retain the sequential runtime exactly. See
-[Parallel loop orchestration semantics](parallel-loop-orchestration.md) for the
-planner sidecar, symbolic fork/join, durable lane states, workspace lifecycle,
-cancellation, and artifact ownership contract.
+All branches must be accepted before the parent advances. Fan-in returns ordered terminal outputs and opaque scope exports; it does not merge branch state or perform VCS integration. Failed/interrupted branches prevent partial fan-in and may be revived without rerunning accepted branches. Omit `parallel` on the generator to retain ordinary sequential behavior exactly.
 
 ## Workflow safety in loops
 

@@ -17,40 +17,21 @@ loop) cannot fail on a stale aggregate visit or edge count.
 | Visit counts | `state.visits` | Diagnostic | Always recorded; **never enforced** |
 | Aggregate traversals | `state.edgeTraversals` | Diagnostic | Always recorded; **never enforced** |
 
-For the opt-in parallel loop contract, see [Parallel loop orchestration semantics](parallel-loop-orchestration.md). Parallel mode adds coordinator, child-process, and workspace rules without changing the resource scopes below for an ordinary sequential loop.
+For intrinsic parallel generation, see [Parallel generation and scoped execution](parallel-loop-orchestration.md). It adds bounded child scheduling without changing the resource scopes below for an ordinary sequential loop.
 
-## Parallel loop safety (experimental)
+## Parallel generation safety
 
-Parallel mode is an explicitly bounded orchestration mode, not an implicit
-relaxation of workflow limits:
+Parallel generation is explicitly bounded and workspace neutral:
 
-- `maxConcurrency` bounds live child lanes. Queued streams do not create a
-  process or workspace until a slot is available.
-- The parent `budget.maxTokens` remains the aggregate hard stop. Child usage is
-  counted once in parent totals; parallel execution never raises the budget or
-  hides child cost.
-- Per-item `edge.maxTraversals` and `limits.maxNoAdvanceCycles` retain their
-  existing child-local scopes. A retry in one lane or item does not consume
-  another lane's allowance. Resolver retries have their own explicit edge
-  budgets.
-- A child failure prevents fan-in but does not cancel healthy siblings. The
-  coordinator waits for all lanes to become terminal unless the parent is
-  cancelled or a hard global limit interrupts the run.
-- Cancellation stops queued launches, terminates live child process trees,
-  marks nonterminal lanes interrupted, and preserves workspaces and artifacts
-  for diagnosis or revival. It is idempotent; late events cannot reopen a
-  terminal lane.
-- The parent workspace and bookmark remain unchanged through fan-out, child
-  execution, and lane-local checkpoints. Shared repository state can advance
-  only after all lanes succeed, fan-in/evaluation is accepted, and finalization
-  verifies the result.
+- `parallelism.maxConcurrency` bounds live streams app-wide; optional loop `parallel.maxConcurrency` overrides it. Both are positive safe integers. Excess streams queue in normalized order.
+- The parent `budget.maxTokens` remains the aggregate hard stop. Child usage is counted once; parallel execution never raises or hides the budget.
+- Per-item retries and no-advance limits remain branch-local. One stream does not consume another's allowance.
+- A branch failure prevents fan-in but healthy siblings run to terminal for diagnostics. Cancellation stops queued launches, terminates live children, drains telemetry, and durably interrupts nonterminal branches.
+- Every copied materia needs `parallelSafe: true`. This is explicit trust for concurrent execution, not a sandbox or isolation guarantee; interactive and multi-turn children are rejected.
+- Execution scopes isolate identity and branch-local state, **not files**. Multiple scopes may share a cwd. Concurrent writers must use a utility-provided isolated scope or be safe by construction.
+- Intrinsic fan-in orders outputs and opaque exports but never merges state, files, or revisions. Failed/interrupted branches produce no partial fan-in.
 
-Parallel mode is jj-only and requires explicit child-safe capability metadata.
-It rejects nested/overlapping regions and parent-shared operations such as
-bookmark advancement or publishing from child subgraphs. See the full
-[parallel orchestration contract](parallel-loop-orchestration.md) for durable
-lane states, all-terminal failure, revival, artifact ownership, and conflict
-resolution.
+VCS behavior is optional utility composition. The shipped jj workflow uses per-branch workspace scopes and ownership-checked integration/finalization, but core parallel execution neither requires jj nor assumes the base working copy is protected.
 
 ## Operator-controlled token budget
 

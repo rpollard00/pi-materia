@@ -15,7 +15,8 @@ queued same-cast quest resumption, and the distinction between revive and recast
 4. [Passive Standalone Revival](#4-passive-standalone-revival)
 5. [Exhaustion-Extending Revival](#5-exhaustion-extending-revival)
 6. [Queued Same-Cast Quest Resumption](#6-queued-same-cast-quest-resumption)
-7. [Implementation Reference](#7-implementation-reference)
+7. [Parallel Branch Revival](#7-parallel-branch-revival)
+8. [Implementation Reference](#8-implementation-reference)
 
 ---
 
@@ -383,7 +384,17 @@ fields for observability.
 
 ---
 
-## 7. Implementation Reference
+## 7. Parallel Branch Revival
+
+A failed intrinsic parallel run is revived from durable plan, graph, branch, child-session, attempt, and execution-scope identities. Revival does not invoke the generator again, redistribute work, or rerun accepted branches. Only failed or interrupted branches restart or resume; accepted terminal outputs and scopes remain available for the eventual ordered barrier.
+
+Before launching anything, runtime validates the immutable plan and graph, stream membership, complete parent/loop/child/lane identity, retained child initial data, execution scope, cwd, and artifact provenance. It revalidates resumed snapshots as well. Missing data or drift is an integrity failure rather than permission to infer a replacement. Intrinsic revival does not require a loop concurrency override; it uses the persisted run bound.
+
+Each coordinator attempt has distinct artifacts even when a resumed child retains its original session paths. Cancellation is idempotent and can be issued by a fresh dispatcher against every persisted nonterminal run; available telemetry is drained before terminalization. See [Parallel generation and scoped execution](parallel-loop-orchestration.md#7-persistence-cancellation-and-revival) and the [operator guide](parallel-workflow-operation.md#cancel-and-revive).
+
+---
+
+## 8. Implementation Reference
 
 | Component | File | Key Functions |
 |---|---|---|
@@ -392,7 +403,7 @@ fields for observability.
 | Agent end handler | `src/runtime/agentLifecycle.ts` | `handleAgentEnd` (interruption routing) |
 | Agent settled handler | `src/runtime/agentLifecycle.ts` | `handleAgentSettled` |
 | Tool scope restoration | `src/runtime/agentLifecycle.ts` | `prepareAgentStartSystemPrompt` |
-| Passive revival | `src/runtime/castLifecycle.ts` | `reviveNativeCast` (passive path, ~L258) |
+| Passive and parallel revival | `src/runtime/castLifecycle.ts` | `reviveNativeCast` |
 | Edge-traversal revival | `src/runtime/castLifecycle.ts` | `reviveNativeCast` (edge_traversal path) |
 | Same-socket recovery revival | `src/runtime/castLifecycle.ts` | `reviveNativeCast` (same_socket_recovery path) |
 | Queued resumption | `src/runtime/castLifecycle.ts` | `reactivateQueuedNativeCast` (~L447) |
@@ -406,6 +417,7 @@ fields for observability.
 | UI status with interruption | `src/presentation/ui.ts` | `createMateriaCastStatusModel` |
 | Lifecycle event presets | `src/eventing/presets.ts` | `AGENT_CONTROLLER_FILTER`, `AGENT_CONTROLLER_TYPE_MAP` |
 | Recovery allowance extensions | `src/application/recoveryPolicy.ts` | `extendEdgeTraversalAllowanceForRevive`, `extendSameSocketRecoveryAllowanceForRevive` |
+| Parallel revival validation/dispatch | `src/runtime/parallelDispatcher.ts` | `validateRevival`, resumed snapshot validation, cancellation |
 
 ### Test Coverage
 

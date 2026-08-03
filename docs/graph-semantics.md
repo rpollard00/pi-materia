@@ -2,7 +2,7 @@
 
 Materia graphs are ordered workflow state machines. They may branch, loop, and run deterministic utility sockets before or between agent turns.
 
-For the structured loop contract, see [Structured loop semantics](structured-loop-semantics.md). For the opt-in jj-only parallel mode, see [Parallel loop orchestration semantics](parallel-loop-orchestration.md). Normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is the graph/loadout terminal sentinel.
+For the structured loop contract, see [Structured loop semantics](structured-loop-semantics.md). For intrinsic, workspace-neutral parallel generation, see [Parallel generation and scoped execution](parallel-loop-orchestration.md). Normal edges route current-item control flow, `advance` increments cursors and detects exhaustion, `loops.<id>.exits` owns post-exhaustion routing, and `end` is the graph/loadout terminal sentinel.
 
 ## Edge conditions
 
@@ -98,25 +98,13 @@ Route resolution is deterministic. A final `{ "satisfied": true }` result select
 
 The WebUI derives visual edges for these routes with stable ids like `loop-exit:<loopId>:<routeId>`. Editing or deleting those visual edges mutates `loops.<id>.exits`, not normal socket edges.
 
-## Parallel loop regions (experimental)
+## Derived parallel regions
 
-A loop may opt into parallel orchestration, but the graph remains symbolic: the
-planner/normalizer connection renders a fork, and the loop's post-integration
-routes render a barrier and fan-in. Runtime lane sockets are not materialized
-in the parent graph, and parent edges must never target or traverse them. The
-parent enters the region once and coordinates one child loop per ordered
-planner stream.
+A materia with `generator: true` and `parallel: true` automatically parallelizes its single deterministic consuming loop. The graph derives a fork after the generator, a branch prelude from sockets on the path to the loop, one stream-local loop per child, and an intrinsic barrier before the loop continuation. These markers are visual/runtime structure, not authored sockets or parent edges.
 
-Parallel topology is validated more strictly than an ordinary loop. It needs a
-valid planner/normalizer input, deterministic entry and terminal boundaries,
-compatible clean/conflict exits, bounded concurrency, and a child-safe loop
-subgraph. Parallel regions cannot overlap or nest. Failure and cancellation are
-coordinator outcomes rather than ordinary per-item edge routing; only a clean
-or conflicted fan-in follows the symbolic satisfied/not-satisfied routes.
+Every child executes the complete prelude once and then only its ordered stream items. The path must be unambiguous and unconditional, with one consumer and one post-barrier continuation. Conditional bypasses, nested regions, and overlapping initial regions are rejected. Child materia must explicitly be trusted with `parallelSafe: true`; this grants concurrent execution and does not promise cwd isolation.
 
-See [Parallel loop orchestration semantics](parallel-loop-orchestration.md) for
-stream validation, child compilation, durable lane states, jj lifecycle,
-revival, and the parent-workspace invariant.
+The barrier emits terminal outputs and opaque execution-scope exports in stream order. It never merges generic branch state or performs repository integration. Branch failure or interruption fails the cast after all branches become terminal. See [Parallel generation and scoped execution](parallel-loop-orchestration.md).
 
 ## Utility materia and generator/consumer styling
 
