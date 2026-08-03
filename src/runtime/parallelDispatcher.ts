@@ -441,7 +441,7 @@ export class ParallelLoopDispatcher {
       });
       const lifecycleType = prepared.resumeChild ? "parallel_lane_resumed" : "parallel_lane_started";
       await this.#appendLaneLifecycle(active, state, input.loopId, prepared.stream, lifecycleType, this.#now(), { status: "running" });
-      await this.#appendEvent(state, lifecycleType, { parentCastId: state.castId, loopId: input.loopId, runId: this.#run?.runId, laneId: lane.laneId, streamIndex: prepared.stream.streamIndex, attempt, childCastId, executionScope: { id: scope.id, cwd: scope.cwd, exportNames: Object.keys(scope.exports).sort() }, ...(artifactPaths ? { artifactPaths } : {}) });
+      await this.#appendEvent(state, lifecycleType, { ...this.#eventProvenance(state, input.loopId, prepared.stream, active), status: "running" });
       notifyParallelUser(input.ctx, `pi-materia spawned parallel lane "${prepared.stream.name}" for loop "${input.loopId}".`, "info");
     } catch (error) {
       this.#active.delete(lane.laneId);
@@ -454,7 +454,7 @@ export class ParallelLoopDispatcher {
   async #handleChildEvent(input: ParallelLoopDispatchInput, state: MateriaCastState, stream: NormalizedParallelStream, active: ActiveLane, event: ChildCastStreamEvent): Promise<void> {
     // Usage already delivered by the child runner remains authoritative during
     // cancellation. Other late callbacks must not mutate a terminal lane.
-    const usage = isParallelUsage(event.usage) ? event.usage : undefined;
+    const usage = isParallelUsage(event.usage) ? compactParallelUsage(event.usage) : undefined;
     if (this.#cancelRequested && !usage) return;
     const previous = this.#eventTails.get(active.childCastId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
@@ -478,7 +478,8 @@ export class ParallelLoopDispatcher {
     if (this.#cancelRequested || this.#budgetFailure || !this.#active.delete(stream.laneId)) return;
     active.subscription?.unsubscribe();
     const observation = await this.#deps.children.observe({ childCastId: active.childCastId }).catch(() => undefined);
-    const usage = highestUsage([observation && isParallelUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined, isParallelUsage(result.usage) ? result.usage : undefined, this.#latestUsage.get(active.childCastId)]);
+    const selectedUsage = highestUsage([observation && isParallelUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined, isParallelUsage(result.usage) ? result.usage : undefined, this.#latestUsage.get(active.childCastId)]);
+    const usage = selectedUsage ? compactParallelUsage(selectedUsage) : undefined;
     if (usage) await this.#aggregateUsage(state, input, stream, active, usage);
     if (this.#budgetFailure) return;
     const accepted = result.status === "succeeded" && result.accepted;
@@ -503,7 +504,13 @@ export class ParallelLoopDispatcher {
       ...(reason ? { error: boundedFailureReason(reason) } : {}),
     });
     const reached = Object.values(this.#run!.lanes).filter((lane) => isTerminalLaneStatus(lane.status)).length;
-    await this.#appendEvent(state, "parallel_lane_terminal", { ...this.#eventProvenance(state, input.loopId, stream, active), status: result.status, accepted, barrier: { reached, total: this.#run!.queueOrder.length }, executionScope: { id: terminalScope.id, cwd: terminalScope.cwd, exportNames: Object.keys(terminalScope.exports).sort() }, ...(result.output !== undefined ? { output: result.output } : {}), ...(reason ? { error: boundedFailureReason(reason) } : {}), ...(usage ? { usage } : {}) });
+    await this.#appendEvent(state, "parallel_lane_terminal", {
+      ...this.#eventProvenance(state, input.loopId, stream, active),
+      status: accepted ? "accepted" : result.status === "interrupted" ? "interrupted" : "failed",
+      barrier: { reached, total: this.#run!.queueOrder.length },
+      ...(reason ? { error: boundedFailureReason(reason) } : {}),
+      ...(usage ? { usage: compactParallelUsage(usage) } : {}),
+    });
     await this.#pump();
     await this.#maybeAllTerminal(input, state);
   }
@@ -521,7 +528,14 @@ export class ParallelLoopDispatcher {
     if (rejected.length) {
       const reason = aggregateParallelLaneFailureReason(run);
       this.#transitionRun(input, state, "failed", "skipped");
-      await this.#appendEvent(state, "parallel_branches_failed", { loopId: input.loopId, runId: run.runId, reason, barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "failed" }, orderedBranches: run.queueOrder.map((laneId) => ({ laneId, status: run.lanes[laneId]?.status ?? "interrupted", attempt: run.lanes[laneId]?.attempt ?? 0 })) });
+      await this.#appendEvent(state, "parallel_branches_failed", {
+        parentCastId: state.castId,
+        loopId: input.loopId,
+        runId: run.runId,
+        status: "failed",
+        error: boundedFailureReason(reason),
+        barrier: barrierSummary(run, "failed"),
+      });
       await this.#notifyRunFailure(input, state, run.runId, reason);
       return;
     }
@@ -530,10 +544,11 @@ export class ParallelLoopDispatcher {
     // the exactly-once guard against duplicate terminal callbacks.
     this.#transitionRun(input, state, "completed", "accepted");
     await this.#appendEvent(state, "parallel_branches_terminal", {
+      parentCastId: state.castId,
       loopId: input.loopId,
       runId: run.runId,
-      barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "accepted" },
-      orderedBranches: result.orderedBranches,
+      status: "accepted",
+      barrier: barrierSummary(run, "accepted"),
     });
     if (!input.onFanIn) return;
     try {
@@ -571,7 +586,8 @@ export class ParallelLoopDispatcher {
         if (!lane) continue;
         const observation = await this.#deps.children.observe({ childCastId }).catch(() => undefined);
         if (!observation || !isParallelUsage(observation.snapshot.usage)) continue;
-        if (!this.#latestUsage.has(childCastId) && lane.usage) this.#latestUsage.set(childCastId, lane.usage);
+        const observedUsage = compactParallelUsage(observation.snapshot.usage);
+        if (!this.#latestUsage.has(childCastId) && lane.usage) this.#latestUsage.set(childCastId, compactParallelUsage(lane.usage));
         const latestEvent = [...observation.snapshot.events, ...observation.events]
           .reduce<ChildCastStreamEvent | undefined>((latest, event) => !latest || event.sequence > latest.sequence ? event : latest, undefined);
         // Cancellation is a durable boundary. Persist the observed cumulative
@@ -581,11 +597,11 @@ export class ParallelLoopDispatcher {
           laneId: lane.laneId,
           attempt: lane.attempt,
           childCastId,
-          usage: observation.snapshot.usage,
+          usage: observedUsage,
           ...(latestEvent ? { lastEvent: { sequence: latestEvent.sequence, type: latestEvent.type, occurredAt: latestEvent.occurredAt } } : {}),
           timestamp: observation.snapshot.updatedAt,
         }, false);
-        await this.#aggregateUsage(state, dispatchInput, streamForPersistedLane(lane), activeForPersistedLane(state, run, lane), observation.snapshot.usage, false);
+        await this.#aggregateUsage(state, dispatchInput, streamForPersistedLane(lane), activeForPersistedLane(state, run, lane), observedUsage, false);
       }
 
       await Promise.all([...childIds].map((childCastId) => this.#abortChild(childCastId, reason)));
@@ -599,7 +615,14 @@ export class ParallelLoopDispatcher {
       }
       for (const lane of active) lane.subscription?.unsubscribe();
       this.#transitionRun(dispatchInput, state, "failed", "skipped");
-      await this.#appendEvent(state, "parallel_cancelled", { loopId: run.loopId, runId: run.runId, reason, barrier: { reached: run.queueOrder.length, total: run.queueOrder.length, phase: "failed" }, orderedBranches: run.queueOrder.map((laneId) => ({ laneId, status: this.#run?.lanes[laneId]?.status ?? "interrupted", attempt: this.#run?.lanes[laneId]?.attempt ?? 0 })) });
+      await this.#appendEvent(state, "parallel_cancelled", {
+        parentCastId: state.castId,
+        loopId: run.loopId,
+        runId: run.runId,
+        status: "failed",
+        error: reason,
+        barrier: barrierSummary(this.#run ?? run, "failed"),
+      });
     }
     this.#active.clear();
   }
@@ -679,7 +702,16 @@ export class ParallelLoopDispatcher {
     catch (error) { await this.#appendEvent(state, "parallel_artifact_failure", { laneId: identity.laneId, operation: "initialize", error: boundedFailureReason(parallelErrorMessage(error)) }); return undefined; }
   }
   async #appendLaneLifecycle(active: ActiveLane, state: MateriaCastState, loopId: string, stream: NormalizedParallelStream, type: ParallelLaneEventArtifact["event"]["type"], occurredAt: number, details: Omit<ParallelLaneEventArtifact["event"], "type" | "occurredAt"> = {}): Promise<void> {
-    const event: ParallelLaneEventArtifact = { provenance: this.#eventProvenance(state, loopId, stream, active), event: { type, occurredAt, ...details } };
+    const event: ParallelLaneEventArtifact = {
+      provenance: this.#eventProvenance(state, loopId, stream, active),
+      event: {
+        type,
+        occurredAt,
+        ...(details.status ? { status: details.status } : {}),
+        ...(details.usage && isParallelUsage(details.usage) ? { usage: compactParallelUsage(details.usage) } : {}),
+        ...(details.error ? { error: boundedFailureReason(details.error) } : {}),
+      },
+    };
     await this.#deps.artifacts?.lane?.appendEvent({ ...active.artifactIdentity, event }).catch(() => undefined);
   }
   async #writeTerminal(active: ActiveLane, result: ChildCastTerminalResult, usage: MateriaParallelUsageTotals | undefined, diagnostics: readonly ParallelLaneDiagnosticArtifact[]): Promise<void> {
@@ -835,6 +867,20 @@ function notifyParallelUser(ctx: ExtensionContext, message: string, level: "info
   }
 }
 function aggregateParallelLaneFailureReason(run: MateriaParallelRunState): string { return boundedFailureReason(`Parallel fan-in skipped because not all branches were accepted: ${run.queueOrder.filter((id) => run.lanes[id]?.status !== "accepted").map((id) => `${id} (${run.lanes[id]?.status ?? "missing"}${run.lanes[id]?.failureReason ? `: ${run.lanes[id]!.failureReason}` : ""})`).join("; ")}.`); }
+function compactParallelUsage(usage: MateriaParallelUsageTotals): MateriaParallelUsageTotals {
+  return {
+    tokens: { input: usage.tokens.input, output: usage.tokens.output, cacheRead: usage.tokens.cacheRead, cacheWrite: usage.tokens.cacheWrite, total: usage.tokens.total },
+    cost: { input: usage.cost.input, output: usage.cost.output, cacheRead: usage.cost.cacheRead, cacheWrite: usage.cost.cacheWrite, total: usage.cost.total },
+  };
+}
+function barrierSummary(run: MateriaParallelRunState, phase: "accepted" | "failed"): Record<string, unknown> {
+  const statuses: Record<string, number> = {};
+  for (const laneId of run.queueOrder) {
+    const status = run.lanes[laneId]?.status ?? "interrupted";
+    statuses[status] = (statuses[status] ?? 0) + 1;
+  }
+  return { reached: run.queueOrder.length, total: run.queueOrder.length, phase, statuses };
+}
 function boundedFailureReason(value: string, max = 1_000): string { const text = value.trim() || "parallel execution failed"; return text.length <= max ? text : `${text.slice(0, max - 1)}…`; }
 function toParallelDiagnostic(value: unknown): ParallelLaneDiagnosticArtifact { const record = isRecord(value) ? value : {}; return { code: boundedFailureReason(typeof record.code === "string" ? record.code : "child_diagnostic", 120), message: boundedFailureReason(typeof record.message === "string" ? record.message : "Child emitted a diagnostic."), severity: record.severity === "info" || record.severity === "error" ? record.severity : "warning", occurredAt: typeof record.occurredAt === "number" ? record.occurredAt : Date.now() }; }
 function highestUsage(values: readonly (MateriaParallelUsageTotals | undefined)[]): MateriaParallelUsageTotals | undefined { return values.filter((value): value is MateriaParallelUsageTotals => value !== undefined).sort((a, b) => b.tokens.total - a.tokens.total)[0]; }

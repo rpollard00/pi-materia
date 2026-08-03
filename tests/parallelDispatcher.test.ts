@@ -145,14 +145,29 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     });
     expect(fanIns[0].result.orderedBranches[0].state).toBeUndefined();
     expect(state.branchScopes[replacementScope.id]).toEqual(replacementScope);
-    expect(events.find((event) => event.type === "parallel_branches_terminal")?.data.orderedBranches.map((branch: any) => branch.laneId)).toEqual(["lane-a", "lane-b", "lane-c"]);
+
+    // Monitoring remains lifecycle-only even though durable state and the
+    // in-process fan-in retain complete outputs and execution scopes.
+    const startedEvent = events.find((event) => event.type === "parallel_lane_started")!.data;
+    expect(startedEvent.status).toBe("running");
+    expect(startedEvent.executionScope).toBeUndefined();
+    expect(startedEvent.artifactPaths).toBeUndefined();
+    const laneTerminalEvents = events.filter((event) => event.type === "parallel_lane_terminal").map((event) => event.data);
+    expect(laneTerminalEvents).toHaveLength(3);
+    expect(laneTerminalEvents.every((event) => event.status === "accepted" && event.output === undefined && event.executionScope === undefined && event.accepted === undefined)).toBe(true);
+    const barrierEvent = events.find((event) => event.type === "parallel_branches_terminal")!.data;
+    expect(barrierEvent).toMatchObject({ parentCastId: "cast-1", loopId: "build", status: "accepted", barrier: { reached: 3, total: 3, phase: "accepted", statuses: { accepted: 3 } } });
+    expect(barrierEvent.orderedBranches).toBeUndefined();
+    expect(JSON.stringify(events)).not.toContain("lane-a-workspace");
+    expect(JSON.stringify(events)).not.toContain('"result":"A"');
   });
 
   test("waits for all terminal branches and fails instead of invoking fan-in", async () => {
     const state = makeState();
     const failures: any[] = [];
     const fanIns: any[] = [];
-    const { childRunner, dispatcher: subject } = dispatcher();
+    const events: Array<{ type: string; data: any }> = [];
+    const { childRunner, dispatcher: subject } = dispatcher(undefined, { artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => events.push({ type, data }) } });
     await subject.dispatch({
       pi: {} as any,
       ctx: {} as any,
@@ -174,6 +189,13 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(failures).toHaveLength(1);
     expect(failures[0].reason).toContain("lane-a (failed: branch failed)");
     expect(state.parallelRuns?.build?.phase).toBe("failed");
+    const failedLane = events.find((event) => event.type === "parallel_lane_terminal" && event.data.laneId === "lane-a")!.data;
+    expect(failedLane).toMatchObject({ status: "failed", error: "branch failed", barrier: { reached: 1, total: 3 } });
+    expect(failedLane.output).toBeUndefined();
+    expect(failedLane.executionScope).toBeUndefined();
+    const failedBarrier = events.find((event) => event.type === "parallel_branches_failed")!.data;
+    expect(failedBarrier).toMatchObject({ status: "failed", barrier: { reached: 3, total: 3, phase: "failed", statuses: { accepted: 2, failed: 1 } } });
+    expect(failedBarrier.orderedBranches).toBeUndefined();
   });
 
   test("revives only failed branches while preserving accepted outputs and immutable attempt artifacts", async () => {
@@ -218,6 +240,14 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(attempt2Manifest.paths.laneManifestPath).not.toBe(attempt3Manifest.paths.laneManifestPath);
     expect(attempt2Manifest.paths.sessionPath).toBe(attempt3Manifest.paths.sessionPath);
 
+    initial.childRunner.emit(attempt3.identity.childCastId, {
+      type: "usage_checkpoint",
+      usage: {
+        tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5, reasoningSignature: "must-not-leak" },
+        cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5, toolResult: "must-not-leak" },
+      } as any,
+    });
+    await flush(initial.childRunner);
     initial.childRunner.complete(attempt3.identity.childCastId, { output: { result: "accepted-b" } });
     await flush(initial.childRunner);
     expect(JSON.parse(await readFile(path.join(laneRoot, "attempt-2", "terminal-result.json"), "utf8")).result.status).toBe("failed");
@@ -225,7 +255,12 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const attempt2Events = (await readFile(path.join(laneRoot, "attempt-2", "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     const attempt3Events = (await readFile(path.join(laneRoot, "attempt-3", "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(attempt2Events.map((entry) => entry.event.type)).toEqual(["parallel_lane_resumed", "parallel_lane_terminal"]);
-    expect(attempt3Events.map((entry) => entry.event.type)).toEqual(["parallel_lane_resumed", "parallel_lane_terminal"]);
+    expect(attempt3Events.map((entry) => entry.event.type)).toEqual(["parallel_lane_resumed", "usage_checkpoint", "parallel_lane_terminal"]);
+    expect(JSON.stringify(attempt3Events)).not.toContain("accepted-b");
+    expect(JSON.stringify(attempt3Events)).not.toContain("must-not-leak");
+    const attempt3Terminal = JSON.parse(await readFile(path.join(laneRoot, "attempt-3", "terminal-result.json"), "utf8"));
+    expect(attempt3Terminal.result.output).toEqual({ result: "accepted-b" });
+    expect(JSON.stringify(attempt3Terminal.usage)).not.toContain("must-not-leak");
     expect(fanIns).toHaveLength(1);
     expect(fanIns[0].result.orderedBranches.map((branch: any) => branch.terminalOutput)).toEqual([
       { result: "accepted-a" }, { result: "accepted-b" }, { result: "accepted-c" },
