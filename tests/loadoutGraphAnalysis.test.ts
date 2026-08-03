@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { analyzeLoadoutGraph } from "../src/graph/loadoutGraphAnalysis.js";
+import { analyzeLoadoutGraph, reconcileLoadoutLoopConsumersFromGraph } from "../src/graph/loadoutGraphAnalysis.js";
 import { normalizeLoadedLoadout, prepareLoadoutForSave } from "../src/loadout/loadoutNormalization.js";
 import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 
@@ -8,8 +8,32 @@ const materia = {
   refiner: { type: "agent", prompt: "Refine", tools: "none", generator: true },
   parallelPlanner: { type: "agent", prompt: "Plan", tools: "none", generator: true, parallel: true },
   Build: { type: "agent", prompt: "Build", tools: "coding" },
+  "Spawn-JJ-Workspace": { type: "utility", command: ["jj", "workspace", "add"] },
   scriptPlanner: { type: "utility", command: ["node", "plan.mjs"], generator: true },
 } satisfies PiMateriaConfig["materia"];
+
+function parallelPreludeLoadout(consumerFrom = "Socket-4"): MateriaPipelineConfig {
+  return {
+    entry: "Socket-4",
+    sockets: {
+      "Socket-4": { materia: "parallelPlanner", edges: [{ when: "always", to: "Socket-5" }] },
+      "Socket-5": { materia: "Spawn-JJ-Workspace", edges: [{ when: "always", to: "Socket-6" }] },
+      "Socket-6": { materia: "Build", edges: [{ when: "always", to: "Socket-7" }] },
+      "Socket-7": { materia: "Build", edges: [
+        { when: "satisfied", to: "Socket-8" },
+        { when: "not_satisfied", to: "Socket-6" },
+      ] },
+      "Socket-8": { materia: "Build", parse: "json", edges: [{ when: "always", to: "end" }] },
+    },
+    loops: {
+      parallelWork: {
+        sockets: ["Socket-6", "Socket-7", "Socket-8"],
+        consumes: { from: consumerFrom, output: "workItems" },
+        exit: { from: "Socket-8", when: "satisfied", to: "end" },
+      },
+    },
+  };
+}
 
 function overlappingLoopLoadout(): MateriaPipelineConfig {
   const sourceId = "Socket-1";
@@ -82,6 +106,47 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
       "loop-consumer-missing:missing:",
       ...Array.from({ length: 24 }, (_, index) => `loop-consumer-stale:overlap-${index.toString().padStart(2, "0")}:Socket-999`),
     ].sort());
+  });
+
+  test("load normalization preserves a parallel consumer and keeps its branch prelude outside the cycle", () => {
+    const authored = parallelPreludeLoadout();
+    const before = JSON.stringify(authored);
+
+    const normalized = normalizeLoadedLoadout(authored, materia);
+
+    expect(JSON.stringify(authored)).toBe(before);
+    expect(normalized.loadout.loops?.parallelWork?.consumes).toEqual({ from: "Socket-4", output: "workItems" });
+    expect(normalized.loadout.loops?.parallelWork?.sockets).toEqual(["Socket-6", "Socket-7", "Socket-8"]);
+    expect(normalized.loadout.loops?.parallelWork?.sockets).not.toContain("Socket-5");
+    expect(normalized.analysis.loopConsumerSources.get("parallelWork")).toEqual({ from: "Socket-4", output: "workItems" });
+    expect(normalized.analysis.diagnostics).toEqual([]);
+  });
+
+  test("consumer reconciliation derives the parallel generator through a branch prelude without mutating input", () => {
+    const authored = parallelPreludeLoadout("stale-socket");
+    const before = JSON.stringify(authored);
+
+    const reconciled = reconcileLoadoutLoopConsumersFromGraph(authored, materia);
+
+    expect(JSON.stringify(authored)).toBe(before);
+    expect(reconciled).not.toBe(authored);
+    expect(reconciled.loops?.parallelWork?.consumes).toEqual({ from: "Socket-4", output: "workItems" });
+    expect(reconciled.loops?.parallelWork?.sockets).toEqual(["Socket-6", "Socket-7", "Socket-8"]);
+    expect(reconciled.loops?.parallelWork?.sockets).not.toContain("Socket-5");
+  });
+
+  test("save preparation preserves a prelude-backed parallel consumer without mutating the authored loadout", () => {
+    const authored = parallelPreludeLoadout();
+    const before = JSON.stringify(authored);
+
+    const prepared = prepareLoadoutForSave(authored, materia, { loadoutName: "Parallel-Experimental" });
+
+    expect(JSON.stringify(authored)).toBe(before);
+    expect(prepared.loadout.loops?.parallelWork?.consumes).toEqual({ from: "Socket-4", output: "workItems" });
+    expect(prepared.loadout.loops?.parallelWork?.sockets).toEqual(["Socket-6", "Socket-7", "Socket-8"]);
+    expect(prepared.loadout.loops?.parallelWork?.sockets).not.toContain("Socket-5");
+    expect(prepared.analysis.loopConsumerSources.get("parallelWork")).toEqual({ from: "Socket-4", output: "workItems" });
+    expect(prepared.analysis.diagnostics).toEqual([]);
   });
 
   test("derives a parallel consumer through a deterministic branch prelude", () => {
