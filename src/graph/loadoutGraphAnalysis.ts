@@ -1,4 +1,5 @@
-import { canonicalGeneratorConfigFor, type GeneratorMateriaLike } from "./generator.js";
+import { canonicalGeneratorConfigFor, isParallelGeneratorMateria, type GeneratorMateriaLike } from "./generator.js";
+import { deriveDeterministicPathToLoop } from "./parallelRegions.js";
 import { getLoadoutSocket, loadoutSocketEntries, loadoutSockets, loopSocketSet } from "../loadout/loadoutAccessors.js";
 import type { MateriaEdgeConfig, MateriaLoopConfig, MateriaLoopConsumerConfig, MateriaPipelineConfig } from "../types.js";
 
@@ -44,11 +45,10 @@ interface AnalyzeableLoadout {
 }
 
 export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record<string, GeneratorMateriaLike> = {}): LoadoutGraphAnalysis {
-  // Keep this analysis tied to semantic graph inputs: build loop membership
-  // indexes once, walk socket edges once, then finalize each loop. Complexity is
-  // O(sockets + edges + loop memberships + edge-loop hits) instead of scanning
-  // every socket/edge once per loop; nested loops only add proportional hits for
-  // edges that actually target sockets belonging to multiple loops.
+  // Keep direct-consumer analysis tied to semantic graph inputs: build loop
+  // membership indexes once and walk socket edges once. Parallel generators get
+  // one additional deterministic path check per consumer loop so this analysis
+  // uses the same branch-prelude rules as parallel region execution.
   const sockets = loadoutSockets(loadout as MateriaPipelineConfig) as Record<string, AnalyzeableSocket | undefined>;
   const diagnostics: LoadoutGraphDiagnostic[] = [];
   const loopConsumerSources = new Map<string, DerivedLoopConsumerSource>();
@@ -81,6 +81,20 @@ export function analyzeLoadoutGraph(loadout: AnalyzeableLoadout, materia: Record
         if (!loopSet || loopSet.has(from)) continue;
         inboundGeneratorSourcesByLoop.get(loopId)?.add(from);
       }
+    }
+  }
+
+  // A parallel branch may perform once-per-branch setup before entering its
+  // per-item cycle. Direct generator edges above remain valid regardless of
+  // branching; only the additional prelude-backed form requires the strict
+  // unconditional, acyclic path semantics used by parallel regions.
+  const pipeline = loadout as MateriaPipelineConfig;
+  for (const [from, socket] of loadoutSocketEntries(pipeline) as [string, AnalyzeableSocket | undefined][]) {
+    if (!socket || !isParallelGeneratorSocket(socket, materia)) continue;
+    for (const [loopId, loopSet] of loopSocketSets) {
+      if (loopSet.has(from) || inboundGeneratorSourcesByLoop.get(loopId)?.has(from)) continue;
+      const path = deriveDeterministicPathToLoop(pipeline, from, loopSet, loopId);
+      if (path.ok) inboundGeneratorSourcesByLoop.get(loopId)?.add(from);
     }
   }
 
@@ -158,6 +172,10 @@ export function reconcileLoadoutLoopConsumersFromGraphInPlace(loadout: MateriaPi
 
 function isWorkItemsGeneratorSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): boolean {
   return isMateriaSocket(socket) && Boolean(canonicalGeneratorConfigFor(materia[socket.materia]));
+}
+
+function isParallelGeneratorSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): boolean {
+  return isMateriaSocket(socket) && isParallelGeneratorMateria(materia[socket.materia]);
 }
 
 function generatorOutputForSocket(socket: AnalyzeableSocket | undefined, materia: Record<string, GeneratorMateriaLike>): string | undefined {

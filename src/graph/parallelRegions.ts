@@ -61,8 +61,12 @@ export function deriveParallelBranchRegions(
     const [loopId, loop] = consumers[0]!;
     const members = loopSockets(loop);
     const memberSet = new Set(members);
-    const path = deterministicPathToLoop(pipeline, generatorSocketId, memberSet, loopId, issues);
-    if (!path) continue;
+    const pathResult = deriveDeterministicPathToLoop(pipeline, generatorSocketId, memberSet, loopId);
+    if (!pathResult.ok) {
+      issues.push(...pathResult.issues);
+      continue;
+    }
+    const path = pathResult.value;
 
     const continuationTargets = new Set<string>();
     if (loop.exit?.to) continuationTargets.add(loop.exit.to);
@@ -98,13 +102,17 @@ export function parallelBranchRegionForEntry(
   return result.ok ? result.value.find((region) => region.entrySocketId === socketId) : undefined;
 }
 
-function deterministicPathToLoop(
+/**
+ * Follow the branch-entry semantics shared by parallel region validation and
+ * loop-consumer derivation. The returned path includes the first loop socket,
+ * but excludes the generator itself.
+ */
+export function deriveDeterministicPathToLoop(
   pipeline: ParallelRegionPipeline,
   generatorSocketId: string,
-  loopMembers: Set<string>,
+  loopMembers: ReadonlySet<string>,
   loopId: string,
-  issues: DomainIssue[],
-): string[] | undefined {
+): DomainResult<readonly string[]> {
   const path: string[] = [];
   const visited = new Set([generatorSocketId]);
   let current = generatorSocketId;
@@ -113,31 +121,27 @@ function deterministicPathToLoop(
     // conditional bypass to `end` alongside an otherwise deterministic path.
     const outgoing = socketConfig(pipeline, current)?.edges ?? [];
     if (outgoing.length !== 1 || outgoing[0]?.when !== "always") {
-      issues.push({
+      return { ok: false, issues: [{
         path: `sockets.${current}.edges`,
         message: `parallel generator path to loop ${JSON.stringify(loopId)} must have exactly one unconditional successor at every prelude socket; ${JSON.stringify(current)} has ${outgoing.length}`,
-      });
-      return undefined;
+      }] };
     }
     const target = outgoing[0].to;
     if (target === "end") {
-      issues.push({
+      return { ok: false, issues: [{
         path: `sockets.${current}.edges`,
         message: `parallel generator path to loop ${JSON.stringify(loopId)} terminates before reaching its consuming loop`,
-      });
-      return undefined;
+      }] };
     }
     if (visited.has(target)) {
-      issues.push({ path: `sockets.${current}.edges`, message: `parallel generator path to loop ${JSON.stringify(loopId)} contains a cycle before its consuming loop` });
-      return undefined;
+      return { ok: false, issues: [{ path: `sockets.${current}.edges`, message: `parallel generator path to loop ${JSON.stringify(loopId)} contains a cycle before its consuming loop` }] };
     }
     if (!socketConfig(pipeline, target)) {
-      issues.push({ path: `sockets.${current}.edges`, message: `parallel generator path references unknown socket ${JSON.stringify(target)}` });
-      return undefined;
+      return { ok: false, issues: [{ path: `sockets.${current}.edges`, message: `parallel generator path references unknown socket ${JSON.stringify(target)}` }] };
     }
     visited.add(target);
     path.push(target);
-    if (loopMembers.has(target)) return path;
+    if (loopMembers.has(target)) return { ok: true, value: path };
     current = target;
   }
 }

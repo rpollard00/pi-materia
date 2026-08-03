@@ -6,6 +6,7 @@ import type { MateriaPipelineConfig, PiMateriaConfig } from "../src/types.js";
 const materia = {
   planner: { type: "agent", prompt: "Plan", tools: "none", generator: true },
   refiner: { type: "agent", prompt: "Refine", tools: "none", generator: true },
+  parallelPlanner: { type: "agent", prompt: "Plan", tools: "none", generator: true, parallel: true },
   Build: { type: "agent", prompt: "Build", tools: "coding" },
   scriptPlanner: { type: "utility", command: ["node", "plan.mjs"], generator: true },
 } satisfies PiMateriaConfig["materia"];
@@ -81,6 +82,58 @@ describe("loadout graph analysis under overlapping loop memberships", () => {
       "loop-consumer-missing:missing:",
       ...Array.from({ length: 24 }, (_, index) => `loop-consumer-stale:overlap-${index.toString().padStart(2, "0")}:Socket-999`),
     ].sort());
+  });
+
+  test("derives a parallel consumer through a deterministic branch prelude", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "parallelPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build", edges: [{ when: "always", to: "Socket-3" }] },
+        "Socket-3": { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
+        "Socket-4": { materia: "Build", edges: [{ when: "not_satisfied", to: "Socket-3" }] },
+      },
+      loops: {
+        work: { sockets: ["Socket-3", "Socket-4"], consumes: { from: "Socket-1", output: "workItems" } },
+      },
+    };
+
+    const analysis = analyzeLoadoutGraph(loadout, materia);
+
+    expect(analysis.loopConsumerSources.get("work")).toEqual({ from: "Socket-1", output: "workItems" });
+    expect(analysis.workItemProducingSocketIds).toEqual(new Set(["Socket-1"]));
+    expect(analysis.diagnostics).toEqual([]);
+  });
+
+  test("does not derive parallel consumers through branching or cyclic preludes", () => {
+    const loadout: MateriaPipelineConfig = {
+      entry: "Socket-1",
+      sockets: {
+        "Socket-1": { materia: "parallelPlanner", edges: [{ when: "always", to: "Socket-2" }] },
+        "Socket-2": { materia: "Build", edges: [
+          { when: "satisfied", to: "Socket-3" },
+          { when: "not_satisfied", to: "Socket-5" },
+        ] },
+        "Socket-3": { materia: "Build", edges: [{ when: "always", to: "Socket-4" }] },
+        "Socket-4": { materia: "Build", edges: [{ when: "not_satisfied", to: "Socket-3" }] },
+        "Socket-5": { materia: "Build", edges: [{ when: "always", to: "Socket-6" }] },
+        "Socket-6": { materia: "Build", edges: [{ when: "always", to: "Socket-5" }] },
+        "Socket-7": { materia: "Build", edges: [{ when: "not_satisfied", to: "Socket-7" }] },
+        "Socket-8": { materia: "parallelPlanner", edges: [{ when: "always", to: "Socket-5" }] },
+      },
+      loops: {
+        branched: { sockets: ["Socket-3", "Socket-4"], consumes: { from: "Socket-1" } },
+        cyclicPrelude: { sockets: ["Socket-7"], consumes: { from: "Socket-8" } },
+      },
+    };
+
+    const analysis = analyzeLoadoutGraph(loadout, materia);
+
+    expect(analysis.loopConsumerSources.size).toBe(0);
+    expect(analysis.diagnostics.map(({ code, loopId }) => `${code}:${loopId}`).sort()).toEqual([
+      "loop-consumer-missing:branched",
+      "loop-consumer-missing:cyclicPrelude",
+    ]);
   });
 
   test("treats utility materia marked generator as loop workItems producers", () => {
