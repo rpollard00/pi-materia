@@ -174,6 +174,9 @@ describe("bundled utility materia defaults", () => {
       parallelSafe: true,
     });
     expect(materia?.description).toContain("active execution scope");
+    expect(materia?.description).toContain("bookmarkless external jj lane workspace");
+    expect(materia?.description).toContain("original cast bookmark");
+    expect(materia?.description).not.toContain("branch-local Blackbelt");
     expect((materia as { command?: unknown }).command).toBeUndefined();
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
@@ -189,7 +192,10 @@ describe("bundled utility materia defaults", () => {
       parse: "json",
       utility: "vcs.integrateJjWorkspaces",
     });
-    expect(materia?.description).toContain("ordered intrinsic fan-in");
+    expect(materia?.description).toContain("schedule-ordered intrinsic barrier exports");
+    expect(materia?.description).toContain("linearly rebases");
+    expect(materia?.description).toContain("without a synthetic merge commit");
+    expect(materia?.description).not.toContain("workspace heads");
     expect((materia as { command?: unknown }).command).toBeUndefined();
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
@@ -206,7 +212,10 @@ describe("bundled utility materia defaults", () => {
       utility: "vcs.finalizeJjWorkspace",
     });
     expect(materia?.description).toContain("explicit agent acceptance");
-    expect(materia?.description).toContain("base scope");
+    expect(materia?.description).toContain("complete linear history");
+    expect(materia?.description).toContain("original cast bookmark");
+    expect(materia?.description).toContain("integration-fix commit");
+    expect(materia?.description).toContain("ownership-checked source and review workspaces");
     expect((materia as { command?: unknown }).command).toBeUndefined();
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
@@ -225,6 +234,10 @@ describe("bundled utility materia defaults", () => {
     expect(typeof materia?.description).toBe("string");
     expect((materia?.description as string).includes("checkpoint")).toBe(true);
     expect((materia?.description as string).includes("jj")).toBe(true);
+    expect(materia?.description).toContain("authorized existing bookmark");
+    expect(materia?.description).toContain("without bookmarks");
+    expect(materia?.description).toContain("never create one");
+    expect(materia?.description).not.toContain("branch-local Blackbelt bookmark");
     expect(typeof materia?.color).toBe("string");
     const allowedColors = new Set(paletteColors);
     expect(allowedColors.has(materia?.color as string)).toBe(true);

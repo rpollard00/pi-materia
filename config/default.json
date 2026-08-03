@@ -690,7 +690,7 @@
     "Integration-Review": {
       "type": "agent",
       "tools": "coding",
-      "prompt": "You are the pi-materia Integration-Review materia. Review the schedule-ordered linear workspace integration in the active execution scope for every integration outcome. Inspect the complete range from the effective base through the final stable change. When conflicts are present, resolve conflicted revisions from earliest to latest by stable change identity while preserving every accepted workstream, then return to the rewritten final tip. When the range is clean, spot-check the combined implementation for cross-workstream defects. Run relevant checks and put any cross-workstream correction in one final working change. Do not rerun workstreams, replan work, publish revisions, advance bookmarks, finalize, or clean workspaces. Return compact JSON with satisfied and explanatory context. Set satisfied true only when the complete linear range is conflict-free and the integrated result satisfies the original request; otherwise set satisfied false with actionable context for the ordinary retry route. Do not emit a top-level text field.",
+      "prompt": "You are the pi-materia Integration-Review materia. Review the schedule-ordered linear workspace integration in the active execution scope for every integration outcome. Inspect the complete range from the effective base through the final stable change; this is linear stacking, not merge fan-in. When conflicts are present, resolve conflicted revisions from earliest to latest by stable change identity while preserving every accepted workstream, then return to the rewritten final tip. When the range is clean, spot-check the combined implementation for cross-workstream defects. Run relevant checks and put any cross-workstream correction in one final working change so finalization can retain it as the single meaningful integration-fix commit. Do not rerun workstreams, replan work, publish revisions, advance the original cast bookmark, finalize, or clean ownership-checked workspaces. Return compact JSON with satisfied and explanatory context. Set satisfied true only when the complete linear range is conflict-free and the integrated result satisfies the original request; otherwise set satisfied false with actionable context for the ordinary retry route. Do not emit a top-level text field.",
       "color": "materia-color-green",
       "parse": "json",
       "lockState": "locked"
@@ -731,7 +731,7 @@
     "Blackbelt-Maintain": {
       "type": "utility",
       "label": "Blackbelt-Maintain",
-      "description": "Autonomously checkpoint accepted work items using jj only (no git fallback). Uses the active execution scope cwd and branch-local Blackbelt bookmark, rejecting parallel use of a shared cast bookmark.",
+      "description": "Autonomously checkpoints accepted work items using jj only (no git fallback). Always describes dirty work before opening a fresh empty working commit; carries forward an explicitly authorized existing bookmark when available, while owned spawned workspaces checkpoint without bookmarks and never create one.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
@@ -745,7 +745,7 @@
     "Spawn-JJ-Workspace": {
       "type": "utility",
       "label": "Spawn-JJ-Workspace",
-      "description": "Creates one ownership-checked external jj workspace from the active execution scope, provisions branch-local Blackbelt state, and activates the workspace as a replacement scope with opaque integration and cleanup exports.",
+      "description": "Creates one ownership-checked, bookmarkless external jj lane workspace from the active execution scope and activates it as a replacement scope with opaque integration and cleanup exports, while preserving the original cast bookmark state for publication.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
@@ -755,7 +755,7 @@
     "Integrate-JJ-Workspaces": {
       "type": "utility",
       "label": "Integrate-JJ-Workspaces",
-      "description": "Consumes ordered intrinsic fan-in scope exports, verifies owned jj workspace heads, and activates a deterministic clean or conflicted integration workspace for post-integration review.",
+      "description": "Consumes schedule-ordered intrinsic barrier exports, verifies owned jj lane commit stacks, linearly rebases each non-empty stack after the preceding one without a synthetic merge commit, and activates a review workspace at the final tip with full-range conflict provenance.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
@@ -764,7 +764,7 @@
     "Finalize-JJ-Workspace": {
       "type": "utility",
       "label": "Finalize-JJ-Workspace",
-      "description": "After explicit agent acceptance, verifies and publishes a conflict-free integrated jj revision, creates an empty base working commit, cleans only ownership-checked workspaces, and returns execution to base scope.",
+      "description": "After explicit agent acceptance, verifies the complete linear history is conflict-free, retains at most one meaningful integration-fix commit, advances only the original cast bookmark to the meaningful tip, leaves one empty base working commit outside published history, and completely cleans ownership-checked source and review workspaces.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",

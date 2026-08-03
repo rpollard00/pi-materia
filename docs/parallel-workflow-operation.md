@@ -50,7 +50,7 @@ Workspace composition does not require parallelism. Place `Spawn-JJ-Workspace` o
 
 ### Parallel generator with one workspace per stream
 
-Place `Spawn-JJ-Workspace` in the derived branch prelude. Each stream creates one owned workspace and executes all its ordered items there. The base working copy remains unchanged during branch work. The utility exports ownership, integration, and cleanup data; parallel core transports those values without understanding jj.
+Place `Spawn-JJ-Workspace` in the derived branch prelude. Each stream creates one owned, bookmarkless lane workspace and executes all its ordered items there. The base working copy and original cast bookmark remain unchanged during branch work. The utility exports ownership, integration, and cleanup data; parallel core transports those values without understanding jj.
 
 ## Runtime expectations
 
@@ -63,15 +63,15 @@ Place `Spawn-JJ-Workspace` in the derived branch prelude. Each stream creates on
 
 ## Blackbelt checkpoints
 
-`Blackbelt-Maintain` runs in the active scope cwd. For dirty work it describes the revision with the current item title, advances that scope's Blackbelt bookmark, and opens a fresh empty working commit. Clean work is a no-op. In parallel use, `Spawn-JJ-Workspace` provides a verified branch-local bookmark. Invocation in a shared base scope retaining the shared cast bookmark is rejected as unsafe.
+`Blackbelt-Maintain` runs in the active scope cwd. For dirty work it first describes the revision with the current item title and then opens a fresh empty working commit. Bookmark carry-forward is optional: it moves only an explicitly scope-authorized bookmark that is proven to exist, and never creates one. Consequently, an owned bookmarkless workspace from `Spawn-JJ-Workspace` checkpoints normally, while ordinary base-scope maintenance can continue carrying the bootstrap bookmark. Clean work is a no-op.
 
 ## Integration, conflicts, and cleanup
 
-After every branch is accepted, `Integrate-JJ-Workspaces` reads the ordered opaque exports, verifies workspace ownership and stable heads, and activates one integration workspace. A repository conflict is a bounded utility result, not an intrinsic fan-in route.
+After every branch is accepted, `Integrate-JJ-Workspaces` reads the schedule-ordered opaque exports and verifies workspace ownership, stable ancestry, and each lane's meaningful commit stack. It removes the trailing empty lane working commits and deterministically stacks each non-empty lane after the preceding lane in normalized schedule order, preserving commit order within each lane. No-op lanes are skipped and no synthetic merge commit is created. The resulting review workspace is materialized at the final linear tip with bounded provenance for conflicts anywhere from the effective base through that tip. A repository conflict is a bounded utility result, not an intrinsic fan-in route.
 
-`Integration-Review` always runs. For a clean integration it spot-checks combined behavior; for a conflicted integration it resolves conflicts. In both cases it runs relevant checks and returns ordinary `satisfied` routing. A not-satisfied retry stays on this review socket and does not rerun accepted branches.
+`Integration-Review` always runs. For a clean integration it spot-checks combined behavior; for a conflicted integration it resolves conflicted revisions from earliest to latest by stable change id, returns to the rewritten final tip, and verifies the complete linear range. In both cases it runs relevant checks and returns ordinary `satisfied` routing. Any cross-stream correction belongs in one final working change, which becomes a single meaningful integration-fix commit during finalization. A not-satisfied retry stays on this review socket and does not rerun accepted branches.
 
-`Finalize-JJ-Workspace` runs only after acceptance. It snapshots review edits, verifies no conflicts remain, publishes the accepted revision through the intended bookmark, creates a verified empty base working commit, cleans only ownership-checked workspaces, and returns execution to base scope. Failure or rejection intentionally preserves workspaces, exports, and revisions. Never use broad `rm -rf`; cleanup must validate producer ownership and workspace manifests.
+`Finalize-JJ-Workspace` runs only after acceptance. It resolves rewritten revisions by stable change id, verifies schedule order and the absence of conflicts across the complete publishable ancestry, and snapshots review edits. An empty review publishes its meaningful parent; a meaningful correction is retained as exactly one integration-fix commit. It advances only the original cast bookmark to that meaningful tip and leaves one verified empty base working commit outside published history. It then forgets every ownership-verified source and review workspace registration and removes each exact external directory and manifest before returning to base scope. Validation precedes destructive cleanup, and partial post-publication cleanup is retryable without creating another empty base commit. Rejection or pre-publication failure intentionally preserves workspaces, exports, and revisions. Never use broad `rm -rf`; cleanup must validate producer ownership and workspace manifests.
 
 ## Monitor and inspect
 

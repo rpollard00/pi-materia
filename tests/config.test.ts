@@ -849,7 +849,7 @@ describe("config loadouts", () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8")) as {
       activeLoadout?: string;
       loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown; consumes?: { from?: string }; exit?: { to?: string } }> }>;
-      materia?: Record<string, { lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean; type?: string; tools?: string; parse?: string }>;
+      materia?: Record<string, { description?: string; prompt?: string; lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean; type?: string; tools?: string; parse?: string }>;
     };
     const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
     expect(rawDefault.activeLoadout).toBe("Full-Auto");
@@ -866,6 +866,16 @@ describe("config loadouts", () => {
     expect(rawDefault.materia?.["Parallel-Integration-Eval"]).toBeUndefined();
     expect(rawDefault.materia?.["Parallel-Resolver"]).toBeUndefined();
     expect(rawDefault.materia?.["Integration-Review"]).toMatchObject({ type: "agent", tools: "coding", parse: "json" });
+    const reviewPrompt = rawDefault.materia?.["Integration-Review"]?.prompt ?? "";
+    expect(reviewPrompt).toContain("schedule-ordered linear workspace integration");
+    expect(reviewPrompt).toContain("complete range from the effective base");
+    expect(reviewPrompt).toContain("single meaningful integration-fix commit");
+    expect(reviewPrompt).toContain("original cast bookmark");
+    expect(reviewPrompt).not.toContain("merge-parent");
+    expect(rawDefault.materia?.["Spawn-JJ-Workspace"]?.description).toContain("bookmarkless external jj lane workspace");
+    expect(rawDefault.materia?.["Blackbelt-Maintain"]?.description).toContain("never create one");
+    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("linearly rebases");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("original cast bookmark");
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
     for (const id of ["Spawn-JJ-Workspace", "Build", "Auto-Eval", "Blackbelt-Maintain"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);

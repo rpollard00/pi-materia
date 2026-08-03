@@ -368,6 +368,24 @@ describe("application prompt assembly", () => {
     expect(syntheticFinalization).toContain("Intrinsic parallel planning");
   });
 
+  test("assembles linear integration review guidance without obsolete workspace merge instructions", () => {
+    const socket = agentSocket({
+      socket: { materia: "Integration-Review", parse: "json" },
+      materia: { type: "agent", tools: "coding", prompt: defaultMateriaPrompt("Integration-Review") },
+    });
+    const prompt = buildSocketPrompt(state(socket), socket);
+
+    expect(prompt).toContain("schedule-ordered linear workspace integration");
+    expect(prompt).toContain("complete range from the effective base");
+    expect(prompt).toContain("earliest to latest by stable change identity");
+    expect(prompt).toContain("single meaningful integration-fix commit");
+    expect(prompt).toContain("original cast bookmark");
+    expect(prompt).toContain("ownership-checked workspaces");
+    expect(prompt).not.toContain("merge-parent");
+    expect(prompt).not.toContain("merge workspace heads");
+    expect(prompt).not.toContain("branch-local workspace bookmark");
+  });
+
   test("supplies bounded conflict context to the coding agent in an integrated scope", () => {
     const socket = agentSocket({
       socket: { materia: "Integration-Review", parse: "json" },
