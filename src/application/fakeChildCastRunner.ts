@@ -169,6 +169,29 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     return { childCastId: input.childCastId, snapshot: this.requireSnapshot(input.childCastId) };
   }
 
+  async retire(input: { childCastId: string; retainForResume: boolean }): Promise<void> {
+    const snapshot = this.records.get(input.childCastId);
+    if (!snapshot || !snapshot.terminalResult) return;
+    this.observers.delete(input.childCastId);
+    if (!input.retainForResume) {
+      this.nextSequences.delete(input.childCastId);
+      this.records.delete(input.childCastId);
+      return;
+    }
+    this.records.set(input.childCastId, {
+      ...snapshot,
+      events: [],
+      diagnostics: [],
+      terminalResult: {
+        status: snapshot.terminalResult.status,
+        accepted: false,
+        endedAt: snapshot.terminalResult.endedAt,
+        ...(snapshot.terminalResult.error ? { error: snapshot.terminalResult.error } : {}),
+        ...(snapshot.terminalResult.abortReason ? { abortReason: snapshot.terminalResult.abortReason } : {}),
+      },
+    });
+  }
+
   async abort(input: ChildCastAbortInput): Promise<{ childCastId: string; status: "aborted" | "already_terminal" | "not_found"; aborted: boolean; snapshot?: ChildCastSnapshot }> {
     const existing = this.records.get(input.childCastId);
     if (!existing) return { childCastId: input.childCastId, status: "not_found", aborted: false };

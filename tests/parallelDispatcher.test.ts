@@ -160,6 +160,195 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(barrierEvent.orderedBranches).toBeUndefined();
     expect(JSON.stringify(events)).not.toContain("lane-a-workspace");
     expect(JSON.stringify(events)).not.toContain('"result":"A"');
+    expect(childRunner.listSnapshots()).toEqual([]);
+    expect(subject.run).toBeUndefined();
+  });
+
+  test("ignores callbacks that arrive after barrier resource retirement", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const observers: any[] = [];
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: (input: any, observer: any) => {
+        observers.push(observer);
+        return childRunner.subscribe(input, observer);
+      },
+    };
+    const fanIns: unknown[] = [];
+    const subject = new ParallelLoopDispatcher({ children, state: { saveCastState: () => undefined } } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
+    for (const child of childRunner.listSnapshots()) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    const usageBefore = structuredClone(state.runState.usage);
+    await observers[0].onEvent?.({ childCastId: "late", sequence: 999, type: "usage_checkpoint", occurredAt: 999, usage: { tokens: { input: 99, output: 0, cacheRead: 0, cacheWrite: 0, total: 99 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    await observers[0].onTerminal?.({ status: "failed", accepted: false, endedAt: 999, error: "late" });
+
+    expect(state.runState.usage).toEqual(usageBefore);
+    expect(state.parallelRuns?.build?.phase).toBe("completed");
+    expect(fanIns).toHaveLength(1);
+    expect(subject.run).toBeUndefined();
+  });
+
+  test("does not let a terminal callback paused in observation mutate a reused dispatcher", async () => {
+    const firstState = makeState();
+    const nextState = makeState();
+    nextState.castId = "cast-2";
+    nextState.runState.runId = "run-2";
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    let releaseObservation!: () => void;
+    const observationReleased = new Promise<void>((resolve) => { releaseObservation = resolve; });
+    let observationStarted!: () => void;
+    const observationEntered = new Promise<void>((resolve) => { observationStarted = resolve; });
+    let deferNextObservation = true;
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: childRunner.subscribe.bind(childRunner),
+      observe: async (input: any) => {
+        if (deferNextObservation) {
+          deferNextObservation = false;
+          observationStarted();
+          await observationReleased;
+        }
+        return childRunner.observe(input);
+      },
+    };
+    const terminalEvents: Array<{ state: MateriaCastState; type: string }> = [];
+    const subject = new ParallelLoopDispatcher({
+      children,
+      state: { saveCastState: () => undefined },
+      artifacts: { appendEvent: async (runState: MateriaCastState["runState"], type: string) => terminalEvents.push({ state: runState === firstState.runState ? firstState : nextState, type }) },
+    } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state: firstState, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const firstChild = childRunner.listSnapshots()[0]!;
+    childRunner.complete(firstChild.identity.childCastId);
+    await observationEntered;
+
+    await subject.cancel({ pi: {} as any, state: firstState, loopId: "build" });
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state: nextState, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    releaseObservation();
+    await flush(childRunner);
+
+    expect(firstState.parallelRuns?.build?.phase).toBe("failed");
+    expect(nextState.parallelRuns?.build?.phase).toBe("dispatching");
+    expect(nextState.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("running");
+    expect(terminalEvents.filter((event) => event.type === "parallel_lane_terminal")).toHaveLength(0);
+    expect(subject.run?.parentCastId).toBe("cast-2");
+  });
+
+  test("does not let terminal usage paused in artifact I/O enforce budget on a reused dispatcher", async () => {
+    const firstState = makeState();
+    const nextState = makeState();
+    nextState.castId = "cast-2";
+    nextState.runState.runId = "run-2";
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    let releaseUsageWrite!: () => void;
+    const usageWriteReleased = new Promise<void>((resolve) => { releaseUsageWrite = resolve; });
+    let usageWriteStarted!: () => void;
+    const usageWriteEntered = new Promise<void>((resolve) => { usageWriteStarted = resolve; });
+    let deferFirstUsageWrite = true;
+    const budgetFailures: unknown[] = [];
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      // Exercise terminal-only accounting rather than the fake runner's
+      // duplicate terminal stream checkpoint.
+      subscribe: (input: any, observer: any) => childRunner.subscribe(input, {
+        ...observer,
+        onEvent: (event: any) => event.type === "terminal" ? undefined : observer.onEvent?.(event),
+      }),
+    };
+    const subject = new ParallelLoopDispatcher({
+      children,
+      state: { saveCastState: () => undefined },
+      artifacts: {
+        appendEvent: async () => undefined,
+        writeUsage: async () => {
+          if (!deferFirstUsageWrite) return;
+          deferFirstUsageWrite = false;
+          usageWriteStarted();
+          await usageWriteReleased;
+        },
+      },
+      budget: { assertBudget: async (value: MateriaCastState) => { if (value.runState.usage.tokens.total > 0) throw new Error("limit"); } },
+      onBudgetExceeded: async (...args: unknown[]) => { budgetFailures.push(args); },
+    } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state: firstState, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const firstChild = childRunner.listSnapshots()[0]!;
+    childRunner.complete(firstChild.identity.childCastId, {
+      usage: { tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, total: 1 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    });
+    await usageWriteEntered;
+
+    await subject.cancel({ pi: {} as any, state: firstState, loopId: "build" });
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state: nextState, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const nextChild = childRunner.listSnapshots().find((child) => child.identity.parentCastId === "cast-2")!;
+    releaseUsageWrite();
+    await flush(childRunner);
+
+    expect(firstState.parallelRuns?.build?.phase).toBe("failed");
+    expect(nextState.parallelRuns?.build?.phase).toBe("dispatching");
+    expect(nextState.parallelRuns?.build?.lanes["lane-a"]?.status).toBe("running");
+    expect(childRunner.getSnapshot(nextChild.identity.childCastId)?.status).toBe("running");
+    expect(budgetFailures).toEqual([]);
+    expect(subject.run?.parentCastId).toBe("cast-2");
+  });
+
+  test("keeps a chained fan-in dispatch owned by the next run", async () => {
+    const firstState = makeState();
+    const nextState = makeState();
+    nextState.castId = "cast-2";
+    nextState.runState.runId = "run-2";
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const observers: any[] = [];
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: (input: any, observer: any) => {
+        observers.push(observer);
+        return childRunner.subscribe(input, observer);
+      },
+    };
+    const subject = new ParallelLoopDispatcher({ children, state: { saveCastState: () => undefined } } as any);
+    const nextFanIns: unknown[] = [];
+    await subject.dispatch({
+      pi: {} as any, ctx: {} as any, state: firstState, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 },
+      onFanIn: async () => {
+        await subject.dispatch({
+          pi: {} as any, ctx: {} as any, state: nextState, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 },
+          onFanIn: async (value) => { nextFanIns.push(value); },
+        });
+      },
+    });
+    for (const child of childRunner.listSnapshots()) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    expect(subject.run?.parentCastId).toBe("cast-2");
+    const nextChildren = childRunner.listSnapshots().filter((child) => child.identity.parentCastId === "cast-2");
+    expect(nextChildren).toHaveLength(3);
+    // A callback captured from the retired run cannot delete a same-named lane
+    // from the new run.
+    await observers[0].onTerminal?.({ status: "failed", accepted: false, endedAt: 99, error: "late old callback" });
+    for (const child of nextChildren) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    expect(nextState.parallelRuns?.build?.phase).toBe("completed");
+    expect(nextFanIns).toHaveLength(1);
+    expect(subject.run).toBeUndefined();
   });
 
   test("waits for all terminal branches and fails instead of invoking fan-in", async () => {
@@ -196,6 +385,10 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const failedBarrier = events.find((event) => event.type === "parallel_branches_failed")!.data;
     expect(failedBarrier).toMatchObject({ status: "failed", barrier: { reached: 3, total: 3, phase: "failed", statuses: { accepted: 2, failed: 1 } } });
     expect(failedBarrier.orderedBranches).toBeUndefined();
+    expect(childRunner.listSnapshots()).toEqual([
+      expect.objectContaining({ status: "failed", events: [], diagnostics: [] }),
+    ]);
+    expect(subject.run).toBeUndefined();
   });
 
   test("revives only failed branches while preserving accepted outputs and immutable attempt artifacts", async () => {
@@ -497,6 +690,29 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(laneEvents.map((entry) => entry.event.event.type)).toEqual(["parallel_lane_started", "usage_checkpoint", "parallel_lane_budget_exceeded"]);
   });
 
+  test("stops terminal processing when terminal-only usage exhausts the budget", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const budgetFailures: unknown[] = [];
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => undefined },
+      budget: { assertBudget: async (value: MateriaCastState) => { if (value.runState.usage.tokens.total > 0) throw new Error("limit"); } },
+      onBudgetExceeded: async (_pi: unknown, _ctx: unknown, _state: unknown, error: unknown) => { budgetFailures.push(error); },
+    } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    childRunner.complete(childRunner.listSnapshots()[0]!.identity.childCastId, {
+      usage: { tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, total: 1 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    });
+
+    await flush(childRunner);
+
+    expect(state.parallelRuns?.build?.phase).toBe("failed");
+    expect(state.parallelRuns?.build?.fanInPhase).toBe("failed");
+    expect(budgetFailures).toHaveLength(1);
+    expect(subject.run).toBeUndefined();
+  });
+
   test("cancels active and queued branches without workspace cleanup", async () => {
     const state = makeState();
     const laneEvents: any[] = [];
@@ -512,7 +728,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     await subject.cancel({ pi: {} as any, state, loopId: "build", reason: "parent abort" });
     await flush(childRunner);
 
-    expect(childRunner.listSnapshots().every((child) => child.status === "interrupted")).toBe(true);
+    expect(childRunner.listSnapshots().every((child) => child.status === "interrupted" && child.events.length === 0 && child.diagnostics.length === 0)).toBe(true);
+    expect(subject.run).toBeUndefined();
     expect(state.parallelRuns?.build?.phase).toBe("failed");
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
     expect(laneEvents.map((entry) => entry.event.event.type)).toEqual([
@@ -520,6 +737,30 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     ]);
     const fresh = dispatcher(childRunner).dispatcher;
     expect(await fresh.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
+  });
+
+  test("reuses the same dispatcher for a later cast after cancellation", async () => {
+    const cancelledState = makeState();
+    const nextState = makeState();
+    nextState.castId = "cast-2";
+    nextState.runState.runId = "run-2";
+    const { childRunner, dispatcher: subject } = dispatcher();
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state: cancelledState, socket: {} as any, loopId: "build", config: { maxConcurrency: 2 } });
+    await subject.cancel({ pi: {} as any, state: cancelledState, loopId: "build" });
+
+    const fanIns: unknown[] = [];
+    await subject.dispatch({
+      pi: {} as any, ctx: {} as any, state: nextState, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 },
+      onFanIn: async (value) => { fanIns.push(value); },
+    });
+    const nextChildren = childRunner.listSnapshots().filter((child) => child.identity.parentCastId === "cast-2");
+    expect(nextChildren).toHaveLength(3);
+    for (const child of nextChildren) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    expect(nextState.parallelRuns?.build?.phase).toBe("completed");
+    expect(fanIns).toHaveLength(1);
+    expect(subject.run).toBeUndefined();
   });
 
   test("rehydrates persisted running children when cancellation uses a fresh dispatcher", async () => {

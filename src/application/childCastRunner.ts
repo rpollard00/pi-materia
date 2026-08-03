@@ -212,6 +212,12 @@ export interface ChildCastAbortResult {
   snapshot?: ChildCastSnapshot;
 }
 
+export interface RetireChildCastInput {
+  childCastId: string;
+  /** Keep only the durable identity needed to resume a failed/interrupted lane. */
+  retainForResume: boolean;
+}
+
 /**
  * Application port for isolated child casts.
  *
@@ -224,6 +230,8 @@ export interface ChildCastRunnerPort {
   subscribe(input: ChildCastObserveInput, observer: ChildCastObserver): ChildCastSubscription;
   resume(input: ResumeChildCastInput): Promise<ChildCastStartResult>;
   abort(input: ChildCastAbortInput): Promise<ChildCastAbortResult>;
+  /** Release terminal process, parser, capture, observer, and replay resources. */
+  retire(input: RetireChildCastInput): Promise<void>;
 }
 
 /** Short aliases for callers that prefer the port-oriented names. */

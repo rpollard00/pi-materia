@@ -95,6 +95,41 @@ describe("Pi child cast runner", () => {
     });
   });
 
+  test("retires terminal resources while preserving only failed-lane resume identity", async () => {
+    const children: FakeChild[] = [];
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 110,
+    });
+
+    await runner.start(input());
+    children[0]!.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: { status: "failed", accepted: false, endedAt: 111, error: "retry" } })}\n`);
+    children[0]!.finish(1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await runner.retire({ childCastId: "child-1", retainForResume: true });
+
+    const retained = await runner.observe({ childCastId: "child-1" });
+    expect(retained?.snapshot.status).toBe("failed");
+    expect(retained?.snapshot.events).toEqual([]);
+    expect(retained?.snapshot.diagnostics).toEqual([]);
+    expect(children[0]!.listenerCount("close")).toBe(0);
+    expect(children[0]!.stdout.listenerCount("data")).toBe(0);
+
+    const resumed = await runner.resume({ childCastId: "child-1" });
+    expect(resumed.snapshot.attempt).toBe(2);
+    children[1]!.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: { status: "succeeded", accepted: true, endedAt: 112 } })}\n`);
+    children[1]!.finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await runner.retire({ childCastId: "child-1", retainForResume: false });
+    expect(await runner.observe({ childCastId: "child-1" })).toBeUndefined();
+    expect(children[1]!.listenerCount("close")).toBe(0);
+  });
+
   test("discards event storms and projects only compact usage telemetry", async () => {
     let child!: FakeChild;
     const runner = createPiChildCastRunner({

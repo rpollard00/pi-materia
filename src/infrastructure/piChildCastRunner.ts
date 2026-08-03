@@ -140,6 +140,8 @@ interface MutableChildRecord {
  */
 export class PiChildCastRunner implements ChildCastRunnerPort {
   readonly #records = new Map<string, MutableChildRecord>();
+  /** Compact terminal snapshots retained only for supported failed-lane resume. */
+  readonly #resumable = new Map<string, ChildCastSnapshot>();
   readonly #executable: string;
   readonly #extensionPath: string;
   readonly #environment: NodeJS.ProcessEnv;
@@ -175,7 +177,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   async start(input: StartChildCastInput): Promise<ChildCastStartResult> {
     validateStartInput(input);
     const childCastId = input.identity.childCastId;
-    if (this.#records.has(childCastId)) {
+    if (this.#records.has(childCastId) || this.#resumable.has(childCastId)) {
       throw new Error(`Child cast ${JSON.stringify(childCastId)} already exists.`);
     }
 
@@ -193,12 +195,13 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 
   async observe(input: ChildCastObserveInput): Promise<ChildCastObservation | undefined> {
     const record = this.#records.get(input.childCastId);
-    if (!record) return undefined;
+    const snapshot = record?.snapshot ?? this.#resumable.get(input.childCastId);
+    if (!snapshot) return undefined;
     const afterSequence = input.afterSequence ?? 0;
     return {
       childCastId: input.childCastId,
-      snapshot: clone(record.snapshot),
-      events: record.snapshot.events.filter((event) => event.sequence > afterSequence).map(clone),
+      snapshot: clone(snapshot),
+      events: snapshot.events.filter((event) => event.sequence > afterSequence).map(clone),
     };
   }
 
@@ -221,37 +224,44 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 
   async resume(input: ResumeChildCastInput): Promise<ChildCastStartResult> {
     const existing = this.#records.get(input.childCastId);
-    if (!existing) throw new Error(`Unknown child cast ${JSON.stringify(input.childCastId)}.`);
-    if (existing.process && !hasProcessExited(existing.process) && !existing.terminalResult) {
+    const retained = this.#resumable.get(input.childCastId);
+    const snapshot = existing?.snapshot ?? retained;
+    if (!snapshot) throw new Error(`Unknown child cast ${JSON.stringify(input.childCastId)}.`);
+    if (existing?.process && !hasProcessExited(existing.process) && !existing.terminalResult) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} is already active.`);
     }
-    if (existing.snapshot.status === "succeeded" && existing.snapshot.accepted) {
+    if (snapshot.status === "succeeded" && snapshot.accepted) {
       throw new Error(`Child cast ${JSON.stringify(input.childCastId)} was accepted and cannot be resumed.`);
     }
 
-    await existing.close.catch(() => undefined);
+    if (existing) await existing.close.catch(() => undefined);
     const inputForLaunch: StartChildCastInput = {
-      identity: clone(existing.snapshot.identity),
-      request: existing.snapshot.request,
-      cwd: existing.snapshot.cwd,
-      compiledLoadout: clone(existing.snapshot.compiledLoadout),
-      paths: clone(existing.snapshot.paths),
-      executionScope: clone(existing.snapshot.executionScope),
-      attempt: existing.snapshot.attempt + 1,
+      identity: clone(snapshot.identity),
+      request: snapshot.request,
+      cwd: snapshot.cwd,
+      compiledLoadout: clone(snapshot.compiledLoadout),
+      paths: clone(snapshot.paths),
+      executionScope: clone(snapshot.executionScope),
+      attempt: snapshot.attempt + 1,
     };
     const replacement = await this.#prepareRecord(inputForLaunch, inputForLaunch.attempt!);
-    replacement.snapshot.events = [...existing.snapshot.events];
-    replacement.snapshot.diagnostics = [...existing.snapshot.diagnostics];
-    replacement.snapshot.usage = clone(existing.snapshot.usage);
-    replacement.nextSequence = existing.nextSequence;
-    replacement.observers = existing.observers;
-    replacement.nextObserverId = existing.nextObserverId;
+    replacement.snapshot.events = [...snapshot.events];
+    replacement.snapshot.diagnostics = [...snapshot.diagnostics];
+    replacement.snapshot.usage = clone(snapshot.usage);
+    replacement.nextSequence = existing?.nextSequence ?? ((snapshot.events.at(-1)?.sequence ?? 0) + 1);
+    if (existing) {
+      replacement.observers = existing.observers;
+      replacement.nextObserverId = existing.nextObserverId;
+    }
     replacement.snapshot.updatedAt = this.#now();
+    this.#resumable.delete(input.childCastId);
     this.#records.set(input.childCastId, replacement);
     try {
       await this.#launch(replacement, inputForLaunch);
     } catch (error) {
-      this.#records.set(input.childCastId, existing);
+      this.#records.delete(input.childCastId);
+      if (retained) this.#resumable.set(input.childCastId, retained);
+      else if (existing) this.#records.set(input.childCastId, existing);
       throw error;
     }
     return { childCastId: input.childCastId, snapshot: clone(replacement.snapshot) };
@@ -314,6 +324,29 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     };
   }
 
+  async retire(input: { childCastId: string; retainForResume: boolean }): Promise<void> {
+    const record = this.#records.get(input.childCastId);
+    if (!record || !record.terminalResult) return;
+    await record.close.catch(() => undefined);
+    // Close has flushed capture artifacts and synthesized any missing terminal
+    // status. Detach every source of late callbacks before releasing the record.
+    record.observers.clear();
+    record.process?.stdout?.removeAllListeners();
+    record.process?.stderr?.removeAllListeners();
+    record.process?.removeAllListeners();
+    if (this.#records.get(input.childCastId) !== record) return;
+    this.#records.delete(input.childCastId);
+    if (input.retainForResume) {
+      this.#resumable.set(input.childCastId, {
+        ...clone(record.snapshot),
+        events: [],
+        diagnostics: [],
+      });
+    } else {
+      this.#resumable.delete(input.childCastId);
+    }
+  }
+
   /** Return a secret-free description of the most recent launch. */
   getLaunchInvocation(childCastId: string): PiChildLaunchInvocation | undefined {
     const launch = this.#records.get(childCastId)?.launch;
@@ -328,8 +361,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   }
 
   getSnapshot(childCastId: string): ChildCastSnapshot | undefined {
-    const record = this.#records.get(childCastId);
-    return record ? clone(record.snapshot) : undefined;
+    const snapshot = this.#records.get(childCastId)?.snapshot ?? this.#resumable.get(childCastId);
+    return snapshot ? clone(snapshot) : undefined;
   }
 
   async #prepareRecord(input: StartChildCastInput, attempt: number): Promise<MutableChildRecord> {
