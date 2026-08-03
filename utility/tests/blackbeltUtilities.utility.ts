@@ -957,8 +957,14 @@ case "$1" in
     fi
     ;;
   bookmark)
+    if [ "$2" = "list" ]; then
+      if [ "\${MAINTAIN_BOOKMARK_MISSING:-false}" != "true" ]; then
+        printf '%s\n' "$3"
+      fi
+      exit 0
+    fi
     if [ "\${CHECKPOINT_FAIL:-false}" = "true" ]; then
-      echo "jj: error: cannot set bookmark" >&2
+      echo "jj: error: cannot move bookmark" >&2
       exit 1
     fi
     ;;
@@ -1014,6 +1020,16 @@ describe("Blackbelt-Maintain oversized-output / refused-snapshot resilience", ()
     expect(result.json.satisfied).toBe(true);
     expect(result.json.context).toContain("checkpoint created");
     expect(result.json.context).toContain("blackbelt/test-bookmark");
+
+    const commands = (await readFile(result.fake.log, "utf8")).split(/\r?\n/).filter(Boolean);
+    const describeIndex = commands.findIndex((command) => command.startsWith("describe "));
+    const moveIndex = commands.findIndex((command) => command === "bookmark move blackbelt/test-bookmark --to @");
+    const newIndex = commands.findIndex((command) => command === "new");
+    expect(describeIndex).toBeGreaterThan(-1);
+    expect(moveIndex).toBeGreaterThan(describeIndex);
+    expect(newIndex).toBeGreaterThan(moveIndex);
+    expect(commands.some((command) => command.startsWith("bookmark set"))).toBe(false);
+    expect(commands.some((command) => command.startsWith("bookmark create"))).toBe(false);
   });
 
   test("reports satisfied:true when working copy is clean", async () => {

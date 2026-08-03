@@ -5,7 +5,7 @@
  * Input scope (tightly constrained):
  *   - item.title          → jj describe message
  *   - executionScope.cwd → working directory for jj commands
- *   - executionScope.state.blackbeltBootstrap.bookmarkName → scope-owned bookmark
+ *   - executionScope.state.blackbeltBootstrap.bookmarkName → optional scope-owned bookmark
  *
  * Legacy direct invocations without executionScope continue to use cwd/state.
  *
@@ -21,10 +21,10 @@
  *   - jj diff --summary may exceed maxBuffer when build artifacts (target/,
  *     node_modules/, etc.) are not gitignored and jj tries to diff thousands
  *     of untracked files.  This is treated as "dirty working copy" so the
- *     checkpoint always advances the bookmark — a satisfied auto-eval result
- *     is never rewritten to a build retry by a jj infrastructure hiccup.
+ *     checkpoint always advances the working commit — a satisfied auto-eval
+ *     result is never rewritten to a build retry by a jj infrastructure hiccup.
  *   - jj refusing to snapshot oversized files is a non-fatal warning printed
- *     to stderr.  Snapshot refusals do not block describe / bookmark / new.
+ *     to stderr. Snapshot refusals do not block describe / optional bookmark / new.
  *   - All known failure modes (no title, no jj repo, jj checkpoint command
  *     failure) return `satisfied: false` with a descriptive context string.
  */
@@ -38,11 +38,12 @@ try {
   const scope = resolveActiveScope(input);
   const cwd = scope?.cwd ?? (typeof input.cwd === "string" && input.cwd.length > 0 ? input.cwd : process.cwd());
 
-  // Scope-local bookmark state is authoritative when present. The cast-level
-  // bootstrap state remains a compatibility fallback for sequential base
-  // scopes; parallel safety below rejects that shared fallback in branches.
-  const bookmarkName = resolveBookmarkName(input, scope);
-  if (bookmarkName === null) {
+  // Spawned jj workspaces intentionally checkpoint without bookmarks. Other
+  // scopes retain the bootstrap bookmark contract, including sequential base
+  // scopes which carry the cast-level bootstrap state as a fallback.
+  const spawnedWorkspace = isRecognizedSpawnedWorkspace(scope);
+  const bookmarkName = resolveBookmarkName(input, scope, spawnedWorkspace);
+  if (bookmarkName === null && !spawnedWorkspace) {
     writeStdoutJson({
       satisfied: false,
       context: scope
@@ -56,7 +57,7 @@ try {
   if (unsafeReason !== null) {
     writeStdoutJson({
       satisfied: false,
-      context: `Blackbelt-Maintain: unsafe parallel invocation: ${unsafeReason} [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: unsafe parallel invocation: ${unsafeReason} ${bookmarkContext(bookmarkName)}`,
     });
     process.exit(0);
   }
@@ -65,7 +66,7 @@ try {
   if (typeof title !== "string" || title.trim().length === 0) {
     writeStdoutJson({
       satisfied: false,
-      context: `Blackbelt-Maintain: no item title available for the VCS message. [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: no item title available for the VCS message. ${bookmarkContext(bookmarkName)}`,
     });
     process.exit(0);
   }
@@ -75,7 +76,7 @@ try {
   if (jjRoot === null) {
     writeStdoutJson({
       satisfied: false,
-      context: `Blackbelt-Maintain: jj is not available or no jj repo is detected. Run Blackbelt-Bootstrap first. [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: jj is not available or no jj repo is detected. Run Blackbelt-Bootstrap first. ${bookmarkContext(bookmarkName)}`,
     });
     process.exit(0);
   }
@@ -89,16 +90,16 @@ try {
   if (diffResult === "clean") {
     writeStdoutJson({
       satisfied: true,
-      context: `Blackbelt-Maintain: clean jj working commit — no-op, nothing to checkpoint. [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: clean jj working commit — no-op, nothing to checkpoint. ${bookmarkContext(bookmarkName)}`,
     });
     process.exit(0);
   }
 
-  // Dirty (or presumed dirty): describe the working change, move the bookmark
-  // to the described commit, then create a new empty working commit.  Moving
-  // the bookmark before `jj new` ensures a post-new failure cannot leave a
-  // clean working copy with a stale bookmark.
-  await performCheckpoint(title, bookmarkName, cwd);
+  // Dirty (or presumed dirty): always describe the working change and create
+  // a new empty working commit. An authorized bookmark is moved in between
+  // only when it is proven to already exist; maintenance never creates one.
+  const movableBookmark = await resolveExistingBookmark(bookmarkName, cwd);
+  await performCheckpoint(title, movableBookmark, cwd);
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   writeStdoutJson({
@@ -116,21 +117,25 @@ async function resolveJjRoot(cwd) {
   }
 }
 
-async function moveBookmark(bookmarkName, cwd) {
-  // Idempotently move/create the bookmark at @.
-  // Try jj >= 0.20 bookmark set first, fall back to bookmark create for
-  // older jj where the bookmark may not exist yet, then bookmark move.
+async function resolveExistingBookmark(bookmarkName, cwd) {
+  if (bookmarkName === null) return null;
   try {
-    await execFileText("jj", ["bookmark", "set", bookmarkName, "--revision", "@"], cwd);
-  } catch (setErr) {
-    console.error(`[blackbelt-maintain] bookmark set failed, trying bookmark create: ${formatExecError(setErr)}`);
-    try {
-      await execFileText("jj", ["bookmark", "create", bookmarkName, "--revision", "@"], cwd);
-    } catch (createErr) {
-      console.error(`[blackbelt-maintain] bookmark create failed, trying bookmark move: ${formatExecError(createErr)}`);
-      await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
-    }
+    const stdout = await execFileText(
+      "jj",
+      ["bookmark", "list", bookmarkName, "--template", 'name ++ "\\n"'],
+      cwd,
+    );
+    return stdout.split(/\r?\n/u).some((name) => name.trim() === bookmarkName) ? bookmarkName : null;
+  } catch (error) {
+    console.error(`[blackbelt-maintain] bookmark existence check failed (checkpointing without moving it): ${formatExecError(error)}`);
+    return null;
   }
+}
+
+async function moveBookmark(bookmarkName, cwd) {
+  // Unlike `bookmark set`, `bookmark move` cannot create a bookmark if the
+  // previously verified name disappears between the probe and this command.
+  await execFileText("jj", ["bookmark", "move", bookmarkName, "--to", "@"], cwd);
 }
 
 function resolveActiveScope(input) {
@@ -150,8 +155,35 @@ function bookmarkFromState(state) {
     : null;
 }
 
-function resolveBookmarkName(input, scope) {
-  return bookmarkFromState(scope?.state) ?? bookmarkFromState(input.state);
+function resolveBookmarkName(input, scope, spawnedWorkspace) {
+  const scopeBookmark = bookmarkFromState(scope?.state);
+  if (scopeBookmark !== null) return scopeBookmark;
+  if (spawnedWorkspace) return null;
+  // Legacy invocations and ordinary base scopes may carry the bootstrap-owned
+  // cast bookmark. Replacement/branch scopes must authorize one locally.
+  if (scope === null || (typeof scope.id === "string" && scope.id.endsWith(":base"))) return bookmarkFromState(input.state);
+  return null;
+}
+
+function isRecognizedSpawnedWorkspace(scope) {
+  if (scope === null) return false;
+  const exportsRecord = scope.exports != null && typeof scope.exports === "object" && !Array.isArray(scope.exports)
+    ? scope.exports
+    : {};
+  const exported = exportsRecord["jj.workspace.integration"];
+  if (exported == null || typeof exported !== "object" || Array.isArray(exported)) return false;
+  if (exported.producer !== "Spawn-JJ-Workspace") return false;
+  const value = exported.value;
+  return value != null
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && typeof value.workspacePath === "string"
+    && value.workspacePath.trim().length > 0
+    && value.workspacePath === scope.cwd;
+}
+
+function bookmarkContext(bookmarkName) {
+  return `[bookmark: ${bookmarkName ?? "none"}]`;
 }
 
 function unsafeParallelInvocation(input, scope, bookmarkName) {
@@ -166,7 +198,7 @@ function unsafeParallelInvocation(input, scope, bookmarkName) {
   // In that shape, an explicit active scope with its own bookmark is the only
   // bookmark authority and is safe to maintain. Reject only a bookmark that
   // can actually be identified as the shared cast bookmark.
-  if (inheritedBookmark !== null && inheritedBookmark === bookmarkName) {
+  if (bookmarkName !== null && inheritedBookmark !== null && inheritedBookmark === bookmarkName) {
     return "the active scope still uses the shared cast bookmark; provision a branch-local scope and bookmark first";
   }
   return null;
@@ -210,7 +242,7 @@ function formatExecError(error) {
  *   - "dirty-assume" when the diff command fails (e.g. maxBuffer exceeded
  *     due to build artifacts not being gitignored).  In this case we
  *     optimistically treat the working copy as dirty so the checkpoint
- *     advances the bookmark rather than masking a satisfied auto-eval.
+ *     advances the working commit rather than masking a satisfied auto-eval.
  */
 async function detectWorkingCopyDirty(cwd) {
   try {
@@ -231,7 +263,7 @@ async function detectWorkingCopyDirty(cwd) {
 }
 
 /**
- * Execute the jj checkpoint sequence: describe → move bookmark → new.
+ * Execute the jj checkpoint sequence: describe → optional bookmark move → new.
  *
  * Writes satisfied:true on success or satisfied:false with diagnostics on
  * failure.  This function is the single point that decides whether the
@@ -240,16 +272,16 @@ async function detectWorkingCopyDirty(cwd) {
 async function performCheckpoint(title, bookmarkName, cwd) {
   try {
     await execFileText("jj", ["describe", "-m", title], cwd);
-    await moveBookmark(bookmarkName, cwd);
+    if (bookmarkName !== null) await moveBookmark(bookmarkName, cwd);
     await execFileText("jj", ["new"], cwd);
     writeStdoutJson({
       satisfied: true,
-      context: `Blackbelt-Maintain: jj checkpoint created and new working commit ready. [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: jj checkpoint created and new working commit ready. ${bookmarkContext(bookmarkName)}`,
     });
   } catch (error) {
     writeStdoutJson({
       satisfied: false,
-      context: `Blackbelt-Maintain: jj command failed: ${formatExecError(error)} [bookmark: ${bookmarkName}]`,
+      context: `Blackbelt-Maintain: jj command failed: ${formatExecError(error)} ${bookmarkContext(bookmarkName)}`,
     });
   }
 }

@@ -41,7 +41,13 @@ case "$1" in
   diff)
     if [ "$JJ_DIRTY" = "1" ]; then echo 'M file.txt'; fi
     ;;
-  git|bookmark|describe)
+  bookmark)
+    if [ "$2" = "list" ] && [ "$JJ_BOOKMARK_MISSING" != "1" ]; then
+      printf '%s\n' "$3"
+    fi
+    exit 0
+    ;;
+  git|describe)
     exit 0
     ;;
   new)
@@ -443,8 +449,51 @@ describe("Blackbelt utility scripts", () => {
     expect(result.json.context).toContain("blackbelt/branch-api");
     const commands = await readFile(fake.log, "utf8");
     expect(commands).toContain("describe -m fix: branch checkpoint");
-    expect(commands).toContain("bookmark set blackbelt/branch-api --revision @");
+    expect(commands).toContain("bookmark move blackbelt/branch-api --to @");
+    expect(commands).not.toContain("bookmark set");
+    expect(commands).not.toContain("bookmark create");
     expect(commands.trim().endsWith("new")).toBe(true);
+  });
+
+  test("maintain checkpoints a recognized spawned workspace without a bookmark", async () => {
+    const fake = await makeFakeJj();
+    const scopeCwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-bookmarkless-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        state: {
+          blackbeltBootstrap: { bookmarkName: "blackbelt/original-cast" },
+          parallelRun: { runId: "parallel-run", loopId: "work-loop" },
+        },
+        executionScope: {
+          id: "cast:child:base:branch:work-loop:lane-api:jj-workspace:api",
+          cwd: scopeCwd,
+          state: {},
+          exports: {
+            "jj.workspace.integration": {
+              producer: "Spawn-JJ-Workspace",
+              value: { workspacePath: scopeCwd },
+            },
+          },
+        },
+        item: { title: "fix: bookmarkless checkpoint" },
+      },
+      { PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`, JJ_LOG: fake.log, JJ_DIRTY: "1" },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json).toEqual({
+      satisfied: true,
+      context: "Blackbelt-Maintain: jj checkpoint created and new working commit ready. [bookmark: none]",
+    });
+    const commands = (await readFile(fake.log, "utf8")).trim().split(/\r?\n/);
+    expect(commands).toEqual([
+      "root",
+      "diff --summary",
+      "describe -m fix: bookmarkless checkpoint",
+      "new",
+    ]);
+    expect(commands.some((command) => command.startsWith("bookmark "))).toBe(false);
   });
 
   test("maintain accepts a production parallel child with only a scope-local bookmark", async () => {
@@ -476,10 +525,51 @@ describe("Blackbelt utility scripts", () => {
     expect(result.exitCode).toBe(0);
     expect(result.json.satisfied).toBe(true);
     expect(result.json.context).toContain("blackbelt/branch-api");
-    const commands = await readFile(fake.log, "utf8");
-    expect(commands).toContain("describe -m fix: production child checkpoint");
-    expect(commands).toContain("bookmark set blackbelt/branch-api --revision @");
-    expect(commands.trim().endsWith("new")).toBe(true);
+    const commands = (await readFile(fake.log, "utf8")).trim().split(/\r?\n/);
+    expect(commands).toEqual([
+      "root",
+      "diff --summary",
+      "bookmark list blackbelt/branch-api --template name ++ \"\\n\"",
+      "describe -m fix: production child checkpoint",
+      "bookmark move blackbelt/branch-api --to @",
+      "new",
+    ]);
+    expect(commands.some((command) => command.startsWith("bookmark set"))).toBe(false);
+    expect(commands.some((command) => command.startsWith("bookmark create"))).toBe(false);
+  });
+
+  test("maintain checkpoints without moving an authorized bookmark that does not exist", async () => {
+    const fake = await makeFakeJj();
+    const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-maintain-missing-bookmark-cwd-"));
+    const result = await runUtility(
+      maintainScript,
+      {
+        cwd,
+        state: { blackbeltBootstrap: { bookmarkName: "blackbelt/sequential" } },
+        item: { title: "fix: missing bookmark checkpoint" },
+      },
+      {
+        PATH: `${fake.dir}${path.delimiter}${process.env.PATH ?? ""}`,
+        JJ_LOG: fake.log,
+        JJ_DIRTY: "1",
+        JJ_BOOKMARK_MISSING: "1",
+      },
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.json.satisfied).toBe(true);
+    expect(result.json.context).toContain("[bookmark: none]");
+    const commands = (await readFile(fake.log, "utf8")).trim().split(/\r?\n/);
+    expect(commands).toEqual([
+      "root",
+      "diff --summary",
+      "bookmark list blackbelt/sequential --template name ++ \"\\n\"",
+      "describe -m fix: missing bookmark checkpoint",
+      "new",
+    ]);
+    expect(commands.some((command) => command.startsWith("bookmark move"))).toBe(false);
+    expect(commands.some((command) => command.startsWith("bookmark set"))).toBe(false);
+    expect(commands.some((command) => command.startsWith("bookmark create"))).toBe(false);
   });
 
   test("maintain preserves cast bootstrap fallback for a sequential base scope", async () => {
@@ -504,7 +594,10 @@ describe("Blackbelt utility scripts", () => {
     expect(result.exitCode).toBe(0);
     expect(result.json.satisfied).toBe(true);
     expect(result.json.context).toContain("blackbelt/sequential");
-    expect(await readFile(fake.log, "utf8")).toContain("bookmark set blackbelt/sequential --revision @");
+    const commands = await readFile(fake.log, "utf8");
+    expect(commands).toContain("bookmark move blackbelt/sequential --to @");
+    expect(commands).not.toContain("bookmark set");
+    expect(commands).not.toContain("bookmark create");
   });
 
   test("maintain rejects a parallel branch that still uses the shared cast bookmark", async () => {
