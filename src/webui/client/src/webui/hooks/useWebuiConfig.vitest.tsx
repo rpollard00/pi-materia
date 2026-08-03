@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MateriaConfig } from '../../loadoutModel.js';
@@ -88,6 +89,17 @@ function ConfigProbe() {
       <button type="button" onClick={() => config.deleteLoadout('Alpha')}>delete Alpha</button>
       <button type="button" onClick={() => config.deleteLoadout('Beta')}>delete Beta</button>
       <button type="button" onClick={() => config.duplicateLoadout('Alpha')}>duplicate Alpha</button>
+      <button type="button" onClick={() => config.duplicateLoadout('Parallel-Experimental')}>duplicate Parallel-Experimental</button>
+      <button
+        type="button"
+        onClick={() => config.updateDraft((draft) => {
+          const activeName = config.activeLoadoutName ?? draft.activeLoadout;
+          const prelude = activeName ? draft.loadouts?.[activeName]?.sockets?.['Socket-5'] : undefined;
+          if (prelude) prelude.edges = [];
+        })}
+      >
+        break active parallel ingress
+      </button>
       <button type="button" onClick={() => config.revertDraft()}>revert draft</button>
       <button type="button" onClick={() => config.createLoadout()}>create loadout</button>
       <button type="button" onClick={() => config.setActiveLoadoutLockState('locked')}>lock active loadout</button>
@@ -265,6 +277,33 @@ function materializeSavedConfigForTest(config: MateriaConfig): MateriaConfig {
   return next;
 }
 
+function parallelExperimentalConfigForTest(): MateriaConfig {
+  const shipped = JSON.parse(readFileSync('config/default.json', 'utf8')) as MateriaConfig;
+  const shippedParallelExperimental = shipped.loadouts?.['Parallel-Experimental'];
+  if (!shippedParallelExperimental) throw new Error('Shipped Parallel-Experimental loadout is missing');
+  const parallelExperimental = cloneConfigForTest({
+    loadouts: { 'Parallel-Experimental': shippedParallelExperimental },
+  }).loadouts!['Parallel-Experimental']!;
+  return {
+    activeLoadout: 'Parallel-Experimental',
+    activeLoadoutId: parallelExperimental.id,
+    materia: {
+      ...cloneConfigForTest({ materia: shipped.materia }).materia,
+      LocalEdit: { tools: 'coding', prompt: 'Local edit.' },
+    },
+    loadouts: {
+      'Parallel-Experimental': { ...parallelExperimental, source: 'default' },
+      Alpha: {
+        id: 'user:alpha:test',
+        source: 'user',
+        lockState: 'unlocked',
+        entry: 'Socket-1',
+        sockets: { 'Socket-1': { materia: 'Build' } },
+      },
+    },
+  };
+}
+
 describe('useWebuiConfig', () => {
   it('reports clean on initial load when the active loadout falls back without mutating the draft', async () => {
     const config = { ...reportedLayeredConfig, activeLoadout: 'Missing-Loadout' } satisfies MateriaConfig;
@@ -396,6 +435,77 @@ describe('useWebuiConfig', () => {
     expect(savedConfig?.activeLoadout).toBe('Full-Auto');
     expect(savedConfig?.activeLoadoutId).toBe('Full-Auto');
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);
+  });
+
+  it('atomically saves a writable Parallel-Experimental copy and other pending edits while omitting the shipped default', async () => {
+    const config = parallelExperimentalConfigForTest();
+    let savedConfig: MateriaConfig | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/config' && init?.method === 'POST') {
+        savedConfig = (JSON.parse(String(init.body)) as { config: MateriaConfig }).config;
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'default < user',
+        config,
+        loadoutSources: { 'Parallel-Experimental': 'default', Alpha: 'user' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Parallel-Experimental'));
+    fireEvent.click(screen.getByRole('button', { name: 'duplicate Parallel-Experimental' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Parallel-Experimental Copy'));
+    fireEvent.click(screen.getByRole('button', { name: 'view Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Saved staged loadout edits to user scope.'));
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+    expect(savedConfig?.loadouts?.['Parallel-Experimental']).toBeUndefined();
+    expect(savedConfig?.loadouts?.['Parallel-Experimental Copy']).toMatchObject({
+      source: 'user',
+      lockState: 'unlocked',
+      loops: { parallelWork: { consumes: { from: 'Socket-4', output: 'workItems' } } },
+      sockets: { 'Socket-5': { edges: [{ when: 'always', to: 'Socket-6' }] } },
+    });
+    expect(savedConfig?.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('LocalEdit');
+    expect(savedConfig?.profile).toEqual({ note: 'real profile edit' });
+  });
+
+  it('blocks the entire staged save when a Parallel-Experimental copy has genuinely invalid ingress', async () => {
+    const config = parallelExperimentalConfigForTest();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
+      ok: true,
+      source: 'default < user',
+      config,
+      loadoutSources: { 'Parallel-Experimental': 'default', Alpha: 'user' },
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Parallel-Experimental'));
+    fireEvent.click(screen.getByRole('button', { name: 'duplicate Parallel-Experimental' }));
+    await waitFor(() => expect(screen.getByLabelText('active-loadout').textContent).toBe('Parallel-Experimental Copy'));
+    fireEvent.click(screen.getByRole('button', { name: 'break active parallel ingress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'view Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    fireEvent.click(screen.getByRole('button', { name: 'edit profile locally' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toContain('Cannot save staged loadout edits'));
+    expect(screen.getByLabelText('status').textContent).toContain('Loop "parallelWork" must have exactly one inbound edge from a generator socket into the selected cycle; found none.');
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(0);
+    const draft = JSON.parse(screen.getByLabelText('draft').textContent ?? '{}') as MateriaConfig;
+    expect(draft.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('LocalEdit');
+    expect(draft.profile).toEqual({ note: 'real profile edit' });
   });
 
   it('normalizes viewed selection when deleting the viewed loadout without changing runtime active loadout', async () => {
