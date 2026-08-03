@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
@@ -135,8 +135,14 @@ describe("central telemetry fan-out", () => {
         materia: "pi-materia",
         sequence: 1,
       });
-      expect(bus?.outcomes[0].sinks?.find((sink) => sink.sinkId === CENTRAL_TELEMETRY_SINK_ID))
-        .toMatchObject({ status: "delivered", statusCode: 200, attempts: 1 });
+      expect(bus?.outcomes).toEqual([]);
+      const dispatchLines = (await readFile(path.join(state.runDir, "events", "dispatch.jsonl"), "utf8"))
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(dispatchLines[0].sinks.find(
+        (sink: { sinkId: string }) => sink.sinkId === CENTRAL_TELEMETRY_SINK_ID,
+      )).toMatchObject({ status: "delivered", statusCode: 200, attempts: 1 });
     } finally {
       runtime.removeEventBus(state.castId);
       server.stop();

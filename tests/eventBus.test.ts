@@ -607,6 +607,152 @@ describe("EventBus async sink reconciliation", () => {
   });
 });
 
+// ── Incremental outcome persistence ───────────────────────────────────
+
+describe("EventBus incremental outcome persistence", () => {
+  test("keeps local-only lifecycle streams bounded while preserving every dispatch record", async () => {
+    const dir = await tempDir();
+    const bus = new EventBus({
+      writeSettledOutcomes: (outcomes) => appendDispatchOutcomes(dir, outcomes),
+    });
+    bus.register({ id: "local", enabled: true, deliver: async () => {} });
+
+    const eventIds: string[] = [];
+    for (let index = 0; index < 1_500; index++) {
+      const lifecycleEvent = makeEvent({ type: `lifecycle.stress.${index}` });
+      eventIds.push(lifecycleEvent.eventId);
+      await bus.dispatch(lifecycleEvent);
+      expect(bus.outcomes.length).toBe(0);
+    }
+
+    const content = await readFile(path.join(dir, "events", "dispatch.jsonl"), "utf8");
+    const persistedIds = content.trim().split("\n").map((line) => JSON.parse(line).eventId);
+    expect(persistedIds).toEqual(eventIds);
+  });
+
+  test("reconciles concurrent async dispatches in invocation order without dropping early results", async () => {
+    const dir = await tempDir();
+    const firstEvent = makeEvent({ type: "lifecycle.concurrent.first" });
+    const secondEvent = makeEvent({ type: "lifecycle.concurrent.second" });
+    const results: AsyncDispatchResult[] = [];
+    const delivered: string[] = [];
+    let signalFirstEntered!: () => void;
+    const firstEntered = new Promise<void>((resolve) => { signalFirstEntered = resolve; });
+    let releaseFirst!: () => void;
+    const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+    const bus = new EventBus({
+      writeSettledOutcomes: (outcomes) => appendDispatchOutcomes(dir, outcomes),
+    });
+    bus.register({
+      id: "early-result-async",
+      enabled: true,
+      async deliver(event) {
+        delivered.push(event.eventId);
+        results.push({
+          eventId: event.eventId,
+          sinkId: "early-result-async",
+          status: "delivered",
+          statusCode: 202,
+          attempts: 1,
+        });
+        if (event.eventId === firstEvent.eventId) {
+          signalFirstEntered();
+          await firstBlocked;
+        }
+      },
+      drainResults() {
+        return results.splice(0);
+      },
+    });
+
+    const firstDispatch = bus.dispatch(firstEvent);
+    await firstEntered;
+    const secondDispatch = bus.dispatch(secondEvent);
+    await Promise.resolve();
+    expect(delivered).toEqual([firstEvent.eventId]);
+
+    releaseFirst();
+    await Promise.all([firstDispatch, secondDispatch]);
+    await bus.flush();
+
+    expect(bus.outcomes).toEqual([]);
+    const content = await readFile(path.join(dir, "events", "dispatch.jsonl"), "utf8");
+    const records = content.trim().split("\n").map((line) => JSON.parse(line));
+    expect(records.map((record) => record.eventId)).toEqual([
+      firstEvent.eventId,
+      secondEvent.eventId,
+    ]);
+    expect(records.map((record) => record.sinks[0].status)).toEqual([
+      "delivered",
+      "delivered",
+    ]);
+  });
+
+  test("retains only async deliveries still awaiting reconciliation", async () => {
+    const dir = await tempDir();
+    const pending: string[] = [];
+    const results: AsyncDispatchResult[] = [];
+    const maxPending = 16;
+    const sink: EventSink = {
+      id: "bounded-async",
+      enabled: true,
+      async deliver(lifecycleEvent) {
+        if (pending.length < maxPending) {
+          pending.push(lifecycleEvent.eventId);
+        } else {
+          results.push({
+            eventId: lifecycleEvent.eventId,
+            sinkId: "bounded-async",
+            status: "failed",
+            reason: "queue_full",
+            attempts: 0,
+            error: "queue full",
+          });
+        }
+      },
+      async flush() {
+        for (const eventId of pending.splice(0)) {
+          results.push({
+            eventId,
+            sinkId: "bounded-async",
+            status: "delivered",
+            statusCode: 202,
+            attempts: 1,
+          });
+        }
+      },
+      drainResults() {
+        return results.splice(0);
+      },
+    };
+    const bus = new EventBus({
+      writeSettledOutcomes: (outcomes) => appendDispatchOutcomes(dir, outcomes),
+    });
+    bus.register(sink);
+
+    const eventIds: string[] = [];
+    for (let index = 0; index < 1_000; index++) {
+      const lifecycleEvent = makeEvent({ type: `lifecycle.async-stress.${index}` });
+      eventIds.push(lifecycleEvent.eventId);
+      await bus.dispatch(lifecycleEvent);
+      expect(bus.outcomes.length).toBeLessThanOrEqual(maxPending);
+    }
+
+    expect(bus.outcomes).toHaveLength(maxPending);
+    await bus.flush();
+    expect(bus.outcomes).toEqual([]);
+
+    const content = await readFile(path.join(dir, "events", "dispatch.jsonl"), "utf8");
+    const records = content.trim().split("\n").map((line) => JSON.parse(line));
+    expect(records).toHaveLength(eventIds.length);
+    expect(new Set(records.map((record) => record.eventId))).toEqual(new Set(eventIds));
+    expect(records.filter((record) => record.sinks[0].status === "delivered")).toHaveLength(maxPending);
+    expect(records.filter((record) => record.sinks[0].reason === "queue_full"))
+      .toHaveLength(eventIds.length - maxPending);
+  });
+});
+
 // ── LocalEventRecordingSink ─────────────────────────────────────────────────
 
 describe("LocalEventRecordingSink", () => {

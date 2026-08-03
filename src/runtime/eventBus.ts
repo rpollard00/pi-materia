@@ -23,9 +23,27 @@ import type {
  * the dispatch artifact via the {@link EventBus.flushOutcome} or
  * {@link EventBus.outcomes} accessor.
  */
+export type SettledOutcomeWriter = (outcomes: readonly DispatchOutcome[]) => Promise<void>;
+
+export interface EventBusOptions {
+  /**
+   * Optional incremental persistence boundary. When configured, final outcomes
+   * are written and released as dispatch progresses; provisional async-sink
+   * outcomes remain buffered until their queued statuses are reconciled.
+   */
+  readonly writeSettledOutcomes?: SettledOutcomeWriter;
+}
+
 export class EventBus {
   readonly #sinks: EventSink[] = [];
   readonly #outcomes: DispatchOutcome[] = [];
+  readonly #writeSettledOutcomes?: SettledOutcomeWriter;
+  #dispatchTail: Promise<void> = Promise.resolve();
+  #settledDrain: Promise<void> = Promise.resolve();
+
+  constructor(options: EventBusOptions = {}) {
+    this.#writeSettledOutcomes = options.writeSettledOutcomes;
+  }
 
   /** Register a sink. Sinks receive events in registration order. */
   register(sink: EventSink): void {
@@ -58,7 +76,17 @@ export class EventBus {
    * recorded internally and can be flushed to the dispatch artifact. Its
    * `deliveredTo` / `failures` legacy fields are derived from `sinks[]`.
    */
-  async dispatch(event: EnrichedEvent): Promise<DispatchOutcome> {
+  dispatch(event: EnrichedEvent): Promise<DispatchOutcome> {
+    // Reserve dispatch order before any sink work begins. In particular, an
+    // async sink may publish its result before deliver() resolves; allowing a
+    // later dispatch to reconcile at that point would consume the result
+    // before this event's provisional outcome exists.
+    const operation = this.#dispatchTail.then(() => this.#dispatchInOrder(event));
+    this.#dispatchTail = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async #dispatchInOrder(event: EnrichedEvent): Promise<DispatchOutcome> {
     const sinkResults: DispatchSinkResult[] = [];
 
     for (const sink of this.#sinks) {
@@ -86,6 +114,7 @@ export class EventBus {
 
     const outcome: DispatchOutcome = this.#buildOutcome(event.eventId, sinkResults);
     this.#outcomes.push(outcome);
+    await this.#scheduleSettledDrain();
     return outcome;
   }
 
@@ -123,6 +152,10 @@ export class EventBus {
    * failed / skipped / misconfigured) rather than a provisional `queued`.
    */
   async flush(): Promise<void> {
+    // Terminal flush also forms a boundary behind dispatches that callers may
+    // still have in flight, so all provisional outcomes exist before results
+    // are drained from asynchronous sinks.
+    await this.#dispatchTail;
     for (const sink of this.#sinks) {
       if (!sink.flush) continue;
       try {
@@ -133,6 +166,35 @@ export class EventBus {
       }
     }
     this.#reconcileAsyncResults();
+    await this.#scheduleSettledDrain();
+  }
+
+  /**
+   * Serialize reconciliation and incremental writes so concurrent lifecycle
+   * emissions cannot reorder settled batches in dispatch.jsonl. A failed write
+   * is best-effort and leaves outcomes buffered for the terminal flush/retry.
+   */
+  async #scheduleSettledDrain(): Promise<void> {
+    if (!this.#writeSettledOutcomes) return;
+
+    const drain = this.#settledDrain.then(async () => {
+      this.#reconcileAsyncResults();
+      const settled = this.#outcomes.filter(isSettledOutcome);
+      if (settled.length === 0) return;
+
+      try {
+        await this.#writeSettledOutcomes!(settled);
+      } catch {
+        return;
+      }
+
+      const written = new Set(settled);
+      for (let index = this.#outcomes.length - 1; index >= 0; index--) {
+        if (written.has(this.#outcomes[index])) this.#outcomes.splice(index, 1);
+      }
+    });
+    this.#settledDrain = drain.catch(() => {});
+    await this.#settledDrain;
   }
 
   /**
@@ -141,9 +203,9 @@ export class EventBus {
    * `queued` entries and re-deriving the legacy `deliveredTo` / `failures`.
    *
    * This is the bridge that makes the dispatch artifact reflect actual
-   * webhook HTTP outcomes (per docs/runtime-eventing.md §5.2). Results that
-   * do not match a still-buffered outcome (e.g. the outcome was already
-   * drained/written) are dropped — best-effort.
+   * webhook HTTP outcomes (per docs/runtime-eventing.md §5.2). Dispatches are
+   * serialized, so a result cannot be consumed before its provisional outcome
+   * exists. Results for outcomes already drained/written are ignored as stale.
    */
   #reconcileAsyncResults(): void {
     const byEvent = new Map<string, AsyncDispatchResult[]>();
@@ -302,8 +364,15 @@ export async function flushBusOutcomes(
  * `{runDir}/events/events.jsonl`. Additional sinks (e.g. webhook) can be
  * registered later via {@link EventBus.register}.
  */
-export function createEventBus(runDir: string): EventBus {
-  const bus = new EventBus();
+export function createEventBus(
+  runDir: string,
+  options: { persistOutcomesIncrementally?: boolean } = {},
+): EventBus {
+  const bus = new EventBus({
+    ...(options.persistOutcomesIncrementally
+      ? { writeSettledOutcomes: (outcomes) => appendDispatchOutcomes(runDir, outcomes) }
+      : {}),
+  });
   bus.register(new LocalEventRecordingSink(runDir));
   return bus;
 }
@@ -335,6 +404,10 @@ function redactErrorMessage(error: unknown): string {
  * Default redacted message for a failed/misconfigured sink result that lacks
  * an explicit `error` string, so legacy `failures[]` entries stay informative.
  */
+function isSettledOutcome(outcome: DispatchOutcome): boolean {
+  return outcome.sinks?.every((sink) => sink.status !== "queued") ?? true;
+}
+
 function defaultFailureMessage(result: DispatchSinkResult): string {
   switch (result.status) {
     case "misconfigured":

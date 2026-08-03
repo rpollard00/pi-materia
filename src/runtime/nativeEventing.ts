@@ -233,7 +233,7 @@ export class NativeEventingRuntime {
       return undefined;
     }
 
-    const bus = createEventBus(state.runDir);
+    const bus = createEventBus(state.runDir, { persistOutcomesIncrementally: true });
     const sequence = createSequenceCounter();
     const accumulator = new ResultAccumulator();
     const resolvedSinks: Record<string, EventSinkConfig> = {};
