@@ -48,6 +48,14 @@ function fakeFanInJj(repositoryRoot: string, options: {
 } = {}) {
   const tracked = new Set<string>();
   const calls: JjCommandInput[] = [];
+  const stackLines = (options.stackOutput ?? "baseline\tbaseline-change\troot\tfalse\tfalse\nlane-working\tchange-lane-working\tbaseline\tfalse\ttrue\n")
+    .trim().split(/\r?\n/).map((line) => line.split("\t"));
+  const stackByIdentity = new Map(stackLines.flatMap((fields) => [[fields[0]!, fields], [fields[1]!, fields]]));
+  if (options.baselineOutput) {
+    const fields = options.baselineOutput.trim().split("\t");
+    stackByIdentity.set(fields[0]!, fields);
+    stackByIdentity.set(fields[1]!, fields);
+  }
   const command: JjCommandExecutor = async (input) => {
     calls.push({ ...input, args: [...input.args] });
     const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
@@ -58,9 +66,12 @@ function fakeFanInJj(repositoryRoot: string, options: {
       const inLane = path.resolve(input.cwd) !== path.resolve(repositoryRoot);
       if (template.includes("parents.map") && template.includes("empty")) {
         if (revset.includes("::")) return { stdout: options.stackOutput ?? "baseline\tbaseline-change\troot\tfalse\tfalse\nlane-working\tchange-lane-working\tbaseline\tfalse\ttrue\n", stderr: "", exitCode: 0 };
-        if (revset === "baseline") return { stdout: options.baselineOutput ?? "baseline\tbaseline-change\troot\tfalse\tfalse\n", stderr: "", exitCode: 0 };
+        const fields = stackByIdentity.get(revset);
+        if (fields) return { stdout: `${fields.join("\t")}\n`, stderr: "", exitCode: 0 };
       }
       if (template.includes("parents.map")) {
+        const fields = stackByIdentity.get(revset);
+        if (fields) return { stdout: `${fields.slice(0, 4).join("\t")}\t\n`, stderr: "", exitCode: 0 };
         return { stdout: `1234567890abcdef\tintegration-change\t${options.integrationParent ?? "baseline"}\tfalse\t\n`, stderr: "", exitCode: 0 };
       }
       if ((revset === "@" && inLane) || revset === "lane-working") return { stdout: "lane-working\tchange-lane-working\n", stderr: "", exitCode: 0 };
@@ -83,7 +94,13 @@ function fakeFanInJj(repositoryRoot: string, options: {
       tracked.delete(args[2]!);
       return { stdout: "", stderr: "", exitCode: 0, operationId: `operation-forget-${args[2]}` };
     }
-    if (args[0] === "new") return { stdout: "Created new commit integration 12345678\n", stderr: "", exitCode: 0, operationId: "operation-fan-in" };
+    if (args[0] === "rebase") {
+      const source = args[args.indexOf("-s") + 1]!;
+      const destination = args[args.indexOf("-d") + 1]!;
+      const fields = stackByIdentity.get(source);
+      if (fields) fields[2] = destination;
+      return { stdout: "Rebased 1 commits\n", stderr: "", exitCode: 0, operationId: "operation-linearize" };
+    }
     return { stdout: "", stderr: `unsupported fake command: ${args.join(" ")}`, exitCode: 1 };
   };
   return { command, calls };
@@ -143,14 +160,16 @@ describe("jj workspace lifecycle backend", () => {
       ],
     });
 
-    const newCall = fake.calls.find(({ args }) => args.includes("new"));
-    expect(newCall?.args.filter((arg) => arg !== "--ignore-working-copy")).toEqual(["new", "--no-edit", pinned.baseline.commitId]);
+    expect(fake.calls.some(({ args }) => args.includes("new") || args.includes("rebase"))).toBe(false);
     expect(result.orderedHeads.map((entry) => entry.laneId)).toEqual(["lane-a", "lane-b"]);
     expect(result.orderedHeads.map((entry) => entry.head)).toEqual([pinned.baseline, pinned.baseline]);
     expect(result.orderedHeads.map((entry) => entry.commits)).toEqual([[], []]);
     expect(result.orderedHeads.map((entry) => entry.workspaceRevision)).toEqual([laneA.revision, laneB.revision]);
     expect(result.effectiveBase).toEqual(pinned.baseline);
-    expect(result.integrationRevision).toEqual({ commitId: "1234567890abcdef", changeId: "integration-change" });
+    expect(result.orderedChangeIds).toEqual([]);
+    expect(result.rewrittenLaneTips).toEqual([]);
+    expect(result.finalTip).toEqual(pinned.baseline);
+    expect(result.integrationRevision).toEqual(pinned.baseline);
   });
 
   test("derives ordered meaningful commits and removes only an empty cast boundary from the effective base", async () => {
@@ -183,6 +202,10 @@ describe("jj workspace lifecycle backend", () => {
     ]);
     expect(result.orderedHeads[0]?.head).toEqual({ commitId: "item-two", changeId: "change-item-two" });
     expect(result.effectiveBase).toEqual({ commitId: "root", changeId: "change-root" });
+    expect(result.orderedChangeIds).toEqual(["change-item-one", "change-item-two"]);
+    expect(result.rewrittenLaneTips).toEqual([{ laneId: "lane", revision: { commitId: "item-two", changeId: "change-item-two" } }]);
+    expect(result.finalTip).toEqual({ commitId: "item-two", changeId: "change-item-two" });
+    expect(fake.calls.some(({ args }) => args.includes("new"))).toBe(false);
   });
 
   test("derives a real-jj multi-item stack and excludes its trailing working commit", async () => {
@@ -215,6 +238,85 @@ describe("jj workspace lifecycle backend", () => {
     expect(result.orderedHeads[0]?.workspaceRevision).toEqual(working);
     expect(result.orderedHeads[0]?.commits).not.toContainEqual(working);
     expect(result.effectiveBase).toEqual(effectiveBase);
+  });
+
+  test("linearly stacks real-jj lanes in schedule order without merge or transient empty commits", async () => {
+    if (!(await hasRealJj())) return;
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-linear-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
+    await runRealJj(["git", "init", repositoryRoot], process.cwd());
+    const backend = createJjWorkspaceBackend({ repositoryRoot, workspaceRoot });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    const laneA = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-a" });
+    const noOp = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-noop" });
+    const laneB = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-b" });
+
+    await writeFile(path.join(laneA.workspacePath, "a-one.txt"), "a one\n");
+    await runRealJj(["describe", "-m", "feat: lane a one"], laneA.workspacePath);
+    const aOne = await realRevision(laneA.workspacePath, "@");
+    await runRealJj(["new"], laneA.workspacePath);
+    await writeFile(path.join(laneA.workspacePath, "a-two.txt"), "a two\n");
+    await runRealJj(["describe", "-m", "feat: lane a two"], laneA.workspacePath);
+    const aTwo = await realRevision(laneA.workspacePath, "@");
+    await runRealJj(["new"], laneA.workspacePath);
+    const aWorking = await realRevision(laneA.workspacePath, "@");
+
+    await writeFile(path.join(laneB.workspacePath, "b.txt"), "b\n");
+    await runRealJj(["describe", "-m", "feat: lane b"], laneB.workspacePath);
+    const b = await realRevision(laneB.workspacePath, "@");
+    await runRealJj(["new"], laneB.workspacePath);
+    const bWorking = await realRevision(laneB.workspacePath, "@");
+
+    const result = await backend.fanIn({
+      parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
+      baseline: pinned.baseline, queueOrder: ["lane-a", "lane-noop", "lane-b"],
+      lanes: [
+        { laneId: "lane-b", streamIndex: 2, queueIndex: 2, workItemIndexes: [2], status: "accepted", acceptedHead: bWorking, workspace: laneB },
+        { laneId: "lane-a", streamIndex: 0, queueIndex: 0, workItemIndexes: [0, 1], status: "accepted", acceptedHead: aWorking, workspace: laneA },
+        { laneId: "lane-noop", streamIndex: 1, queueIndex: 1, workItemIndexes: [], status: "accepted", acceptedHead: noOp.revision, workspace: noOp },
+      ],
+    });
+
+    expect(result.orderedChangeIds).toEqual([aOne.changeId, aTwo.changeId, b.changeId]);
+    expect(result.rewrittenLaneTips.map(({ laneId }) => laneId)).toEqual(["lane-a", "lane-b"]);
+    expect(result.finalTip.changeId).toBe(b.changeId);
+    expect(result.integrationRevision).toEqual(result.finalTip);
+    expect(result.outcome).toBe("clean");
+    const { stdout } = await runRealJj(["log", "-r", `${result.effectiveBase.commitId}::${result.finalTip.commitId}`, "--reversed", "--no-graph", "-T", 'change_id ++ "\\t" ++ parents.len() ++ "\\t" ++ empty ++ "\\t" ++ description.first_line() ++ "\\n"'], repositoryRoot);
+    const history = stdout.trim().split(/\r?\n/).map((line) => line.split("\t"));
+    expect(history.slice(1).map(([changeId]) => changeId)).toEqual(result.orderedChangeIds);
+    expect(history.slice(1).map(([, parents]) => parents)).toEqual(["1", "1", "1"]);
+    expect(history.slice(1).map(([, , empty]) => empty)).toEqual(["false", "false", "false"]);
+    expect(history.slice(1).map(([, , , description]) => description)).toEqual(["feat: lane a one", "feat: lane a two", "feat: lane b"]);
+  });
+
+  test("reports conflicts across the real-jj linear range with bounded paths", async () => {
+    if (!(await hasRealJj())) return;
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-linear-conflict-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
+    await runRealJj(["git", "init", repositoryRoot], process.cwd());
+    const backend = createJjWorkspaceBackend({ repositoryRoot, workspaceRoot });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    const lanes = await Promise.all(["lane-a", "lane-b"].map((laneId) => backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId })));
+    const working: Array<{ commitId: string; changeId: string }> = [];
+    for (const [laneIndex, lane] of lanes.entries()) {
+      for (let index = 0; index < 70; index += 1) await writeFile(path.join(lane.workspacePath, `shared-${index}.txt`), `lane ${laneIndex}\n`);
+      await runRealJj(["describe", "-m", `feat: conflicting lane ${laneIndex}`], lane.workspacePath);
+      await runRealJj(["new"], lane.workspacePath);
+      working.push(await realRevision(lane.workspacePath, "@"));
+    }
+
+    const result = await backend.fanIn({
+      parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
+      baseline: pinned.baseline, queueOrder: ["lane-a", "lane-b"],
+      lanes: lanes.map((lane, index) => ({ laneId: `lane-${index === 0 ? "a" : "b"}`, streamIndex: index, queueIndex: index, workItemIndexes: [index], status: "accepted" as const, acceptedHead: working[index]!, workspace: lane })),
+    });
+
+    expect(result.outcome).toBe("conflict");
+    expect(result.satisfied).toBe(false);
+    expect(result.conflictedPaths).toHaveLength(64);
+    expect(result.conflictDetails).toHaveLength(64);
+    expect(result.finalTip.changeId).toBe(result.orderedChangeIds.at(-1));
   });
 
   test("represents a real-jj no-op lane as an empty stack", async () => {

@@ -102,6 +102,13 @@ export interface JjFanInProvenance {
   parentRevisionBefore: JjRevisionIdentity;
   parentRevisionAfter: JjRevisionIdentity;
   orderedHeads: JjFanInHead[];
+  /** Stable change ids in deterministic lane and in-lane order. */
+  orderedChangeIds: string[];
+  /** Rewritten meaningful tip for each non-empty lane. */
+  rewrittenLaneTips: Array<{ laneId: string; revision: JjRevisionIdentity }>;
+  /** Last meaningful revision after linear composition, or effectiveBase for all-no-op input. */
+  finalTip: JjRevisionIdentity;
+  /** Compatibility alias for the revision materialized by the integration utility. */
   integrationRevision?: JjRevisionIdentity;
   outcome: "clean" | "conflict";
   conflictedPaths: string[];
@@ -360,13 +367,12 @@ export class JjWorkspaceBackend {
   }
 
   /**
-   * Materialize one deterministic parent merge from accepted lane heads.
+   * Compose accepted lane stacks into one deterministic, schedule-ordered chain.
    *
-   * All verification happens before `jj new`. The command is deliberately run
-   * with --ignore-working-copy: jj creates the integration revision in the
-   * repository operation while leaving the parent working-copy commit and
-   * filesystem untouched. The returned provenance proves both the pre-fan-in
-   * parent revision and the exact ordered parents of the new revision.
+   * Every lane is validated before rewriting begins. Non-empty lane roots are
+   * then rebased onto the preceding rewritten meaningful tip. Empty lanes are
+   * retained in provenance but add no revision, and no synthetic merge or
+   * integration commit is created.
    */
   async fanIn(input: JjFanInInput): Promise<JjFanInResult> {
     validateFanInInput(input);
@@ -428,30 +434,62 @@ export class JjWorkspaceBackend {
         });
       }
 
-      // jj models parents as a set: when multiple no-op lanes retain the same
-      // baseline head, passing that commit more than once still creates only
-      // one parent. Keep every lane in orderedHeads for provenance, but use
-      // jj's canonical unique parent list for creation and verification.
-      const hasMeaningfulWork = orderedHeads.some(({ commits }) => commits.length > 0);
-      const effectiveBase = hasMeaningfulWork
+      const meaningfulHeads = orderedHeads.filter(({ commits }) => commits.length > 0);
+      const effectiveBase = meaningfulHeads.length > 0
         ? await this.#effectiveBaseForWorkflowBoundary(capability.repositoryRoot, input.baseline)
         : { ...input.baseline };
-      const parentIds = uniqueParentIds(orderedHeads.map((entry) => entry.head.commitId));
-      const createArgs = ["new", "--no-edit", ...parentIds];
-      const created = await this.#run(createArgs, capability.repositoryRoot);
-      this.#requireSuccess(created, createArgs, capability.repositoryRoot);
-      const integration = await this.#findIntegrationRevision(capability.repositoryRoot, parentIds, created);
+      const orderedChangeIds = meaningfulHeads.flatMap(({ commits }) => commits.map(({ changeId }) => changeId));
+      const rewrittenLaneTips: Array<{ laneId: string; revision: JjRevisionIdentity }> = [];
+      const conflictPaths = new Set<string>();
+      let finalTip = { ...effectiveBase };
+      let operationId: string | undefined;
+      let hasConflict = false;
+
+      for (const lane of meaningfulHeads) {
+        const root = lane.commits[0]!;
+        const rootDetails = await this.#readStackRevision(capability.repositoryRoot, root.commitId);
+        if (rootDetails.parents.length !== 1) {
+          throw new JjWorkspaceError("fan_in_lane_history_malformed", `Lane ${JSON.stringify(lane.laneId)} root is not a single-parent revision.`);
+        }
+        if (rootDetails.parents[0] !== finalTip.commitId) {
+          const rebaseArgs = ["rebase", "-s", root.commitId, "-d", finalTip.commitId];
+          const rebased = await this.#run(rebaseArgs, capability.repositoryRoot);
+          this.#requireSuccess(rebased, rebaseArgs, capability.repositoryRoot);
+          operationId = rebased.operationId ?? operationId;
+        }
+
+        let previous = finalTip;
+        for (const original of lane.commits) {
+          const rewritten = await this.#readStackRevision(capability.repositoryRoot, original.changeId);
+          if (rewritten.changeId !== original.changeId || rewritten.parents.length !== 1 || rewritten.parents[0] !== previous.commitId || rewritten.empty) {
+            throw new JjWorkspaceError("fan_in_rewrite_drift", `Lane ${JSON.stringify(lane.laneId)} did not retain one ordered meaningful chain after rebase.`);
+          }
+          hasConflict ||= rewritten.conflict;
+          if (rewritten.conflict) {
+            const details = await this.#readRevisionDetails(capability.repositoryRoot, rewritten.commitId);
+            for (const conflictedPath of details.conflictedPaths) {
+              if (conflictPaths.size >= 64) break;
+              conflictPaths.add(boundedFanInText(conflictedPath, 512));
+            }
+          }
+          previous = { commitId: rewritten.commitId, changeId: rewritten.changeId };
+        }
+        finalTip = previous;
+        rewrittenLaneTips.push({ laneId: lane.laneId, revision: { ...finalTip } });
+      }
+
       const parentAfter = await this.#readRevision(capability.repositoryRoot, "@");
       if (!sameRevision(parentBefore, parentAfter)) {
-        throw new JjWorkspaceError("fan_in_parent_changed", "jj fan-in changed the parent working-copy revision unexpectedly.");
+        throw new JjWorkspaceError("fan_in_parent_changed", "jj linear composition changed the parent working-copy revision unexpectedly.");
       }
       const completedAt = this.#now();
-      const operationId = created.operationId ?? await this.#latestOperationId(capability.repositoryRoot);
-      const conflictDetails = integration.conflictedPaths.map((pathValue) => ({
-        path: boundedFanInText(pathValue, 512),
-        message: boundedFanInText(`jj reported a merge conflict for ${pathValue}`, 1_000),
+      operationId ??= await this.#latestOperationId(capability.repositoryRoot);
+      const conflictedPaths = [...conflictPaths];
+      const conflictDetails = conflictedPaths.map((pathValue) => ({
+        path: pathValue,
+        message: boundedFanInText(`jj reported a conflict in the linear integration range for ${pathValue}`, 1_000),
       }));
-      const outcome = integration.conflict ? "conflict" : "clean";
+      const outcome = hasConflict ? "conflict" : "clean";
       return {
         version: 1,
         parentCastId: input.parentCastId,
@@ -462,9 +500,12 @@ export class JjWorkspaceBackend {
         parentRevisionBefore: parentBefore,
         parentRevisionAfter: parentAfter,
         orderedHeads,
-        integrationRevision: integration.revision,
+        orderedChangeIds,
+        rewrittenLaneTips,
+        finalTip,
+        integrationRevision: { ...finalTip },
         outcome,
-        conflictedPaths: integration.conflictedPaths,
+        conflictedPaths,
         conflictDetails,
         operationId,
         startedAt,
@@ -1057,37 +1098,6 @@ export class JjWorkspaceBackend {
     return revision;
   }
 
-  async #findIntegrationRevision(repositoryRoot: string, expectedParents: readonly string[], created: JjCommandResult): Promise<{ revision: JjRevisionIdentity; conflict: boolean; conflictedPaths: string[] }> {
-    // Be defensive for callers that supply lane heads directly: jj silently
-    // deduplicates repeated parents, so verification must compare the same
-    // canonical parent list that jj records.
-    const canonicalExpectedParents = uniqueParentIds(expectedParents);
-    const candidates: string[] = [];
-    const createdText = `${created.stdout}\n${created.stderr}`;
-    const createdMatch = /created new commit\s+\S+\s+([0-9a-f]{8,64})/i.exec(createdText);
-    if (createdMatch?.[1]) candidates.push(createdMatch[1]);
-
-    const inspectCandidate = async (candidate: string): Promise<{ revision: JjRevisionIdentity; conflict: boolean; conflictedPaths: string[] } | undefined> => {
-      const details = await this.#readRevisionDetails(repositoryRoot, candidate).catch(() => undefined);
-      if (!details || !sameStringArray(details.parents, canonicalExpectedParents)) return undefined;
-      return { revision: { commitId: details.commitId, changeId: details.changeId }, conflict: details.conflict, conflictedPaths: details.conflictedPaths };
-    };
-    for (const candidate of candidates) {
-      const found = await inspectCandidate(candidate);
-      if (found) return found;
-    }
-
-    const args = ["log", "-r", "heads(all())", "--no-graph", "-T", FAN_IN_REVISION_TEMPLATE];
-    const listed = await this.#run(args, repositoryRoot);
-    this.#requireSuccess(listed, args, repositoryRoot);
-    for (const line of listed.stdout.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
-      const details = parseRevisionDetails(line);
-      if (!details || !sameStringArray(details.parents, canonicalExpectedParents)) continue;
-      return { revision: { commitId: details.commitId, changeId: details.changeId }, conflict: details.conflict, conflictedPaths: details.conflictedPaths };
-    }
-    throw new JjWorkspaceError("fan_in_revision_missing", "jj created no verifiable integration revision with the ordered lane heads as parents.");
-  }
-
   async #readRevisionDetails(cwd: string, revset: string): Promise<RevisionDetails> {
     const args = ["log", "-r", revset, "--no-graph", "-T", FAN_IN_REVISION_TEMPLATE];
     const result = await this.#run(args, cwd);
@@ -1309,20 +1319,6 @@ function parseRevisionDetails(line: string): RevisionDetails | undefined {
 function boundedFanInText(value: string, max: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
-}
-
-function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-/** jj removes duplicate parents while preserving their first-seen order. */
-function uniqueParentIds(parentIds: readonly string[]): string[] {
-  const seen = new Set<string>();
-  return parentIds.filter((parentId) => {
-    if (seen.has(parentId)) return false;
-    seen.add(parentId);
-    return true;
-  });
 }
 
 function isRevision(value: unknown): value is JjRevisionIdentity {
