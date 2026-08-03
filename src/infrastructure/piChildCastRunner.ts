@@ -4,6 +4,8 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cloneExecutionScope } from "../domain/executionScope.js";
 import {
+  DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
+  DEFAULT_CHILD_CAST_RETAINED_EVENTS,
   EMPTY_CHILD_CAST_USAGE,
   type ChildCastAbortInput,
   type ChildCastAbortResult,
@@ -74,6 +76,10 @@ export interface PiChildCastRunnerOptions {
   maxStderrBytes?: number;
   maxJsonLineBytes?: number;
   killGraceMs?: number;
+  /** Maximum observational replay entries retained per child. */
+  maxRetainedEvents?: number;
+  /** Maximum diagnostics retained per child snapshot. */
+  maxRetainedDiagnostics?: number;
   /** Avoids writing the generated config when a caller supplies its own path. */
   configPath?: string;
   /** Allows tests and embedders to use a different fixed child command. */
@@ -143,6 +149,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   readonly #maxStderrBytes: number;
   readonly #maxJsonLineBytes: number;
   readonly #killGraceMs: number;
+  readonly #maxRetainedEvents: number;
+  readonly #maxRetainedDiagnostics: number;
   readonly #configPath?: string;
   readonly #childCommand: string;
 
@@ -158,6 +166,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     this.#maxStderrBytes = positiveLimit(options.maxStderrBytes, DEFAULT_PI_CHILD_MAX_STDERR_BYTES);
     this.#maxJsonLineBytes = positiveLimit(options.maxJsonLineBytes, DEFAULT_PI_CHILD_MAX_JSON_LINE_BYTES);
     this.#killGraceMs = nonNegativeLimit(options.killGraceMs, DEFAULT_PI_CHILD_KILL_GRACE_MS);
+    this.#maxRetainedEvents = positiveLimit(options.maxRetainedEvents, DEFAULT_CHILD_CAST_RETAINED_EVENTS);
+    this.#maxRetainedDiagnostics = positiveLimit(options.maxRetainedDiagnostics, DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS);
     this.#configPath = options.configPath;
     this.#childCommand = options.childCommand ?? "child";
   }
@@ -440,12 +450,14 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 
     process.stdout?.on("data", (chunk: Buffer | string) => {
       const text = record.stdoutCapture.push(chunk);
-      record.stdoutWrite = record.stdoutWrite.then(() => appendFile(record.stdoutPath, text)).catch(() => undefined);
+      // Continue parsing after capture fills so terminal delivery still works,
+      // but do not grow a promise chain with no-op artifact writes.
+      if (text.length > 0) record.stdoutWrite = record.stdoutWrite.then(() => appendFile(record.stdoutPath, text)).catch(() => undefined);
       record.stdoutParser.push(chunk);
     });
     process.stderr?.on("data", (chunk: Buffer | string) => {
       const text = record.stderrCapture.push(chunk);
-      record.stderrWrite = record.stderrWrite.then(() => appendFile(record.stderrPath, text)).catch(() => undefined);
+      if (text.length > 0) record.stderrWrite = record.stderrWrite.then(() => appendFile(record.stderrPath, text)).catch(() => undefined);
       record.stderrParser.push(chunk);
     });
     process.once("error", (error) => {
@@ -627,7 +639,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}),
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
     };
-    record.snapshot.events = [...record.snapshot.events, event];
+    record.snapshot.events = retainTail(record.snapshot.events, event, this.#maxRetainedEvents);
     record.snapshot.updatedAt = occurredAt;
     for (const observer of record.observers.values()) void callObserver(observer.onEvent, clone(event));
   }
@@ -638,7 +650,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       occurredAt: diagnostic.occurredAt ?? this.#now(),
       ...(diagnostic.details ? { details: clone(diagnostic.details) } : {}),
     };
-    record.snapshot.diagnostics = [...record.snapshot.diagnostics, next];
+    record.snapshot.diagnostics = retainTail(record.snapshot.diagnostics, next, this.#maxRetainedDiagnostics);
     record.snapshot.updatedAt = next.occurredAt;
     this.#emit(record, { type: "diagnostic", payload: next, occurredAt: next.occurredAt });
   }
@@ -675,6 +687,10 @@ const DISCARDED_CHILD_EVENT_TYPES = new Set([
   "session",
 ]);
 const TERMINAL_EVENT_TYPES = new Set(["pi_materia_child_terminal", "child_terminal", "terminal"]);
+
+function retainTail<T>(values: readonly T[], value: T, limit: number): T[] {
+  return values.length < limit ? [...values, value] : [...values.slice(values.length - limit + 1), value];
+}
 
 function addUsage(left: ChildCastUsage, right: ChildCastUsage): ChildCastUsage {
   return {

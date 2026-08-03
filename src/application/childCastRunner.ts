@@ -58,6 +58,10 @@ export const EMPTY_CHILD_CAST_USAGE: ChildCastUsage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+/** Default replay tails retained by child runners; sequence numbers remain global. */
+export const DEFAULT_CHILD_CAST_RETAINED_EVENTS = 256;
+export const DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS = 64;
+
 export type ChildCastDiagnosticSeverity = "info" | "warning" | "error";
 
 /** A bounded, secret-free diagnostic suitable for durable lane state. */

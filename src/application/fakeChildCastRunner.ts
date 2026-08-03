@@ -1,5 +1,7 @@
 import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import {
+  DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
+  DEFAULT_CHILD_CAST_RETAINED_EVENTS,
   EMPTY_CHILD_CAST_USAGE,
   type ChildCastAbortInput,
   type ChildCastDiagnostic,
@@ -22,6 +24,10 @@ export interface FakeChildCastRunnerOptions {
   now?: () => number;
   /** New children start running by default; queued is useful for dispatch tests. */
   initialStatus?: Extract<ChildCastStatus, "queued" | "starting" | "running">;
+  /** Maximum observational replay entries retained per child. */
+  maxRetainedEvents?: number;
+  /** Maximum diagnostics retained per child snapshot. */
+  maxRetainedDiagnostics?: number;
 }
 
 export interface FakeChildCastEventInput {
@@ -58,12 +64,17 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
   private readonly observers = new Map<string, Map<number, ChildCastObserver>>();
   private readonly now: () => number;
   private readonly initialStatus: Extract<ChildCastStatus, "queued" | "starting" | "running">;
+  private readonly maxRetainedEvents: number;
+  private readonly maxRetainedDiagnostics: number;
+  private readonly nextSequences = new Map<string, number>();
   private nextObserverId = 1;
   private pendingObserverWork: Promise<void>[] = [];
 
   constructor(options: FakeChildCastRunnerOptions = {}) {
     this.now = options.now ?? (() => Date.now());
     this.initialStatus = options.initialStatus ?? "running";
+    this.maxRetainedEvents = retentionLimit(options.maxRetainedEvents, DEFAULT_CHILD_CAST_RETAINED_EVENTS);
+    this.maxRetainedDiagnostics = retentionLimit(options.maxRetainedDiagnostics, DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS);
   }
 
   async start(input: StartChildCastInput): Promise<ChildCastStartResult> {
@@ -90,6 +101,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       diagnostics: [],
     };
     this.records.set(input.identity.childCastId, snapshot);
+    this.nextSequences.set(input.identity.childCastId, 1);
     this.emit(input.identity.childCastId, { type: "started", occurredAt: timestamp });
     return { childCastId: input.identity.childCastId, snapshot: this.requireSnapshot(input.identity.childCastId) };
   }
@@ -191,7 +203,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     const timestamp = input.occurredAt ?? this.now();
     const event: ChildCastStreamEvent = {
       childCastId,
-      sequence: existing.events.length + 1,
+      sequence: this.nextSequences.get(childCastId) ?? 1,
       type: input.type,
       occurredAt: timestamp,
       ...(input.payload !== undefined ? { payload: clone(input.payload) } : {}),
@@ -199,8 +211,9 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}),
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
     };
+    this.nextSequences.set(childCastId, event.sequence + 1);
     const nextUsage = input.usage ? clone(input.usage) : existing.usage;
-    this.records.set(childCastId, { ...existing, updatedAt: timestamp, usage: nextUsage, events: [...existing.events, event] });
+    this.records.set(childCastId, { ...existing, updatedAt: timestamp, usage: nextUsage, events: retainTail(existing.events, event, this.maxRetainedEvents) });
     this.notifyEvent(childCastId, event);
     return clone(event);
   }
@@ -212,7 +225,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       occurredAt: diagnostic.occurredAt ?? this.now(),
       ...(diagnostic.details ? { details: clone(diagnostic.details) } : {}),
     };
-    this.records.set(childCastId, { ...existing, updatedAt: nextDiagnostic.occurredAt, diagnostics: [...existing.diagnostics, nextDiagnostic] });
+    this.records.set(childCastId, { ...existing, updatedAt: nextDiagnostic.occurredAt, diagnostics: retainTail(existing.diagnostics, nextDiagnostic, this.maxRetainedDiagnostics) });
     this.emit(childCastId, { type: "diagnostic", payload: nextDiagnostic, occurredAt: nextDiagnostic.occurredAt });
     return clone(nextDiagnostic);
   }
@@ -335,6 +348,14 @@ function validateStartInput(input: StartChildCastInput): void {
   if (input.attempt !== undefined && (!Number.isSafeInteger(input.attempt) || input.attempt < 1)) {
     throw new Error("Child cast attempt must be a positive safe integer.");
   }
+}
+
+function retentionLimit(value: number | undefined, fallback: number): number {
+  return Number.isSafeInteger(value) && value! > 0 ? value! : fallback;
+}
+
+function retainTail<T>(values: readonly T[], value: T, limit: number): T[] {
+  return values.length < limit ? [...values, value] : [...values.slice(values.length - limit + 1), value];
 }
 
 function clone<T>(value: T): T {

@@ -163,6 +163,60 @@ describe("Pi child cast runner", () => {
     expect(JSON.stringify(observation?.snapshot)).not.toContain(secret);
   });
 
+  test("bounds replay and diagnostics while preserving sequence and late terminal delivery", async () => {
+    let child!: FakeChild;
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        child = new FakeChild();
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      maxStdoutBytes: 128,
+      maxRetainedEvents: 32,
+      maxRetainedDiagnostics: 8,
+      now: () => 130,
+    });
+    await runner.start(input());
+
+    for (let index = 0; index < 3_000; index++) {
+      child.stdout.write(`not-json-${index}\n`);
+      child.stdout.write(`${JSON.stringify({ type: "message_end", message: { usage: {
+        input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      } } })}\n`);
+    }
+    child.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: {
+      status: "succeeded",
+      accepted: true,
+      endedAt: 131,
+      usage: { tokens: { input: 3_000, output: 3_000, cacheRead: 0, cacheWrite: 0, total: 6_000 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      executionScope: { id: "scope-retained", cwd: "/tmp/lane-a", state: { recovery: "stable" }, exports: {} },
+    } })}\n`);
+    child.finish();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const observation = await runner.observe({ childCastId: "child-1" });
+    expect(observation?.snapshot.events).toHaveLength(32);
+    expect(observation?.snapshot.diagnostics).toHaveLength(8);
+    expect(observation?.snapshot.events[0]!.sequence).toBeGreaterThan(5_000);
+    expect(observation?.snapshot.usage.tokens.total).toBe(6_000);
+    expect(observation?.snapshot.executionScope).toMatchObject({ id: "scope-retained", state: { recovery: "stable" } });
+    expect(observation?.snapshot.identity).toEqual(input().identity);
+    expect(JSON.stringify(observation?.snapshot).length).toBeLessThan(20_000);
+
+    const watermark = observation!.snapshot.events.at(-3)!.sequence;
+    const replayed: number[] = [];
+    const terminals: string[] = [];
+    runner.subscribe({ childCastId: "child-1", afterSequence: watermark }, {
+      onEvent: (event) => { replayed.push(event.sequence); },
+      onTerminal: (result) => { terminals.push(result.status); },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(replayed).toEqual(observation!.snapshot.events.slice(-2).map((event) => event.sequence));
+    expect(terminals).toEqual(["succeeded"]);
+    expect((await readFile("/tmp/lane-a/artifacts/child-stdout.jsonl", "utf8")).length).toBeLessThanOrEqual(128);
+  });
+
   test("consumes duplicate terminal markers once without forwarding their payload", async () => {
     let child!: FakeChild;
     const runner = createPiChildCastRunner({
