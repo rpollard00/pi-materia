@@ -602,17 +602,52 @@ describe("layered config loading and persistence", () => {
     }
   });
 
-  test("rejects content saves to locked materia while allowing lock metadata and deletion", async () => {
+  test("rejects only actual content changes to locked materia while allowing idempotent submissions, lock metadata, and deletion", async () => {
     const cwd = await mkdtemp(path.join(tmpdir(), "pi-materia-locked-content-"));
     const profile = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
     process.env.PI_MATERIA_PROFILE_DIR = profile;
     try {
-      await saveMateriaConfigPatch(cwd, { materia: { Agent: { tools: "none", prompt: "agent", lockState: "locked" } } as never });
-      await expect(saveMateriaConfigPatch(cwd, { materia: { Agent: { prompt: "changed" } } as never })).rejects.toThrow("Unlock it before saving content changes");
+      await saveMateriaConfigPatch(cwd, {
+        materia: {
+          Agent: { tools: "none", prompt: "agent", lockState: "locked" },
+          Other: { tools: "none", prompt: "other" },
+        } as never,
+      });
+
+      // Editors may submit the whole catalog while changing only an unrelated materia.
+      await saveMateriaConfigPatch(cwd, {
+        materia: {
+          Agent: { type: "agent", tools: "none", prompt: "agent", lockState: "locked" },
+          Other: { prompt: "updated" },
+        } as never,
+      });
+
+      // Partial unchanged definitions must likewise not block unrelated loadout edits.
+      await saveMateriaConfigPatch(cwd, {
+        materia: { Agent: { prompt: "agent" } } as never,
+        loadouts: {
+          Unrelated: { entry: "Socket-1", sockets: { "Socket-1": { materia: "Other" } } },
+        } as never,
+      });
+      let loaded = await loadConfig(cwd);
+      expect(loaded.config.materia.Other.prompt).toBe("updated");
+      expect(loaded.config.loadouts?.Unrelated).toBeDefined();
+
+      await expect(saveMateriaConfigPatch(cwd, {
+        materia: {
+          Agent: { prompt: "changed" },
+          Other: { prompt: "must not be saved" },
+        } as never,
+      })).rejects.toThrow("Unlock it before saving content changes");
+      await expect(saveMateriaConfigPatch(cwd, {
+        materia: { Agent: { tools: "coding" } } as never,
+      })).rejects.toThrow("Unlock it before saving content changes");
+      loaded = await loadConfig(cwd);
+      expect(loaded.config.materia.Other.prompt).toBe("updated");
 
       await saveMateriaConfigPatch(cwd, { materia: { Agent: { lockState: "unlocked" } } as never });
-      let loaded = await loadConfig(cwd);
+      loaded = await loadConfig(cwd);
       expect(loaded.config.materia.Agent).toMatchObject({ prompt: "agent", lockState: "unlocked" });
 
       await saveMateriaConfigPatch(cwd, { materia: { Agent: { lockState: "locked" } } as never });

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 import { validateCompactionConfig } from "./compactionConfig.js";
 import { validateParallelismConfig } from "../domain/parallelLoop.js";
@@ -1011,8 +1012,14 @@ function rejectLockedMateriaContentSaves(patch: MateriaConfigPatch, existing: Pa
     if (materiaPatch === null || !isPlainObject(materiaPatch)) continue;
     const current = existingMateria[name];
     if (!isPlainObject(current) || current.lockState !== "locked") continue;
-    const contentKeys = Object.keys(materiaPatch).filter((key) => key !== "lockState");
-    if (contentKeys.length > 0) throw new Error(`Materia definition "${name}" is locked. Unlock it before saving content changes.`);
+    const currentContent = { ...current };
+    const nextContent = { ...current, ...materiaPatch };
+    delete currentContent.lockState;
+    delete nextContent.lockState;
+    for (const [key, value] of Object.entries(materiaPatch)) {
+      if (key !== "lockState" && value === null) delete nextContent[key];
+    }
+    if (!isDeepStrictEqual(nextContent, currentContent)) throw new Error(`Materia definition "${name}" is locked. Unlock it before saving content changes.`);
   }
 }
 
