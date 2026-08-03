@@ -15,28 +15,27 @@ import { executeBuiltInUtility } from "../src/utilities/utilityRegistry.js";
 const repositoryRoot = "/repo";
 const workspaceRoot = "/tmp/materia-finalize";
 const integrationPath = path.join(workspaceRoot, "integration");
-const sourcePath = path.join(workspaceRoot, "source");
 const integrationOwner = { parentCastId: "cast", loopId: "integrate", laneId: "integration-scope" };
 const sourceOwner = { parentCastId: "child", loopId: "spawn", laneId: "lane-a" };
+const TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
 
 describe("Finalize-JJ-Workspace", () => {
-  test("requires agent acceptance before inspecting or mutating workspaces", async () => {
+  test("requires acceptance before inspecting or mutating workspaces", async () => {
     let touched = false;
-    await expect(finalizeJjWorkspace({
-      ...input(false),
-      bookmarkName: "blackbelt/test",
-    }, {
+    await expect(finalizeJjWorkspace({ ...input(false), bookmarkName: "blackbelt/test" }, {
       createBackend: () => ({ inspect: async () => { touched = true; return undefined as any; }, cleanup: async () => undefined as any }),
       runJj: async () => { touched = true; return ""; },
     })).rejects.toThrow("explicit agent acceptance");
     expect(touched).toBe(false);
   });
 
-  test("verifies, publishes, cleans owned workspaces, and returns to base scope", async () => {
+  test("resolves stable changes, retains one correction, and advances only the existing bookmark", async () => {
     const calls: string[] = [];
     const cleaned: string[] = [];
     let described = false;
-    const result = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test", description: "accepted integration" }, {
+    let moved = false;
+    let createdBase = false;
+    const result = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test", description: "fix: accepted integration" }, {
       createBackend: () => ({
         inspect: async (reference: any) => record(reference.workspaceName, reference.owner),
         cleanup: async (reference: any) => { cleaned.push(reference.workspaceName); return {} as any; },
@@ -45,115 +44,153 @@ describe("Finalize-JJ-Workspace", () => {
         calls.push(`${ignore}:${cwd}:${args.join(" ")}`);
         if (args[0] === "status") return "The working copy has no changes.\n";
         if (args[0] === "describe") { described = true; return ""; }
-        if (args[0] === "bookmark") return "";
-        if (args[0] === "new") return "";
-        if (args.at(-1) === "empty") return "true\n";
+        if (args[0] === "bookmark") { moved = true; return ""; }
+        if (args[0] === "new") { createdBase = true; return ""; }
         const revision = args[args.indexOf("-r") + 1];
-        if (revision === "@" && cwd === integrationPath) return "accepted\tchangeaccepted\tfalse\n";
-        if (revision === "original") return "original\tchangeoriginal\n";
-        if (revision === "original::accepted") return "accepted\n";
-        if (revision === "changeaccepted" || revision === "blackbelt/test" || revision === "@-") return `${described ? "described" : "accepted"}\tchangeaccepted\n`;
-        if (revision === "@") return "baseworking\tchangebaseworking\n";
+        if (String(revision).includes("conflicts()")) return "";
+        if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, false);
+        if (revision === "changebase") return details("base", "changebase", "root", false, false);
+        if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+        if (revision === "changereview") return details(described ? "described" : "review", "changereview", "final", false, false);
+        if (revision === "blackbelt/test") return details(moved ? "described" : "old", moved ? "changereview" : "changeold", "root", false, false);
+        if (revision === "@" && cwd === repositoryRoot && createdBase) return details("baseworking", "changebaseworking", "described", false, true);
         throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
       },
     });
 
-    expect(result.scope).toEqual(input(true).baseScope);
-    expect(result.integrationRevision).toEqual({ commitId: "described", changeId: "changeaccepted" });
+    expect(result.integrationRevision).toEqual({ commitId: "described", changeId: "changereview" });
+    expect(result.reviewCorrection).toBe(true);
     expect(cleaned).toEqual(["integration", "source"]);
-    expect(calls).toContain(`false:${integrationPath}:log -r @ --no-graph -T commit_id ++ "\\t" ++ change_id ++ "\\t" ++ conflict ++ "\\n"`);
-    expect(calls.findIndex((call) => call.includes("describe"))).toBeLessThan(calls.findIndex((call) => call.includes("bookmark set")));
-    expect(calls.findIndex((call) => call.includes(":false:/repo:new"))).toBeLessThan(calls.length);
+    expect(calls.filter((call) => call.includes(":describe "))).toHaveLength(1);
+    expect(calls.some((call) => call.includes("bookmark set") || call.includes("bookmark create"))).toBe(false);
+    expect(calls).toContain(`true:/repo:bookmark move --allow-backwards blackbelt/test --to described`);
   });
 
-  test("rejects unresolved conflicts without publishing or cleanup", async () => {
+  test("publishes the meaningful parent when review working commit is empty", async () => {
+    const mutations: string[] = [];
+    let moved = false;
+    let createdBase = false;
+    const result = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, {
+      createBackend: () => ({ inspect: async (reference: any) => record(reference.workspaceName, reference.owner), cleanup: async () => ({} as any) }),
+      runJj: async (args, cwd) => {
+        if (args[0] !== "log" && args[0] !== "status") mutations.push(args.join(" "));
+        if (args[0] === "status") return "The working copy has no changes.\n";
+        if (args[0] === "bookmark") { moved = true; return ""; }
+        if (args[0] === "new") { createdBase = true; return ""; }
+        const revision = args[args.indexOf("-r") + 1];
+        if (String(revision).includes("conflicts()")) return "";
+        if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);
+        if (revision === "changebase") return details("base", "changebase", "root", false, false);
+        if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+        if (revision === "blackbelt/test") return details(moved ? "final" : "old", moved ? "changefinal" : "changeold", "base", false, false);
+        if (revision === "@" && cwd === repositoryRoot && createdBase) return details("working", "changeworking", "final", false, true);
+        throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
+      },
+    });
+    expect(result.integrationRevision).toEqual({ commitId: "final", changeId: "changefinal" });
+    expect(result.reviewCorrection).toBe(false);
+    expect(mutations.some((call) => call.startsWith("describe"))).toBe(false);
+  });
+
+  test.each([
+    ["stale schedule ordering", { finalParent: "wrong", ancestorConflict: false }, "meaningful linear chain"],
+    ["conflicted ancestor", { finalParent: "base", ancestorConflict: true }, "unresolved conflicts"],
+  ])("rejects %s before publication", async (_name, scenario, message) => {
     const mutations: string[] = [];
     await expect(finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, {
       createBackend: () => ({ inspect: async (reference: any) => record(reference.workspaceName, reference.owner), cleanup: async () => { mutations.push("cleanup"); return {} as any; } }),
-      runJj: async (args) => {
-        if (args[0] === "log") return "accepted\tchangeaccepted\ttrue\n";
-        mutations.push(args.join(" "));
+      runJj: async (args, cwd) => {
+        if (args[0] !== "log") mutations.push(args.join(" "));
+        const revision = args[args.indexOf("-r") + 1];
+        if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);
+        if (revision === "changebase") return details("base", "changebase", "root", false, false);
+        if (revision === "changefinal") return details("final", "changefinal", scenario.finalParent, scenario.ancestorConflict, false);
         return "";
       },
-    })).rejects.toThrow("unresolved conflicts");
+    })).rejects.toThrow(message);
     expect(mutations).toEqual([]);
   });
 
-  test("snapshots post-integration agent edits before publishing and cleanup with real jj", async () => {
+  test("unchanged and corrected reviews publish no merge or transient empty commit with real jj", async () => {
     if (!(await hasJj())) return;
-    const realRepositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-repo-"));
-    const realWorkspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-workspaces-"));
-    await realJj(["git", "init", realRepositoryRoot], process.cwd());
-    await writeFile(path.join(realRepositoryRoot, "base.txt"), "base\n");
-    await realJj(["describe", "-m", "base"], realRepositoryRoot);
-    await realJj(["new"], realRepositoryRoot);
-
-    const backend = createJjWorkspaceBackend({ workspaceRoot: realWorkspaceRoot, repositoryRoot: realRepositoryRoot });
-    const baseline = (await backend.pinBaseline(realRepositoryRoot)).baseline;
-    const workspace = await backend.createWorkspace({
-      cwd: realRepositoryRoot,
-      repositoryRoot: realRepositoryRoot,
-      workspaceRoot: realWorkspaceRoot,
-      parentCastId: "cast",
-      loopId: "integrate",
-      laneId: "integration-scope",
-      baseline,
-    });
-    const ownedWorkspace = {
-      owner: { ...workspace.owner },
-      workspaceRoot: workspace.workspaceRoot,
-      workspacePath: workspace.workspacePath,
-      workspaceName: workspace.workspaceName,
-      manifestPath: workspace.manifestPath,
-    };
-    const activeScope = createExecutionScope({
-      id: "integration-scope",
-      cwd: workspace.cwd,
-      exports: {
-        [JJ_WORKSPACE_INTEGRATION_EXPORT]: {
-          producer: "Integrate-JJ-Workspaces",
-          value: { version: 1, backend: "jj", outcome: "clean", repositoryRoot: realRepositoryRoot, integrationRevision: baseline, ...ownedWorkspace },
-        },
-        [JJ_WORKSPACE_CLEANUP_EXPORT]: {
-          producer: "Integrate-JJ-Workspaces",
-          value: { version: 1, backend: "jj", integration: ownedWorkspace, sources: [] },
-        },
-      },
-    });
-
-    // This is deliberately an unsnapshotted filesystem edit, matching an
-    // integration agent's accepted post-integration work.
-    await writeFile(path.join(workspace.cwd, "accepted-fix.txt"), "resolved by agent\n");
-    const result = await finalizeJjWorkspace({
-      cwd: workspace.cwd,
-      executionScope: activeScope,
-      baseScope: createExecutionScope({ id: "cast:cast:base", cwd: realRepositoryRoot }),
-      state: { envelope: { satisfied: true } },
-      bookmarkName: "blackbelt/test",
-      description: "accepted agent fix",
-    });
-
-    expect((await realJj(["file", "show", "-r", result.integrationRevision.commitId, "accepted-fix.txt"], realRepositoryRoot)).stdout).toBe("resolved by agent\n");
-    expect((await realJj(["log", "-r", "blackbelt/test", "--no-graph", "-T", "commit_id"], realRepositoryRoot)).stdout.trim()).toBe(result.integrationRevision.commitId);
-    await expect(backend.inspect(ownedWorkspace)).resolves.toBeUndefined();
+    for (const corrected of [false, true]) {
+      const fixture = await realFixture();
+      if (corrected) {
+        await writeFile(path.join(fixture.workspace.cwd, "accepted-fix.txt"), "resolved by agent\n");
+      } else {
+        // Conflict resolution rewrites commit ids while preserving change ids.
+        // Re-describing the reviewed stable change exercises the same jj rewrite
+        // behavior without depending on a platform-specific merge tool.
+        await realJj(["describe", "-r", fixture.base.changeId, "-m", "fix: resolved integrated revision"], fixture.repositoryRoot);
+      }
+      const result = await finalizeJjWorkspace({
+        cwd: fixture.workspace.cwd,
+        executionScope: fixture.scope,
+        baseScope: createExecutionScope({ id: "cast:cast:base", cwd: fixture.repositoryRoot }),
+        state: { envelope: { satisfied: true } },
+        bookmarkName: "blackbelt/test",
+        description: "fix: reconcile streams",
+      });
+      expect(result.reviewCorrection).toBe(corrected);
+      if (!corrected) expect(result.integrationRevision.commitId).not.toBe(fixture.base.commitId);
+      const history = (await realJj(["log", "-r", `${fixture.base.changeId}::blackbelt/test`, "--reversed", "--no-graph", "-T", TEMPLATE], fixture.repositoryRoot)).stdout.trim().split("\n").map(parseDetails);
+      expect(history.every((entry, index) => index === 0 || (entry.parents.length === 1 && entry.parents[0] === history[index - 1]!.commitId))).toBe(true);
+      expect(history.slice(1).every((entry) => !entry.empty)).toBe(true);
+      expect(history).toHaveLength(corrected ? 2 : 1);
+      expect((await realJj(["log", "-r", "@", "--no-graph", "-T", "empty"], fixture.repositoryRoot)).stdout.trim()).toBe("true");
+    }
   });
 
-  test("built-in utility emits finalization state and a base-scope transition", async () => {
-    // Input validation happens before the real command boundary; this focused
-    // assertion also keeps the utility alias and acceptance contract covered.
+  test("rejects stale schedule ordering and conflicted publish ancestry with real jj", async () => {
+    if (!(await hasJj())) return;
+
+    const staleRepo = await realRepository("stale");
+    await writeFile(path.join(staleRepo, "a.txt"), "a\n");
+    await realJj(["describe", "-m", "feat: first"], staleRepo);
+    const first = await realIdentity("@", staleRepo);
+    await realJj(["new", "-m", "feat: second"], staleRepo);
+    await writeFile(path.join(staleRepo, "b.txt"), "b\n");
+    const second = await realIdentity("@", staleRepo);
+    await realJj(["new", second.commitId], staleRepo);
+    const stale = await realReviewFixture(staleRepo, second, first, first, [second.changeId, first.changeId]);
+    await expect(finalizeRealFixture(stale)).rejects.toThrow("schedule order");
+
+    const conflictRepo = await realRepository("conflicted-ancestor");
+    const conflict = await createConflict(conflictRepo);
+    await realJj(["new", conflict.conflicted.changeId, "-m", "fix: resolve conflict"], conflictRepo);
+    await writeFile(path.join(conflictRepo, "shared.txt"), "resolved\n");
+    const resolved = await realIdentity("@", conflictRepo);
+    await realJj(["new", resolved.commitId], conflictRepo);
+    const conflictedAncestry = await realReviewFixture(conflictRepo, resolved, resolved, resolved, []);
+    await expect(finalizeRealFixture(conflictedAncestry)).rejects.toThrow("conflicted ancestors");
+  });
+
+  test("resolves a genuinely conflicted stable change before publishing with real jj", async () => {
+    if (!(await hasJj())) return;
+    const repositoryRoot = await realRepository("resolved-rewrite");
+    const conflict = await createConflict(repositoryRoot);
+    await realJj(["bookmark", "create", "blackbelt/test", "-r", conflict.conflicted.commitId], repositoryRoot);
+    await realJj(["new", conflict.left.commitId], repositoryRoot);
+    const fixture = await realReviewFixture(repositoryRoot, conflict.conflicted, conflict.left, conflict.conflicted, [conflict.conflicted.changeId]);
+
+    await realJj(["edit", conflict.conflicted.changeId], fixture.workspace.cwd);
+    await writeFile(path.join(fixture.workspace.cwd, "shared.txt"), "resolved by reviewer\n");
+    await realJj(["new", conflict.conflicted.changeId], fixture.workspace.cwd);
+    const result = await finalizeRealFixture(fixture);
+
+    expect(result.reviewCorrection).toBe(false);
+    expect(result.integrationRevision.changeId).toBe(conflict.conflicted.changeId);
+    expect(result.integrationRevision.commitId).not.toBe(conflict.conflicted.commitId);
+    expect((await realJj(["log", "-r", `ancestors(blackbelt/test) & conflicts()`, "--no-graph", "-T", "commit_id"], repositoryRoot)).stdout.trim()).toBe("");
+    expect((await realJj(["file", "show", "-r", "blackbelt/test", "shared.txt"], repositoryRoot)).stdout).toBe("resolved by reviewer\n");
+  });
+
+  test("built-in utility preserves the acceptance contract", async () => {
     await expect(executeBuiltInUtility("vcs.finalizeJjWorkspace", {
-      cwd: integrationPath,
-      runDir: repositoryRoot,
-      request: "",
-      castId: "cast",
-      socketId: "finalize",
-      executionScope: input(false).executionScope,
-      baseScope: input(false).baseScope,
-      params: {},
+      cwd: integrationPath, runDir: repositoryRoot, request: "", castId: "cast", socketId: "finalize",
+      executionScope: input(false).executionScope, baseScope: input(false).baseScope, params: {},
       state: { envelope: { satisfied: false }, blackbeltBootstrap: { bookmarkName: "blackbelt/test" } },
-      item: null,
-      itemKey: null,
-      itemLabel: null,
+      item: null, itemKey: null, itemLabel: null,
     })).rejects.toThrow("explicit agent acceptance");
   });
 });
@@ -163,67 +200,93 @@ function input(accepted: boolean) {
   const source = owned("source", sourceOwner);
   return {
     cwd: integrationPath,
-    executionScope: createExecutionScope({
-      id: "integration-scope",
-      cwd: integrationPath,
-      exports: {
-        [JJ_WORKSPACE_INTEGRATION_EXPORT]: {
-          producer: "Integrate-JJ-Workspaces",
-          value: { version: 1, backend: "jj", outcome: "clean", repositoryRoot, integrationRevision: { commitId: "original", changeId: "changeoriginal" }, ...integration },
-        },
-        [JJ_WORKSPACE_CLEANUP_EXPORT]: {
-          producer: "Integrate-JJ-Workspaces",
-          value: { version: 1, backend: "jj", integration, sources: [{ laneId: "lane-a", ...source }] },
-        },
-      },
-    }),
+    executionScope: createExecutionScope({ id: "integration-scope", cwd: integrationPath, exports: {
+      [JJ_WORKSPACE_INTEGRATION_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: {
+        version: 1, backend: "jj", outcome: "clean", repositoryRoot,
+        integrationRevision: { commitId: "final", changeId: "changefinal" },
+        effectiveBase: { commitId: "base", changeId: "changebase" },
+        finalTip: { commitId: "final", changeId: "changefinal" }, orderedChangeIds: ["changefinal"], provenanceTruncated: false,
+        ...integration,
+      } },
+      [JJ_WORKSPACE_CLEANUP_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", integration, sources: [{ laneId: "lane-a", ...source }] } },
+    } }),
     baseScope: createExecutionScope({ id: "cast:cast:base", cwd: repositoryRoot }),
     state: { envelope: { satisfied: accepted } },
   };
 }
 
-function owned(name: string, owner: typeof integrationOwner) {
-  return { owner: { ...owner }, workspaceRoot, workspacePath: path.join(workspaceRoot, name), workspaceName: name, manifestPath: path.join(workspaceRoot, ".manifests", `${name}.json`) };
+async function realRepository(label: string) {
+  const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), `materia-real-finalize-${label}-`));
+  await realJj(["git", "init", repositoryRoot], process.cwd());
+  await writeFile(path.join(repositoryRoot, "shared.txt"), "base\n");
+  await realJj(["describe", "-m", "feat: meaningful base"], repositoryRoot);
+  return repositoryRoot;
 }
 
-async function hasJj(): Promise<boolean> {
-  try {
-    await realJj(["--version"], process.cwd());
-    return true;
-  } catch {
-    return false;
-  }
+async function createConflict(repositoryRoot: string) {
+  const base = await realIdentity("@", repositoryRoot);
+  await realJj(["new", base.commitId, "-m", "feat: left"], repositoryRoot);
+  await writeFile(path.join(repositoryRoot, "shared.txt"), "left\n");
+  const left = await realIdentity("@", repositoryRoot);
+  await realJj(["new", base.commitId, "-m", "feat: right"], repositoryRoot);
+  await writeFile(path.join(repositoryRoot, "shared.txt"), "right\n");
+  const right = await realIdentity("@", repositoryRoot);
+  await realJj(["rebase", "-r", right.commitId, "-d", left.commitId], repositoryRoot);
+  const conflicted = await realIdentity(right.changeId, repositoryRoot);
+  expect((await realJj(["log", "-r", conflicted.commitId, "--no-graph", "-T", "conflict"], repositoryRoot)).stdout.trim()).toBe("true");
+  return { base, left, conflicted };
 }
 
+async function realReviewFixture(repositoryRoot: string, workspaceBase: { commitId: string; changeId: string }, effectiveBase: { commitId: string; changeId: string }, finalTip: { commitId: string; changeId: string }, orderedChangeIds: string[]) {
+  const realWorkspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-review-"));
+  const backend = createJjWorkspaceBackend({ workspaceRoot: realWorkspaceRoot, repositoryRoot });
+  const workspace = await backend.createWorkspace({ cwd: repositoryRoot, repositoryRoot, workspaceRoot: realWorkspaceRoot, parentCastId: "cast", loopId: "integrate", laneId: "integration-scope", baseline: workspaceBase });
+  const ownedWorkspace = { owner: { ...workspace.owner }, workspaceRoot: workspace.workspaceRoot, workspacePath: workspace.workspacePath, workspaceName: workspace.workspaceName, manifestPath: workspace.manifestPath };
+  const scope = createExecutionScope({ id: "integration-scope", cwd: workspace.cwd, exports: {
+    [JJ_WORKSPACE_INTEGRATION_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", outcome: "clean", repositoryRoot, integrationRevision: finalTip, effectiveBase, finalTip, orderedChangeIds, provenanceTruncated: false, ...ownedWorkspace } },
+    [JJ_WORKSPACE_CLEANUP_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", integration: ownedWorkspace, sources: [] } },
+  } });
+  return { repositoryRoot, workspace, scope };
+}
+
+function finalizeRealFixture(fixture: Awaited<ReturnType<typeof realReviewFixture>>) {
+  return finalizeJjWorkspace({ cwd: fixture.workspace.cwd, executionScope: fixture.scope, baseScope: createExecutionScope({ id: "cast:cast:base", cwd: fixture.repositoryRoot }), state: { envelope: { satisfied: true } }, bookmarkName: "blackbelt/test" });
+}
+
+async function realFixture() {
+  const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-repo-"));
+  const realWorkspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-workspaces-"));
+  await realJj(["git", "init", repositoryRoot], process.cwd());
+  await writeFile(path.join(repositoryRoot, "base.txt"), "base\n");
+  await realJj(["describe", "-m", "feat: meaningful base"], repositoryRoot);
+  const base = await realIdentity("@", repositoryRoot);
+  await realJj(["new"], repositoryRoot);
+  const workflowBoundary = await realIdentity("@", repositoryRoot);
+  await realJj(["bookmark", "create", "blackbelt/test", "-r", workflowBoundary.commitId], repositoryRoot);
+  await realJj(["new"], repositoryRoot);
+  const backend = createJjWorkspaceBackend({ workspaceRoot: realWorkspaceRoot, repositoryRoot });
+  const workspace = await backend.createWorkspace({ cwd: repositoryRoot, repositoryRoot, workspaceRoot: realWorkspaceRoot, parentCastId: "cast", loopId: "integrate", laneId: "integration-scope", baseline: workflowBoundary });
+  const ownedWorkspace = { owner: { ...workspace.owner }, workspaceRoot: workspace.workspaceRoot, workspacePath: workspace.workspacePath, workspaceName: workspace.workspaceName, manifestPath: workspace.manifestPath };
+  const scope = createExecutionScope({ id: "integration-scope", cwd: workspace.cwd, exports: {
+    [JJ_WORKSPACE_INTEGRATION_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", outcome: "clean", repositoryRoot, integrationRevision: workflowBoundary, effectiveBase: workflowBoundary, finalTip: workflowBoundary, orderedChangeIds: [], provenanceTruncated: false, ...ownedWorkspace } },
+    [JJ_WORKSPACE_CLEANUP_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", integration: ownedWorkspace, sources: [] } },
+  } });
+  return { repositoryRoot, backend, workspace, scope, base };
+}
+
+function owned(name: string, owner: typeof integrationOwner) { return { owner: { ...owner }, workspaceRoot, workspacePath: path.join(workspaceRoot, name), workspaceName: name, manifestPath: path.join(workspaceRoot, ".manifests", `${name}.json`) }; }
+function details(commitId: string, changeId: string, parent: string, conflict: boolean, empty: boolean) { return `${commitId}\t${changeId}\t${parent}\t${conflict}\t${empty}\n`; }
+function parseDetails(line: string) { const [commitId, changeId, parents = "", conflict, empty] = line.split("\t"); return { commitId: commitId!, changeId: changeId!, parents: parents ? parents.split(",") : [], conflict: conflict === "true", empty: empty === "true" }; }
+
+async function hasJj(): Promise<boolean> { try { await realJj(["--version"], process.cwd()); return true; } catch { return false; } }
+async function realIdentity(revset: string, cwd: string) { const value = (await realJj(["log", "-r", revset, "--no-graph", "-T", 'commit_id ++ "\\t" ++ change_id'], cwd)).stdout.trim().split("\t"); return { commitId: value[0]!, changeId: value[1]! }; }
 async function realJj(args: readonly string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
   const processHandle = Bun.spawn(["jj", ...args], { cwd, stdout: "pipe", stderr: "pipe" });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(processHandle.stdout).text(),
-    new Response(processHandle.stderr).text(),
-    processHandle.exited,
-  ]);
+  const [stdout, stderr, exitCode] = await Promise.all([new Response(processHandle.stdout).text(), new Response(processHandle.stderr).text(), processHandle.exited]);
   if (exitCode !== 0) throw new Error(`jj ${args.join(" ")} failed (${exitCode}): ${stderr || stdout}`);
   return { stdout, stderr };
 }
-
 function record(name: string, owner: typeof integrationOwner): JjWorkspaceRecord & { exists: true; tracked: true } {
   const value = owned(name, owner);
-  return {
-    version: 1,
-    backend: "jj",
-    ...value,
-    repositoryRoot,
-    baseline: { commitId: "base", changeId: "change-base" },
-    revision: { commitId: "working", changeId: "change-working" },
-    operationId: "op",
-    state: "active",
-    createdAt: 1,
-    updatedAt: 1,
-    cwd: value.workspacePath,
-    path: value.workspacePath,
-    baselineCommitId: "base",
-    revisionCommitId: "working",
-    exists: true,
-    tracked: true,
-  };
+  return { version: 1, backend: "jj", ...value, repositoryRoot, baseline: { commitId: "base", changeId: "changebase" }, revision: { commitId: "working", changeId: "changeworking" }, operationId: "op", state: "active", createdAt: 1, updatedAt: 1, cwd: value.workspacePath, path: value.workspacePath, baselineCommitId: "base", revisionCommitId: "working", exists: true, tracked: true };
 }

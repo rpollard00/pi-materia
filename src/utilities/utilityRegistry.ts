@@ -149,11 +149,13 @@ async function finalizeIntegratedJjWorkspace(input: BuiltInUtilityInput): Promis
     baseWorkingRevision: finalized.baseWorkingRevision,
     bookmarkName: finalized.bookmarkName,
     cleanedWorkspaceNames: finalized.cleanedWorkspaceNames,
-    description: finalized.description,
+    reviewCorrection: finalized.reviewCorrection,
+    orderedChangeIds: finalized.orderedChangeIds,
+    ...(finalized.description ? { description: finalized.description } : {}),
   };
   return stringifyDeterministicHandoffOutput({
     satisfied: true,
-    context: `Finalize-JJ-Workspace: published accepted revision ${finalized.integrationRevision.commitId} through ${finalized.bookmarkName}, created an empty base working commit, and cleaned ${finalized.cleanedWorkspaceNames.length} owned workspace(s).`,
+    context: `Finalize-JJ-Workspace: published conflict-free meaningful tip ${finalized.integrationRevision.commitId} through the original bookmark ${finalized.bookmarkName}${finalized.reviewCorrection ? " with one integration-fix commit" : " without an extra integration commit"}, created an empty base working commit outside published history, and cleaned ${finalized.cleanedWorkspaceNames.length} owned workspace(s).`,
     state: { jjWorkspaceFinalization: summary },
     scopeTransition: { kind: "replace", scope: finalized.scope },
   });
