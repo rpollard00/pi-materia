@@ -17,6 +17,10 @@ import {
 
 export const INTEGRATE_JJ_WORKSPACES_PRODUCER = "Integrate-JJ-Workspaces";
 
+const MAX_REVIEW_WORKSTREAMS = 64;
+const MAX_REVIEW_CHANGES = 512;
+const MAX_REVIEW_ID_LENGTH = 512;
+
 interface SpawnedWorkspaceExport {
   version: 1;
   backend: "jj";
@@ -128,7 +132,10 @@ export async function integrateJjWorkspaceExports(
     lanes,
   });
   const integration = boundJjFanInResult(rawIntegration);
-  if (!integration.integrationRevision) throw new Error("Integrate-JJ-Workspaces did not materialize an integration revision.");
+  if (!isRevision(integration.effectiveBase) || !isRevision(integration.finalTip)) {
+    throw new Error("Integrate-JJ-Workspaces did not return linear integration provenance.");
+  }
+  const reviewProvenance = boundedReviewProvenance(integration);
 
   const integrationScopeId = `${input.executionScope.id}:jj-integration:${encodeURIComponent(input.socketId)}`;
   const workspace = await backend.createWorkspace({
@@ -138,15 +145,15 @@ export async function integrateJjWorkspaceExports(
     parentCastId: input.castId,
     loopId: input.socketId,
     laneId: integrationScopeId,
-    baseline: integration.integrationRevision,
+    baseline: integration.finalTip,
   });
-  // `jj workspace add --revision <integration>` materializes a fresh empty
-  // working commit whose direct parent is the requested integration. The
+  // `jj workspace add --revision <final-tip>` materializes a fresh empty
+  // working commit whose direct parent is the requested linear tip. The
   // ownership record's pinned baseline represents that relationship; the
   // workspace's own revision is intentionally a distinct child revision.
-  if (workspace.baseline.commitId !== integration.integrationRevision.commitId
-    || workspace.baseline.changeId !== integration.integrationRevision.changeId) {
-    throw new Error("Integrate-JJ-Workspaces materialized workspace does not descend directly from the stable integration revision.");
+  if (workspace.baseline.commitId !== integration.finalTip.commitId
+    || workspace.baseline.changeId !== integration.finalTip.changeId) {
+    throw new Error("Integrate-JJ-Workspaces materialized workspace does not descend directly from the stable final linear tip.");
   }
 
   const sourceCleanup = sources.map(({ laneId, workspace: source }) => ({
@@ -161,7 +168,8 @@ export async function integrateJjWorkspaceExports(
     version: 1,
     backend: "jj",
     outcome: integration.outcome,
-    integrationRevision: { ...integration.integrationRevision },
+    integrationRevision: { ...integration.finalTip },
+    ...structuredClone(reviewProvenance),
     repositoryRoot: workspace.repositoryRoot,
     workspaceRoot: workspace.workspaceRoot,
     workspacePath: workspace.workspacePath,
@@ -193,7 +201,8 @@ export async function integrateJjWorkspaceExports(
     version: 1,
     outcome: integration.outcome,
     sourceCount: sources.length,
-    integrationRevision: { ...integration.integrationRevision },
+    integrationRevision: { ...integration.finalTip },
+    ...structuredClone(reviewProvenance),
     conflictedPaths: [...integration.conflictedPaths],
     conflictDetails: structuredClone(integration.conflictDetails),
   };
@@ -299,6 +308,52 @@ function boundJjFanInResult(result: JjFanInResult): JjFanInResult {
       message: boundedText(detail.message, 1_000),
     })),
   };
+}
+
+function boundedReviewProvenance(integration: JjFanInResult) {
+  const orderedWorkstreams = [] as Array<{
+    laneId: string;
+    streamIndex: number;
+    workItemIndexes: number[];
+    changeIds: string[];
+    rewrittenTip?: { commitId: string; changeId: string };
+  }>;
+  let retainedChanges = 0;
+  for (const head of integration.orderedHeads.slice(0, MAX_REVIEW_WORKSTREAMS)) {
+    const changeIds = head.commits
+      .map(({ changeId }) => boundedReviewId(changeId))
+      .slice(0, Math.max(0, MAX_REVIEW_CHANGES - retainedChanges));
+    retainedChanges += changeIds.length;
+    const rewrittenTip = integration.rewrittenLaneTips.find(({ laneId }) => laneId === head.laneId)?.revision;
+    orderedWorkstreams.push({
+      laneId: boundedReviewId(head.laneId),
+      streamIndex: head.streamIndex,
+      workItemIndexes: head.workItemIndexes.slice(0, MAX_REVIEW_CHANGES),
+      changeIds,
+      ...(rewrittenTip ? { rewrittenTip: boundedRevision(rewrittenTip) } : {}),
+    });
+  }
+  const totalChangeCount = integration.orderedChangeIds.length;
+  return {
+    effectiveBase: boundedRevision(integration.effectiveBase),
+    orderedWorkstreams,
+    orderedChangeIds: integration.orderedChangeIds.slice(0, MAX_REVIEW_CHANGES).map(boundedReviewId),
+    finalTip: boundedRevision(integration.finalTip),
+    totalWorkstreamCount: integration.orderedHeads.length,
+    totalChangeCount,
+    provenanceTruncated: integration.orderedHeads.length > orderedWorkstreams.length
+      || totalChangeCount > retainedChanges
+      || totalChangeCount > MAX_REVIEW_CHANGES,
+  };
+}
+
+function boundedRevision(revision: { commitId: string; changeId: string }) {
+  return { commitId: boundedReviewId(revision.commitId), changeId: boundedReviewId(revision.changeId) };
+}
+
+function boundedReviewId(value: string): string {
+  const normalized = String(value).replace(/\s+/g, " ").trim();
+  return normalized.length > MAX_REVIEW_ID_LENGTH ? `${normalized.slice(0, MAX_REVIEW_ID_LENGTH - 1)}…` : normalized;
 }
 
 function isIntrinsicFanIn(value: unknown): value is IntrinsicParallelFanInResult {

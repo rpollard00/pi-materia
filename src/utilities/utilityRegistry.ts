@@ -109,13 +109,13 @@ async function integrateJjWorkspaces(input: BuiltInUtilityInput): Promise<string
     executionScope: createExecutionScope(input.executionScope),
     state: input.state,
   });
-  const revision = integrated.integration.integrationRevision!;
+  const revision = integrated.integration.finalTip;
   const outcome = integrated.integration.outcome;
   return stringifyDeterministicHandoffOutput({
     satisfied: true,
     context: outcome === "conflict"
-      ? `Integrate-JJ-Workspaces: materialized ${integrated.sourceCount} ordered workspace(s) at conflicted integration ${revision.commitId}.`
-      : `Integrate-JJ-Workspaces: cleanly materialized ${integrated.sourceCount} ordered workspace(s) at ${revision.commitId}.`,
+      ? `Integrate-JJ-Workspaces: materialized ${integrated.sourceCount} ordered workstream(s) at conflicted final linear tip ${revision.commitId}.`
+      : `Integrate-JJ-Workspaces: cleanly materialized ${integrated.sourceCount} ordered workstream(s) at final linear tip ${revision.commitId}.`,
     state: { jjWorkspaceIntegration: integrated.scope.state.jjWorkspaceIntegration },
     scopeTransition: { kind: "replace", scope: integrated.scope },
   });

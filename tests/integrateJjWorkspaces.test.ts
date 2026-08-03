@@ -44,7 +44,16 @@ describe("Integrate-JJ-Workspaces", () => {
     expect(received?.lanes.map((lane) => lane.owner?.parentCastId)).toEqual(["child-b", "child-a"]);
     expect(result.sourceCount).toBe(2);
     expect(result.scope.cwd).toBe(path.join(root, "integration"));
-    expect(result.scope.state.jjWorkspaceIntegration).toMatchObject({ outcome: "clean", sourceCount: 2 });
+    expect(result.scope.state.jjWorkspaceIntegration).toMatchObject({
+      outcome: "clean",
+      sourceCount: 2,
+      effectiveBase: { commitId: "base", changeId: "change-base" },
+      orderedWorkstreams: [
+        { laneId: "lane-b", streamIndex: 0, changeIds: [] },
+        { laneId: "lane-a", streamIndex: 1, changeIds: [] },
+      ],
+      finalTip: { commitId: "integration", changeId: "change-integration" },
+    });
     expect(result.scope.exports[JJ_WORKSPACE_INTEGRATION_EXPORT]?.producer).toBe(INTEGRATE_JJ_WORKSPACES_PRODUCER);
     expect(result.scope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]?.value).toMatchObject({ sources: [{ laneId: "lane-b" }, { laneId: "lane-a" }] });
   });
@@ -175,9 +184,22 @@ function fakeDeps(sources: Array<ReturnType<typeof source>>, outcome: "clean" | 
           loopId: input.loopId,
           runId: input.runId,
           baseline: { ...input.baseline },
+          effectiveBase: { ...input.baseline },
           parentRevisionBefore: { ...input.baseline },
           parentRevisionAfter: { ...input.baseline },
-          orderedHeads: [],
+          orderedHeads: input.lanes.map((lane) => ({
+            laneId: lane.laneId,
+            streamIndex: lane.streamIndex,
+            queueIndex: lane.queueIndex,
+            workItemIndexes: [...lane.workItemIndexes],
+            head: { ...input.baseline },
+            commits: [],
+            workspace: {},
+            workspaceRevision: lane.acceptedHead!,
+          })),
+          orderedChangeIds: [],
+          rewrittenLaneTips: [],
+          finalTip: { commitId: "integration", changeId: "change-integration" },
           integrationRevision: { commitId: "integration", changeId: "change-integration" },
           outcome,
           conflictedPaths: outcome === "conflict" ? ["src/conflict.ts"] : [],

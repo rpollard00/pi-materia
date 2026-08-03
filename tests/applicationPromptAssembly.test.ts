@@ -384,7 +384,15 @@ describe("application prompt assembly", () => {
             version: 1,
             outcome: "conflict",
             sourceCount: 3,
-            integrationRevision: { commitId: "abc123", changeId: "change-1" },
+            effectiveBase: { commitId: "base123", changeId: "base-change" },
+            orderedWorkstreams: [
+              { laneId: "lane-a", streamIndex: 0, changeIds: ["change-1"] },
+              { laneId: "lane-b", streamIndex: 1, changeIds: ["change-2"] },
+              { laneId: "lane-c", streamIndex: 2, changeIds: [] },
+            ],
+            finalTip: { commitId: "abc123", changeId: "change-2" },
+            totalWorkstreamCount: 3,
+            totalChangeCount: 2,
             conflictedPaths: ["src/a.ts", longPath],
             conflictDetails: [{ path: "src/a.ts", message: "both branches changed this function" }],
           },
@@ -401,7 +409,13 @@ describe("application prompt assembly", () => {
     expect(synthetic).toContain('"/tmp/integration-workspace"');
     expect(synthetic).toContain("materialized conflict workspace integration");
     expect(synthetic).toContain("src/a.ts: both branches changed this function");
-    expect(synthetic).toContain("Resolve all integration conflicts");
+    expect(synthetic).toContain('Effective linear base: "base-change"');
+    expect(synthetic).toContain('"lane-a" [stream 0]: "change-1"');
+    expect(synthetic).toContain('Final stable change: "change-2"');
+    expect(synthetic).toContain("complete effective-base-to-final-tip linear range");
+    expect(synthetic).toContain("Resolve all integration conflicts from earliest to latest");
+    expect(synthetic).toContain("return to the rewritten final tip");
+    expect(synthetic).toContain("one final working change");
     expect(synthetic).toContain("satisfied:false");
     expect(synthetic).not.toContain("secretUnboundedField");
     expect(synthetic).not.toContain(longPath);
@@ -414,13 +428,56 @@ describe("application prompt assembly", () => {
         id: "integration-clean",
         cwd: "/tmp/clean",
         exports: {},
-        state: { jjWorkspaceIntegration: { outcome: "clean", sourceCount: 1, conflictedPaths: [] } },
+        state: {
+          jjWorkspaceIntegration: {
+            outcome: "clean",
+            sourceCount: 1,
+            effectiveBase: { commitId: "base", changeId: "base-change" },
+            orderedWorkstreams: [{ laneId: "only", streamIndex: 0, changeIds: [] }],
+            finalTip: { commitId: "base", changeId: "base-change" },
+            totalWorkstreamCount: 1,
+            totalChangeCount: 0,
+            conflictedPaths: [],
+          },
+        },
       },
     } as Partial<MateriaCastState>));
 
     expect(synthetic).toContain("reports no conflicts");
     expect(synthetic).toContain("Spot-check the combined work");
+    expect(synthetic).toContain('"only" [stream 0]: no meaningful changes');
+    expect(synthetic).toContain("All ordered workstreams are no-op");
     expect(synthetic).not.toContain("Bounded conflict context");
+  });
+
+  test("bounds linear integration review provenance", () => {
+    const socket = agentSocket({ socket: { materia: "Integration-Review", parse: "json" } });
+    const orderedWorkstreams = Array.from({ length: 70 }, (_, index) => ({
+      laneId: `lane-${index}`,
+      streamIndex: index,
+      changeIds: [`change-${index}`],
+    }));
+    const synthetic = buildSyntheticCastContext(state(socket, {
+      activeScope: {
+        id: "integration-bounded",
+        cwd: "/tmp/bounded",
+        exports: {},
+        state: {
+          jjWorkspaceIntegration: {
+            outcome: "clean",
+            orderedWorkstreams,
+            totalWorkstreamCount: 70,
+            totalChangeCount: 70,
+            provenanceTruncated: true,
+            conflictedPaths: [],
+          },
+        },
+      },
+    } as Partial<MateriaCastState>));
+
+    expect(synthetic).toContain("Review provenance is bounded");
+    expect(synthetic).toContain('"lane-63"');
+    expect(synthetic).not.toContain('"lane-64"');
   });
 
   test("non-generator JSON sockets keep only concise JSON-only final output guidance", () => {

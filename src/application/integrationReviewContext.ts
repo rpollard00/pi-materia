@@ -1,13 +1,31 @@
 import type { ExecutionScope } from "../domain/executionScope.js";
 
 const MAX_CONFLICTS = 64;
+const MAX_WORKSTREAMS = 64;
+const MAX_CHANGES = 512;
 const MAX_PATH_LENGTH = 512;
 const MAX_MESSAGE_LENGTH = 1_000;
+
+interface ReviewRevision {
+  commitId: string;
+  changeId?: string;
+}
+
+interface ReviewWorkstream {
+  laneId: string;
+  streamIndex?: number;
+  changeIds: string[];
+}
 
 interface IntegrationSummary {
   outcome: "clean" | "conflict";
   sourceCount?: number;
-  revision?: { commitId: string; changeId?: string };
+  effectiveBase?: ReviewRevision;
+  finalTip?: ReviewRevision;
+  orderedWorkstreams: ReviewWorkstream[];
+  totalWorkstreamCount?: number;
+  totalChangeCount?: number;
+  provenanceTruncated: boolean;
   conflicts: Array<{ path: string; message?: string }>;
 }
 
@@ -20,33 +38,63 @@ export function syntheticIntegrationReviewContext(scope: ExecutionScope | undefi
   const summary = readIntegrationSummary(scope.state.jjWorkspaceIntegration);
   if (!summary) return undefined;
 
-  const revision = summary.revision?.commitId ? ` Integration revision: ${JSON.stringify(summary.revision.commitId)}.` : "";
   const sources = summary.sourceCount === undefined ? "" : ` Ordered workspace sources: ${summary.sourceCount}.`;
+  const base = summary.effectiveBase
+    ? `\nEffective linear base: ${formatRevision(summary.effectiveBase)}.`
+    : "";
+  const finalTip = summary.finalTip
+    ? `\nFinal stable change: ${formatRevision(summary.finalTip)}.`
+    : "";
+  const workstreams = summary.orderedWorkstreams.length > 0
+    ? `\nOrdered workstreams (schedule order):\n${summary.orderedWorkstreams.map((stream) => {
+        const changes = stream.changeIds.length > 0 ? stream.changeIds.map((changeId) => JSON.stringify(changeId)).join(" -> ") : "no meaningful changes";
+        const index = stream.streamIndex === undefined ? "" : ` [stream ${stream.streamIndex}]`;
+        return `- ${JSON.stringify(stream.laneId)}${index}: ${changes}`;
+      }).join("\n")}`
+    : summary.totalWorkstreamCount === 0
+      ? "\nOrdered workstreams: none. The linear integration is an all-no-op result."
+      : "";
+  const noOp = summary.totalChangeCount === 0
+    ? "\nAll ordered workstreams are no-op; the final stable change is the effective base."
+    : "";
+  const truncation = summary.provenanceTruncated
+    ? `\nReview provenance is bounded: showing at most ${MAX_WORKSTREAMS} workstreams and ${MAX_CHANGES} stable changes from ${summary.totalWorkstreamCount ?? "unknown"} workstreams and ${summary.totalChangeCount ?? "unknown"} changes.`
+    : "";
   const conflictContext = summary.outcome === "conflict"
     ? summary.conflicts.length > 0
-      ? `\nBounded conflict context (${summary.conflicts.length}/${MAX_CONFLICTS} maximum):\n${summary.conflicts.map((conflict) => `- ${conflict.path}${conflict.message ? `: ${conflict.message}` : ""}`).join("\n")}`
-      : "\nThe integration reports conflicts, but no conflicted paths were supplied; inspect the active scope for the current conflict state."
-    : "\nThe integration reports no conflicts. Spot-check the combined work and run relevant checks before accepting it.";
+      ? `\nConflicts across the complete effective-base-to-final-tip linear range (${summary.conflicts.length}/${MAX_CONFLICTS} maximum):\n${summary.conflicts.map((conflict) => `- ${conflict.path}${conflict.message ? `: ${conflict.message}` : ""}`).join("\n")}`
+      : "\nThe complete linear range reports conflicts, but no conflicted paths were supplied; inspect every revision from the effective base through the final stable change."
+    : "\nThe complete linear range reports no conflicts. Spot-check the combined work and run relevant checks before accepting it.";
 
   return [
     "Integrated workspace review context:",
-    `The active execution scope ${JSON.stringify(scope.id)} at ${JSON.stringify(scope.cwd)} contains the materialized ${summary.outcome} workspace integration.${revision}${sources}`,
+    `The active execution scope ${JSON.stringify(scope.id)} at ${JSON.stringify(scope.cwd)} contains the materialized ${summary.outcome} workspace integration as a linear history.${sources}${base}${workstreams}${finalTip}${noOp}${truncation}`,
     conflictContext,
-    "Review the combined implementation in this active scope. Resolve all integration conflicts when present; otherwise inspect the merge for cross-branch defects. You may edit files and run relevant checks, but do not rerun branches, publish revisions, or clean workspaces. Emit satisfied:true with concise context only when the integration is conflict-free and acceptable. Emit satisfied:false with actionable context to use the ordinary retry route.",
+    "Review the combined implementation in this active scope. Resolve all integration conflicts from earliest to latest using their stable change identities, then return to the rewritten final tip. Run relevant checks. Put any cross-workstream correction in one final working change. Do not rerun workstreams, publish revisions, advance bookmarks, finalize, or clean workspaces. Emit satisfied:true with concise context only when the complete linear range is conflict-free and acceptable. Emit satisfied:false with actionable context to use the ordinary retry route.",
   ].join("\n");
 }
 
 function readIntegrationSummary(value: unknown): IntegrationSummary | undefined {
   if (!isRecord(value) || (value.outcome !== "clean" && value.outcome !== "conflict")) return undefined;
-  const sourceCount = Number.isSafeInteger(value.sourceCount) && (value.sourceCount as number) >= 0
-    ? value.sourceCount as number
-    : undefined;
-  const revision = isRecord(value.integrationRevision) && nonEmpty(value.integrationRevision.commitId)
-    ? {
-        commitId: bounded(value.integrationRevision.commitId, MAX_PATH_LENGTH),
-        ...(nonEmpty(value.integrationRevision.changeId) ? { changeId: bounded(value.integrationRevision.changeId, MAX_PATH_LENGTH) } : {}),
-      }
-    : undefined;
+  const sourceCount = safeCount(value.sourceCount);
+  const effectiveBase = readRevision(value.effectiveBase);
+  // Accept integrationRevision as a compatibility fallback for scopes created
+  // before linear provenance was exported.
+  const finalTip = readRevision(value.finalTip) ?? readRevision(value.integrationRevision);
+  const rawWorkstreams = Array.isArray(value.orderedWorkstreams) ? value.orderedWorkstreams : [];
+  let retainedChangeCount = 0;
+  let suppliedChangeCount = 0;
+  const orderedWorkstreams = rawWorkstreams.slice(0, MAX_WORKSTREAMS).flatMap((entry): ReviewWorkstream[] => {
+    if (!isRecord(entry) || !nonEmpty(entry.laneId)) return [];
+    const streamIndex = safeCount(entry.streamIndex);
+    const suppliedChangeIds = Array.isArray(entry.changeIds) ? entry.changeIds.filter(nonEmpty) : [];
+    suppliedChangeCount += suppliedChangeIds.length;
+    const changeIds = suppliedChangeIds
+      .slice(0, Math.max(0, MAX_CHANGES - retainedChangeCount))
+      .map((id) => bounded(id, MAX_PATH_LENGTH));
+    retainedChangeCount += changeIds.length;
+    return [{ laneId: bounded(entry.laneId, MAX_PATH_LENGTH), ...(streamIndex !== undefined ? { streamIndex } : {}), changeIds }];
+  });
   const details = Array.isArray(value.conflictDetails) ? value.conflictDetails : [];
   const detailByPath = new Map<string, string>();
   for (const detail of details.slice(0, MAX_CONFLICTS)) {
@@ -65,7 +113,40 @@ function readIntegrationSummary(value: unknown): IntegrationSummary | undefined 
     if (conflicts.length >= MAX_CONFLICTS) break;
     if (!conflicts.some((conflict) => conflict.path === path)) conflicts.push({ path, message });
   }
-  return { outcome: value.outcome, ...(sourceCount !== undefined ? { sourceCount } : {}), ...(revision ? { revision } : {}), conflicts };
+  const totalWorkstreamCount = safeCount(value.totalWorkstreamCount) ?? sourceCount;
+  const totalChangeCount = safeCount(value.totalChangeCount);
+  const provenanceTruncated = value.provenanceTruncated === true
+    || rawWorkstreams.length > MAX_WORKSTREAMS
+    || suppliedChangeCount > retainedChangeCount;
+  return {
+    outcome: value.outcome,
+    ...(sourceCount !== undefined ? { sourceCount } : {}),
+    ...(effectiveBase ? { effectiveBase } : {}),
+    ...(finalTip ? { finalTip } : {}),
+    orderedWorkstreams,
+    ...(totalWorkstreamCount !== undefined ? { totalWorkstreamCount } : {}),
+    ...(totalChangeCount !== undefined ? { totalChangeCount } : {}),
+    provenanceTruncated,
+    conflicts,
+  };
+}
+
+function readRevision(value: unknown): ReviewRevision | undefined {
+  if (!isRecord(value) || !nonEmpty(value.commitId)) return undefined;
+  return {
+    commitId: bounded(value.commitId, MAX_PATH_LENGTH),
+    ...(nonEmpty(value.changeId) ? { changeId: bounded(value.changeId, MAX_PATH_LENGTH) } : {}),
+  };
+}
+
+function formatRevision(revision: ReviewRevision): string {
+  return revision.changeId
+    ? `${JSON.stringify(revision.changeId)} (commit ${JSON.stringify(revision.commitId)})`
+    : JSON.stringify(revision.commitId);
+}
+
+function safeCount(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 0 ? value as number : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
