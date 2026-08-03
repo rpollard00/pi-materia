@@ -36,6 +36,7 @@ export const DEFAULT_JJ_WORKSPACE_ROOT = path.join(os.tmpdir(), "pi-materia", "j
 const REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\n"';
 const OPERATION_TEMPLATE = 'id ++ "\\n"';
 const FAN_IN_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ conflicted_files.map(|f| f.path()).join("|") ++ "\\n"';
+const STACK_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
 
 export interface JjCommandInput {
   executable: string;
@@ -81,9 +82,13 @@ export interface JjFanInHead {
   streamIndex: number;
   queueIndex: number;
   workItemIndexes: number[];
+  /** Last meaningful lane commit, or the pinned baseline for a no-op lane. */
   head: JjRevisionIdentity;
+  /** Meaningful commits in ancestry order, excluding the empty working tip. */
+  commits: JjRevisionIdentity[];
   workspace: JjWorkspaceOwnership;
-  workspaceRevision?: JjRevisionIdentity;
+  /** The accepted, clean, empty working commit excluded from `commits`. */
+  workspaceRevision: JjRevisionIdentity;
 }
 
 export interface JjFanInProvenance {
@@ -92,6 +97,8 @@ export interface JjFanInProvenance {
   loopId: string;
   runId: string;
   baseline: JjRevisionIdentity;
+  /** Baseline parent when the cast baseline is an empty workflow boundary. */
+  effectiveBase: JjRevisionIdentity;
   parentRevisionBefore: JjRevisionIdentity;
   parentRevisionAfter: JjRevisionIdentity;
   orderedHeads: JjFanInHead[];
@@ -404,21 +411,20 @@ export class JjWorkspaceBackend {
         if (!isCleanJjStatus(laneStatus.stdout)) {
           throw new JjWorkspaceError("fan_in_lane_dirty", `Lane ${JSON.stringify(lane.laneId)} workspace has uncheckpointed changes.`);
         }
-        const acceptedHead = await this.#readRevision(manifest.workspacePath, lane.acceptedHead!.commitId);
-        if (!sameRevision(acceptedHead, lane.acceptedHead!)) {
-          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted head identity changed before fan-in.`);
+        const acceptedWorkingRevision = await this.#readRevision(manifest.workspacePath, lane.acceptedHead!.commitId);
+        if (!sameRevision(acceptedWorkingRevision, lane.acceptedHead!) || !sameRevision(acceptedWorkingRevision, inspection.currentRevision)) {
+          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted working revision changed before fan-in.`);
         }
-        if (!(await this.#isAncestor(manifest.workspacePath, acceptedHead.commitId, inspection.currentRevision.commitId))) {
-          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} workspace no longer descends from its accepted head.`);
-        }
+        const commits = await this.#deriveMeaningfulStack(manifest.workspacePath, manifest.baseline, acceptedWorkingRevision, lane.laneId);
         orderedHeads.push({
           laneId: lane.laneId,
           streamIndex: lane.streamIndex,
           queueIndex: lane.queueIndex,
           workItemIndexes: [...lane.workItemIndexes],
-          head: acceptedHead,
+          head: commits.at(-1) ?? { ...manifest.baseline },
+          commits,
           workspace: workspaceOwnershipFromManifest(manifest),
-          workspaceRevision: inspection.currentRevision,
+          workspaceRevision: acceptedWorkingRevision,
         });
       }
 
@@ -426,6 +432,10 @@ export class JjWorkspaceBackend {
       // baseline head, passing that commit more than once still creates only
       // one parent. Keep every lane in orderedHeads for provenance, but use
       // jj's canonical unique parent list for creation and verification.
+      const hasMeaningfulWork = orderedHeads.some(({ commits }) => commits.length > 0);
+      const effectiveBase = hasMeaningfulWork
+        ? await this.#effectiveBaseForWorkflowBoundary(capability.repositoryRoot, input.baseline)
+        : { ...input.baseline };
       const parentIds = uniqueParentIds(orderedHeads.map((entry) => entry.head.commitId));
       const createArgs = ["new", "--no-edit", ...parentIds];
       const created = await this.#run(createArgs, capability.repositoryRoot);
@@ -448,6 +458,7 @@ export class JjWorkspaceBackend {
         loopId: input.loopId,
         runId: input.runId,
         baseline: { ...input.baseline },
+        effectiveBase,
         parentRevisionBefore: parentBefore,
         parentRevisionAfter: parentAfter,
         orderedHeads,
@@ -999,14 +1010,51 @@ export class JjWorkspaceBackend {
     await assertNoSymlinkComponents(resolvedRoot, resolvedTarget);
   }
 
-  async #isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
-    const args = ["log", "-r", `${ancestor}::${descendant}`, "--no-graph", "-T", 'commit_id ++ "\\n"'];
+  async #deriveMeaningfulStack(cwd: string, baseline: JjRevisionIdentity, working: JjRevisionIdentity, laneId: string): Promise<JjRevisionIdentity[]> {
+    const args = ["log", "-r", `${baseline.commitId}::${working.commitId}`, "--reversed", "--no-graph", "-T", STACK_REVISION_TEMPLATE];
     const result = await this.#run(args, cwd);
-    if (result.exitCode !== 0) return false;
-    // A successful non-empty range means the accepted head is reachable from
-    // the observed workspace revision. Do not depend on template whitespace
-    // or abbreviated-id rendering when deciding ancestry.
-    return result.stdout.trim().length > 0;
+    this.#requireSuccess(result, args, cwd);
+    const revisions = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map(parseStackRevision);
+    if (revisions.some((revision) => revision === undefined) || revisions.length < 2) {
+      throw new JjWorkspaceError("fan_in_lane_history_malformed", `Lane ${JSON.stringify(laneId)} has no complete baseline-to-working ancestry.`);
+    }
+    const history = revisions as StackRevision[];
+    if (!sameRevision(history[0]!, baseline) || !sameRevision(history.at(-1)!, working)) {
+      throw new JjWorkspaceError("fan_in_lane_ancestry_drift", `Lane ${JSON.stringify(laneId)} no longer has its pinned baseline and accepted working revision as stable ancestry endpoints.`);
+    }
+    for (let index = 1; index < history.length; index += 1) {
+      if (history[index]!.parents.length !== 1 || history[index]!.parents[0] !== history[index - 1]!.commitId) {
+        throw new JjWorkspaceError("fan_in_lane_history_malformed", `Lane ${JSON.stringify(laneId)} history is not one stable linear chain.`);
+      }
+    }
+    const tip = history.at(-1)!;
+    if (!tip.empty || tip.conflict) {
+      throw new JjWorkspaceError("fan_in_lane_tip_not_empty", `Lane ${JSON.stringify(laneId)} must end at a clean, empty, conflict-free working commit.`);
+    }
+    const meaningful = history.slice(1, -1);
+    if (meaningful.some((revision) => revision.empty)) {
+      throw new JjWorkspaceError("fan_in_lane_history_malformed", `Lane ${JSON.stringify(laneId)} contains an unexpected empty commit before its working tip.`);
+    }
+    return meaningful.map(({ commitId, changeId }) => ({ commitId, changeId }));
+  }
+
+  async #effectiveBaseForWorkflowBoundary(cwd: string, baseline: JjRevisionIdentity): Promise<JjRevisionIdentity> {
+    const details = await this.#readStackRevision(cwd, baseline.commitId);
+    if (!sameRevision(details, baseline) || !details.empty) return { ...baseline };
+    if (details.parents.length !== 1) {
+      throw new JjWorkspaceError("fan_in_baseline_boundary_malformed", "The empty cast baseline is not a removable single-parent workflow boundary.");
+    }
+    return this.#readRevision(cwd, details.parents[0]!);
+  }
+
+  async #readStackRevision(cwd: string, revset: string): Promise<StackRevision> {
+    const args = ["log", "-r", revset, "--no-graph", "-T", STACK_REVISION_TEMPLATE];
+    const result = await this.#run(args, cwd);
+    this.#requireSuccess(result, args, cwd);
+    const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const revision = lines.length === 1 ? parseStackRevision(lines[0]!) : undefined;
+    if (!revision) throw new JjWorkspaceError("revision_missing", `jj did not return stack metadata for ${JSON.stringify(revset)}.`);
+    return revision;
   }
 
   async #findIntegrationRevision(repositoryRoot: string, expectedParents: readonly string[], created: JjCommandResult): Promise<{ revision: JjRevisionIdentity; conflict: boolean; conflictedPaths: string[] }> {
@@ -1158,6 +1206,12 @@ function isAlreadyExists(error: unknown): boolean {
   return isRecord(error) && error.code === "EEXIST";
 }
 
+interface StackRevision extends JjRevisionIdentity {
+  parents: string[];
+  conflict: boolean;
+  empty: boolean;
+}
+
 interface RevisionDetails {
   commitId: string;
   changeId: string;
@@ -1226,6 +1280,18 @@ function orderFanInLanes(input: JjFanInInput): JjFanInLaneInput[] {
   }
   if (seen.size !== byId.size) throw new JjWorkspaceError("fan_in_order_incomplete", "Fan-in queueOrder does not cover every lane.");
   return ordered;
+}
+
+function parseStackRevision(line: string): StackRevision | undefined {
+  const [commitId, changeId, parentText = "", conflictText = "false", emptyText = "false"] = line.split("\t");
+  if (!commitId || !changeId || !/^(?:true|false)$/i.test(conflictText.trim()) || !/^(?:true|false)$/i.test(emptyText.trim())) return undefined;
+  return {
+    commitId,
+    changeId,
+    parents: parentText ? parentText.split(",").filter(Boolean) : [],
+    conflict: conflictText.trim().toLowerCase() === "true",
+    empty: emptyText.trim().toLowerCase() === "true",
+  };
 }
 
 function parseRevisionDetails(line: string): RevisionDetails | undefined {
