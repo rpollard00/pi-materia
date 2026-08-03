@@ -178,6 +178,24 @@ describe('loadout draft mutations', () => {
     expect(payload.materia).not.toHaveProperty('Central-Review');
   });
 
+  it('omits locked materia from aggregate loadout saves while retaining unlocked local materia', () => {
+    const frozen = deepFreeze({
+      ...config,
+      materia: {
+        Build: { type: 'agent', tools: 'coding', prompt: 'build' },
+        Test: { type: 'agent', tools: 'coding', prompt: 'test' },
+        Locked: { type: 'agent', tools: 'coding', prompt: 'do not resubmit', lockState: 'locked' },
+        Editable: { type: 'agent', tools: 'coding', prompt: 'local definition', lockState: 'unlocked' },
+      },
+    } satisfies MateriaConfig);
+
+    const payload = buildConfigToSave(frozen, [], {}, { Locked: 'user', Editable: 'user' });
+
+    expect(payload.materia).not.toHaveProperty('Locked');
+    expect(payload.materia).toMatchObject({ Editable: { prompt: 'local definition', lockState: 'unlocked' } });
+    expect(frozen.materia?.Locked).toMatchObject({ prompt: 'do not resubmit', lockState: 'locked' });
+  });
+
   it('includes source-less user and project loadouts identified by loadoutSources', () => {
     const frozen = deepFreeze({
       ...config,

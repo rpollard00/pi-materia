@@ -437,6 +437,50 @@ describe('useWebuiConfig', () => {
     expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/loadout/active')).toHaveLength(0);
   });
 
+  it('saves staged loadout edits with locked materia present without resubmitting or changing the locked definition', async () => {
+    const lockedDefinition = { type: 'agent' as const, tools: 'none' as const, prompt: 'locked prompt', lockState: 'locked' as const };
+    let persistedConfig: MateriaConfig = {
+      ...initialConfig,
+      materia: { ...initialConfig.materia, Locked: lockedDefinition },
+    };
+    let postedConfig: MateriaConfig | undefined;
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        postedConfig = (JSON.parse(String(init.body)) as { config: MateriaConfig }).config;
+        if (postedConfig.materia?.Locked) {
+          return new Response(JSON.stringify({ ok: false, error: 'Materia "Locked" is locked.' }), { status: 409 });
+        }
+        persistedConfig = {
+          ...persistedConfig,
+          ...postedConfig,
+          materia: { ...persistedConfig.materia, ...postedConfig.materia },
+          loadouts: { ...persistedConfig.loadouts, ...postedConfig.loadouts },
+        };
+        return new Response(JSON.stringify({ ok: true, target: 'user' }));
+      }
+      return new Response(JSON.stringify({
+        ok: true,
+        source: 'test',
+        config: persistedConfig,
+        loadoutSources: { Alpha: 'user' },
+        materiaSources: { Build: 'user', LocalEdit: 'user', Locked: 'user' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConfigProbe />);
+
+    await waitFor(() => expect(screen.getByLabelText('dirty').textContent).toBe('false'));
+    fireEvent.click(screen.getByRole('button', { name: 'edit loadout locally' }));
+    fireEvent.click(screen.getByRole('button', { name: 'save draft' }));
+
+    await waitFor(() => expect(screen.getByLabelText('status').textContent).toBe('Saved staged loadout edits to user scope.'));
+    expect(postedConfig?.materia).not.toHaveProperty('Locked');
+    expect(postedConfig?.loadouts?.Alpha?.sockets?.['Socket-1']?.materia).toBe('LocalEdit');
+    expect(persistedConfig.materia?.Locked).toEqual(lockedDefinition);
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === 'POST')).toHaveLength(1);
+  });
+
   it('atomically saves a writable Parallel-Experimental copy and other pending edits while omitting the shipped default', async () => {
     const config = parallelExperimentalConfigForTest();
     let savedConfig: MateriaConfig | undefined;

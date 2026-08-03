@@ -159,8 +159,10 @@ export function buildConfigToSave(
   const preparedDraft = canonicalizeUtilitySocketReferences(normalizeMateriaConfigEdges(normalizedDraft));
   assertValidLoadoutSaveSemantics(preparedDraft);
   // Shipped defaults and read-only central-catalog loadouts are never written
-  // through a normal save. Central materia are likewise omitted using their
-  // layer provenance, and a process-local central active identity is omitted,
+  // through a normal save. Central and locked materia are likewise omitted:
+  // loadout drafts do not edit materia definitions, while the Materia Forge
+  // persists definition and lock-state changes through its dedicated path.
+  // A process-local central active identity is also omitted,
   // so an unrelated loadout edit cannot silently materialize remotely read
   // state in a local file. Promotion remains an explicit copy/update/replace
   // action (docs/enterprise-control-plane.md §5, §10, §12).
@@ -174,7 +176,9 @@ export function buildConfigToSave(
   }
   const materia = preparedDraft.materia === undefined
     ? undefined
-    : Object.fromEntries(Object.entries(preparedDraft.materia).filter(([id]) => materiaSources[id] !== 'central'));
+    : Object.fromEntries(Object.entries(preparedDraft.materia).filter(([id, definition]) => (
+      materiaSources[id] !== 'central' && definition.lockState !== 'locked'
+    )));
   const activeSource = preparedDraft.activeLoadout
     ? resolvedLoadoutSource(preparedDraft.activeLoadout, preparedDraft.loadouts?.[preparedDraft.activeLoadout], loadoutSources)
     : undefined;
