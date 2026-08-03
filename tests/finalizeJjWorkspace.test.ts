@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createExecutionScope } from "../src/domain/executionScope.js";
@@ -35,7 +35,10 @@ describe("Finalize-JJ-Workspace", () => {
     let described = false;
     let moved = false;
     let createdBase = false;
-    const result = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test", description: "fix: accepted integration" }, {
+    const acceptedInput = input(true);
+    const cleanupExport = acceptedInput.executionScope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]!.value as any;
+    cleanupExport.sources.push(structuredClone(cleanupExport.sources[0]));
+    const result = await finalizeJjWorkspace({ ...acceptedInput, bookmarkName: "blackbelt/test", description: "fix: accepted integration" }, {
       createBackend: () => ({
         inspect: async (reference: any) => record(reference.workspaceName, reference.owner),
         cleanup: async (reference: any) => { cleaned.push(reference.workspaceName); return {} as any; },
@@ -64,6 +67,73 @@ describe("Finalize-JJ-Workspace", () => {
     expect(calls.filter((call) => call.includes(":describe "))).toHaveLength(1);
     expect(calls.some((call) => call.includes("bookmark set") || call.includes("bookmark create"))).toBe(false);
     expect(calls).toContain(`true:/repo:bookmark move --allow-backwards blackbelt/test --to described`);
+  });
+
+  test("retries partial post-publication cleanup without creating another base commit", async () => {
+    let published = false;
+    let baseCreated = false;
+    let newCalls = 0;
+    let firstAttempt = true;
+    const removed = new Set<string>();
+    const backend = {
+      inspect: async (reference: any) => removed.has(reference.workspaceName)
+        ? undefined
+        : { ...record(reference.workspaceName, reference.owner), tracked: reference.workspaceName === "integration" ? true : !published },
+      cleanup: async (reference: any) => {
+        if (reference.workspaceName === "source" && firstAttempt) {
+          firstAttempt = false;
+          throw new Error("simulated directory removal failure");
+        }
+        removed.add(reference.workspaceName);
+        return {} as any;
+      },
+    };
+    const runJj = async (args: readonly string[], cwd: string) => {
+      if (args[0] === "status") return "The working copy has no changes.\n";
+      if (args[0] === "bookmark") { published = true; return ""; }
+      if (args[0] === "new") { baseCreated = true; newCalls += 1; return ""; }
+      const revision = args[args.indexOf("-r") + 1];
+      if (String(revision).includes("conflicts()")) return "";
+      if (revision === "changebase") return details("base", "changebase", "root", false, false);
+      if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+      if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);
+      if (revision === "blackbelt/test") return published ? details("final", "changefinal", "base", false, false) : details("old", "changeold", "root", false, false);
+      if (revision === "@" && cwd === repositoryRoot && baseCreated) return details("working", "changeworking", "final", false, true);
+      throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
+    };
+
+    await expect(finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj })).rejects.toThrow("simulated directory removal failure");
+    expect(removed).toEqual(new Set(["integration"]));
+    const retried = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj });
+    expect(newCalls).toBe(1);
+    expect(retried.cleanedWorkspaceNames).toEqual(["integration", "source"]);
+    expect(removed).toEqual(new Set(["integration", "source"]));
+  });
+
+  test("rejects mismatched duplicate cleanup references before inspection or mutation", async () => {
+    const value = input(true);
+    const cleanup = value.executionScope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]!.value as any;
+    cleanup.sources.push({ ...cleanup.integration, owner: { ...cleanup.integration.owner, laneId: "foreign" } });
+    let touched = false;
+    await expect(finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, {
+      createBackend: () => ({ inspect: async () => { touched = true; return undefined; }, cleanup: async () => { touched = true; return {} as any; } }),
+      runJj: async () => { touched = true; return ""; },
+    })).rejects.toThrow("duplicate cleanup ownership mismatches");
+    expect(touched).toBe(false);
+  });
+
+  test("validates every owned workspace before publication or cleanup", async () => {
+    const mutations: string[] = [];
+    await expect(finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, {
+      createBackend: () => ({
+        inspect: async (reference: any) => reference.workspaceName === "integration"
+          ? record(reference.workspaceName, reference.owner)
+          : record(reference.workspaceName, { ...reference.owner, laneId: "foreign" }),
+        cleanup: async () => { mutations.push("cleanup"); return {} as any; },
+      }),
+      runJj: async () => { mutations.push("jj"); return ""; },
+    })).rejects.toThrow("ownership verification failed");
+    expect(mutations).toEqual([]);
   });
 
   test("publishes the meaningful parent when review working commit is empty", async () => {
@@ -138,6 +208,10 @@ describe("Finalize-JJ-Workspace", () => {
       expect(history.slice(1).every((entry) => !entry.empty)).toBe(true);
       expect(history).toHaveLength(corrected ? 2 : 1);
       expect((await realJj(["log", "-r", "@", "--no-graph", "-T", "empty"], fixture.repositoryRoot)).stdout.trim()).toBe("true");
+      expect(await pathExists(fixture.workspace.workspacePath)).toBe(false);
+      expect(await pathExists(fixture.workspace.manifestPath)).toBe(false);
+      const listed = (await realJj(["workspace", "list"], fixture.repositoryRoot)).stdout;
+      expect(listed).not.toContain(`${fixture.workspace.workspaceName}:`);
     }
   });
 
@@ -278,6 +352,7 @@ function owned(name: string, owner: typeof integrationOwner) { return { owner: {
 function details(commitId: string, changeId: string, parent: string, conflict: boolean, empty: boolean) { return `${commitId}\t${changeId}\t${parent}\t${conflict}\t${empty}\n`; }
 function parseDetails(line: string) { const [commitId, changeId, parents = "", conflict, empty] = line.split("\t"); return { commitId: commitId!, changeId: changeId!, parents: parents ? parents.split(",") : [], conflict: conflict === "true", empty: empty === "true" }; }
 
+async function pathExists(target: string): Promise<boolean> { try { await lstat(target); return true; } catch (error: any) { if (error?.code === "ENOENT") return false; throw error; } }
 async function hasJj(): Promise<boolean> { try { await realJj(["--version"], process.cwd()); return true; } catch { return false; } }
 async function realIdentity(revset: string, cwd: string) { const value = (await realJj(["log", "-r", revset, "--no-graph", "-T", 'commit_id ++ "\\t" ++ change_id'], cwd)).stdout.trim().split("\t"); return { commitId: value[0]!, changeId: value[1]! }; }
 async function realJj(args: readonly string[], cwd: string): Promise<{ stdout: string; stderr: string }> {

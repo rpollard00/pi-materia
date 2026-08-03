@@ -790,7 +790,21 @@ export class JjWorkspaceBackend {
     const target = await this.#resolveReference(reference);
     const manifestPath = manifestPathFor(root, path.basename(target));
     const manifest = await this.#readManifestIfPresent(manifestPath);
-    if (!manifest) return undefined;
+    if (!manifest) {
+      // A missing manifest is a completed cleanup only when both jj and disk
+      // agree that the workspace is gone. Residue without the ownership
+      // capability must never be removed by guessing.
+      const [present, tracked] = await Promise.all([
+        exists(target),
+        this.#configuredRepositoryRoot
+          ? this.#isTracked(this.#configuredRepositoryRoot, path.basename(target))
+          : Promise.resolve(false),
+      ]);
+      if (present || tracked) {
+        throw new JjWorkspaceError("workspace_not_owned", `Workspace ${JSON.stringify(target)} has cleanup residue but no ownership manifest.`);
+      }
+      return undefined;
+    }
     await this.#assertSafeWorkspacePath(target, manifest.workspaceRoot);
     this.#validateManifestOwnership(manifest, {
       owner: manifest.owner,

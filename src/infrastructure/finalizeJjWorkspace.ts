@@ -71,16 +71,29 @@ export async function finalizeJjWorkspace(
   if (path.resolve(input.baseScope.cwd) !== path.resolve(integration.repositoryRoot)) throw new Error("Finalize-JJ-Workspace base scope does not match the integration repository.");
 
   const backend = (deps.createBackend ?? ((workspaceRoot, repositoryRoot) => createJjWorkspaceBackend({ workspaceRoot, repositoryRoot })))(integration.workspaceRoot, integration.repositoryRoot);
+  if (!sameOwnedWorkspace(integration, cleanup.integration)) {
+    throw new Error("Finalize-JJ-Workspace integration cleanup ownership does not match the integration export.");
+  }
   const owned = [cleanup.integration, ...cleanup.sources];
-  const seen = new Set<string>();
-  const verified: OwnedWorkspaceExport[] = [];
+  const byPath = new Map<string, OwnedWorkspaceExport>();
   for (const workspace of owned) {
     const key = path.resolve(workspace.workspacePath);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    const duplicate = byPath.get(key);
+    if (duplicate && !sameOwnedWorkspace(duplicate, workspace)) {
+      throw new Error(`Finalize-JJ-Workspace duplicate cleanup ownership mismatches for ${JSON.stringify(workspace.workspaceName)}.`);
+    }
+    if (!duplicate) byPath.set(key, workspace);
+  }
+  const verified = [...byPath.values()];
+  const pendingCleanup: OwnedWorkspaceExport[] = [];
+  for (const workspace of verified) {
+    const key = path.resolve(workspace.workspacePath);
     const inspected = await backend.inspect(workspace);
-    if (!inspected || !inspected.exists || !inspected.tracked
-      || inspected.owner.parentCastId !== workspace.owner.parentCastId
+    // No manifest is acceptable only as a completed cleanup. The real backend
+    // additionally proves that neither a jj registration nor path residue is
+    // present before returning undefined.
+    if (!inspected) continue;
+    if (inspected.owner.parentCastId !== workspace.owner.parentCastId
       || inspected.owner.loopId !== workspace.owner.loopId
       || inspected.owner.laneId !== workspace.owner.laneId
       || path.resolve(inspected.repositoryRoot) !== path.resolve(integration.repositoryRoot)
@@ -90,13 +103,12 @@ export async function finalizeJjWorkspace(
       || inspected.manifestPath !== workspace.manifestPath) {
       throw new Error(`Finalize-JJ-Workspace ownership verification failed for ${JSON.stringify(workspace.workspaceName)}.`);
     }
-    verified.push(workspace);
+    pendingCleanup.push(workspace);
   }
 
   const runJj = deps.runJj ?? runJjCommand;
   // A normal command snapshots review edits and conflict resolutions before
   // stable change ids are resolved to their current rewritten commits.
-  const reviewWorking = await readRevision(runJj, "@", input.cwd, false);
   const effectiveBase = await readRevision(runJj, integration.effectiveBase.changeId, integration.repositoryRoot);
   if (effectiveBase.changeId !== integration.effectiveBase.changeId) throw new Error("Finalize-JJ-Workspace effective base drifted before publication.");
 
@@ -113,10 +125,7 @@ export async function finalizeJjWorkspace(
   if (previous.changeId !== integration.finalTip.changeId || integration.integrationRevision.changeId !== integration.finalTip.changeId) {
     throw new Error("Finalize-JJ-Workspace final stable change no longer matches the exported linearization.");
   }
-  if (reviewWorking.parents.length !== 1 || reviewWorking.parents[0] !== previous.commitId) {
-    throw new Error("Finalize-JJ-Workspace review workspace is not positioned directly after the rewritten final tip.");
-  }
-  if (reviewWorking.conflict || effectiveBase.conflict || expected.some(({ conflict }) => conflict)) {
+  if (effectiveBase.conflict || expected.some(({ conflict }) => conflict)) {
     throw new Error("Finalize-JJ-Workspace cannot publish an integration with unresolved conflicts in its linear ancestry.");
   }
 
@@ -130,6 +139,23 @@ export async function finalizeJjWorkspace(
     if (meaningfulTip.empty || meaningfulTip.conflict) throw new Error("Finalize-JJ-Workspace all-no-op integration has no conflict-free meaningful parent to publish.");
   } else if (meaningfulTip.empty) {
     throw new Error("Finalize-JJ-Workspace cannot publish an empty integration tip.");
+  }
+
+  // Publication precedes cleanup. If an earlier attempt stopped during
+  // cleanup, recognize its verified bookmark/base-working shape and resume
+  // cleanup without snapshotting review state or creating another empty base.
+  const recovered = await readPublishedRetry(runJj, input, meaningfulTip);
+  if (recovered) {
+    for (const workspace of pendingCleanup) await backend.cleanup(workspace);
+    return finalizeResult(input, integration, verified, recovered.published, recovered.baseWorking, recovered.reviewCorrection);
+  }
+
+  const reviewWorking = await readRevision(runJj, "@", input.cwd, false);
+  if (reviewWorking.parents.length !== 1 || reviewWorking.parents[0] !== previous.commitId) {
+    throw new Error("Finalize-JJ-Workspace review workspace is not positioned directly after the rewritten final tip.");
+  }
+  if (reviewWorking.conflict) {
+    throw new Error("Finalize-JJ-Workspace cannot publish an integration with unresolved conflicts in its linear ancestry.");
   }
 
   const baseStatus = await runJj(["status"], input.baseScope.cwd, false);
@@ -164,13 +190,46 @@ export async function finalizeJjWorkspace(
     throw new Error("Finalize-JJ-Workspace did not create a verified empty base working commit.");
   }
 
-  for (const workspace of verified) await backend.cleanup(workspace);
+  for (const workspace of pendingCleanup) await backend.cleanup(workspace);
+  return finalizeResult(input, integration, verified, published, baseWorking, reviewCorrection, description);
+}
+
+async function readPublishedRetry(
+  run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>,
+  input: FinalizeJjWorkspaceInput,
+  meaningfulTip: RevisionDetails,
+): Promise<{ published: JjRevisionIdentity; baseWorking: RevisionDetails; reviewCorrection: boolean } | undefined> {
+  try {
+    const published = await readRevision(run, input.bookmarkName, input.baseScope.cwd);
+    const baseWorking = await readRevision(run, "@", input.baseScope.cwd, false);
+    if (published.empty || published.conflict || !baseWorking.empty || baseWorking.conflict
+      || baseWorking.parents.length !== 1 || baseWorking.parents[0] !== published.commitId) return undefined;
+    const unchanged = sameRevision(published, meaningfulTip);
+    const corrected = published.parents.length === 1 && published.parents[0] === meaningfulTip.commitId;
+    if (!unchanged && !corrected) return undefined;
+    const conflicts = await run(["log", "-r", `ancestors(${published.commitId}) & conflicts()`, "--no-graph", "-T", 'commit_id ++ "\\n"'], input.baseScope.cwd);
+    if (conflicts.trim()) return undefined;
+    return { published: revisionIdentity(published), baseWorking, reviewCorrection: corrected };
+  } catch {
+    return undefined;
+  }
+}
+
+function finalizeResult(
+  input: FinalizeJjWorkspaceInput,
+  integration: IntegrationExport,
+  completeCleanupSet: readonly OwnedWorkspaceExport[],
+  published: JjRevisionIdentity,
+  baseWorking: RevisionDetails,
+  reviewCorrection: boolean,
+  description?: string,
+): FinalizeJjWorkspaceResult {
   return {
     scope: createExecutionScope(input.baseScope),
-    integrationRevision: published,
+    integrationRevision: revisionIdentity(published),
     baseWorkingRevision: revisionIdentity(baseWorking),
     bookmarkName: input.bookmarkName,
-    cleanedWorkspaceNames: verified.map(({ workspaceName }) => workspaceName),
+    cleanedWorkspaceNames: completeCleanupSet.map(({ workspaceName }) => workspaceName),
     ...(description ? { description } : {}),
     reviewCorrection,
     orderedChangeIds: [...integration.orderedChangeIds],
@@ -211,6 +270,16 @@ function parseIntegration(value: ExecutionScopeExport | undefined): IntegrationE
 function parseCleanup(value: ExecutionScopeExport | undefined): { integration: OwnedWorkspaceExport; sources: OwnedWorkspaceExport[] } {
   if (!value || value.producer !== INTEGRATE_JJ_WORKSPACES_PRODUCER || !isRecord(value.value) || !isRecord(value.value.integration) || !Array.isArray(value.value.sources)) throw new Error("Finalize-JJ-Workspace requires a trusted cleanup export.");
   return { integration: parseOwned(value.value.integration, "integration cleanup"), sources: value.value.sources.map((entry, index) => parseOwned(entry, `source cleanup ${index}`)) };
+}
+
+function sameOwnedWorkspace(left: OwnedWorkspaceExport, right: OwnedWorkspaceExport): boolean {
+  return left.owner.parentCastId === right.owner.parentCastId
+    && left.owner.loopId === right.owner.loopId
+    && left.owner.laneId === right.owner.laneId
+    && path.resolve(left.workspaceRoot) === path.resolve(right.workspaceRoot)
+    && path.resolve(left.workspacePath) === path.resolve(right.workspacePath)
+    && left.workspaceName === right.workspaceName
+    && path.resolve(left.manifestPath) === path.resolve(right.manifestPath);
 }
 
 function parseOwned(value: unknown, label: string): OwnedWorkspaceExport {
