@@ -222,6 +222,10 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     await flush(initial.childRunner);
     expect(JSON.parse(await readFile(path.join(laneRoot, "attempt-2", "terminal-result.json"), "utf8")).result.status).toBe("failed");
     expect(JSON.parse(await readFile(path.join(laneRoot, "attempt-3", "terminal-result.json"), "utf8")).result.status).toBe("succeeded");
+    const attempt2Events = (await readFile(path.join(laneRoot, "attempt-2", "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    const attempt3Events = (await readFile(path.join(laneRoot, "attempt-3", "events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(attempt2Events.map((entry) => entry.event.type)).toEqual(["parallel_lane_resumed", "parallel_lane_terminal"]);
+    expect(attempt3Events.map((entry) => entry.event.type)).toEqual(["parallel_lane_resumed", "parallel_lane_terminal"]);
     expect(fanIns).toHaveLength(1);
     expect(fanIns[0].result.orderedBranches.map((branch: any) => branch.terminalOutput)).toEqual([
       { result: "accepted-a" }, { result: "accepted-b" }, { result: "accepted-c" },
@@ -339,24 +343,136 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(Object.values(state.parallelRuns!.build!.lanes).every((lane) => lane.status === "failed")).toBe(true);
   });
 
-  test("aggregates usage and preserves event forwarding", async () => {
+  test("checkpoints only real usage deltas during an observational event storm", async () => {
     const state = makeState();
-    const forwarded: any[] = [];
-    const { childRunner, dispatcher: subject } = dispatcher(undefined, { artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => forwarded.push({ type, data }) } });
+    const saved: MateriaCastState[] = [];
+    const forwarded: Array<{ type: string; data: unknown }> = [];
+    const laneEvents: any[] = [];
+    const childRunner = createFakeChildCastRunner({ now: () => 10, maxRetainedEvents: 32 });
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: (_pi: unknown, value: MateriaCastState) => { saved.push(structuredClone(value)); } },
+      artifacts: {
+        appendEvent: async (_run: unknown, type: string, data: unknown) => { forwarded.push({ type, data }); },
+        lane: {
+          initialize: async () => undefined,
+          appendEvent: async (input: unknown) => { laneEvents.push(input); },
+          writeTerminalResult: async () => undefined,
+          writeDiagnostics: async () => undefined,
+          writeUsage: async () => undefined,
+        },
+      },
+    } as any);
     await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
     const child = childRunner.listSnapshots()[0]!;
-    const usage = { tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 }, cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 } };
-    childRunner.emit(child.identity.childCastId, { type: "socket_output", usage });
+    const savesAfterLaunch = saved.length;
+    const artifactsAfterLaunch = forwarded.length;
+    const laneArtifactsAfterLaunch = laneEvents.length;
+    expect(laneEvents.map((entry) => entry.event.event.type)).toEqual(["parallel_lane_started"]);
+
+    for (let index = 0; index < 1_000; index += 1) {
+      childRunner.emit(child.identity.childCastId, { type: "message_update", payload: { index, token: "x".repeat(100) } });
+    }
     await flush(childRunner);
 
+    expect(saved).toHaveLength(savesAfterLaunch);
+    expect(forwarded).toHaveLength(artifactsAfterLaunch);
+    expect(laneEvents).toHaveLength(laneArtifactsAfterLaunch);
+    expect(forwarded.some((event) => event.type === "parallel_child_event")).toBe(false);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(1_001);
+    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.lastEvent).toBeUndefined();
+
+    const usage = { tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 }, cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 } };
+    childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
+    await flush(childRunner);
+
+    expect(saved).toHaveLength(savesAfterLaunch + 1);
+    expect(forwarded).toHaveLength(artifactsAfterLaunch);
+    expect(laneEvents).toHaveLength(laneArtifactsAfterLaunch + 1);
+    expect(laneEvents.at(-1).event.event).toMatchObject({ type: "usage_checkpoint", usage });
     expect(state.runState.usage.tokens.total).toBe(5);
     expect(state.runState.usage.cost.total).toBe(0.5);
-    expect(forwarded.some((event) => event.type === "parallel_child_event" && event.data.provenance.laneId === "lane-a")).toBe(true);
+    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(1_002);
+  });
+
+  test("replays from a stale durable watermark when reviving a child", async () => {
+    const state = makeState();
+    const initial = dispatcher();
+    await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    const laneA = initial.childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-a")!;
+    for (let index = 0; index < 8; index += 1) initial.childRunner.emit(laneA.identity.childCastId, { type: "message_update", payload: { index } });
+    await flush(initial.childRunner);
+    for (const child of initial.childRunner.listSnapshots()) initial.childRunner.fail(child.identity.childCastId, { error: "retry" });
+    await flush(initial.childRunner);
+
+    // Model a crash whose last observational watermark never reached disk.
+    state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent = undefined;
+    let resumedAfterSequence: number | undefined;
+    const children = {
+      start: initial.childRunner.start.bind(initial.childRunner),
+      observe: initial.childRunner.observe.bind(initial.childRunner),
+      resume: initial.childRunner.resume.bind(initial.childRunner),
+      abort: initial.childRunner.abort.bind(initial.childRunner),
+      subscribe: (input: any, observer: any) => {
+        if (input.childCastId === laneA.identity.childCastId) resumedAfterSequence = input.afterSequence;
+        return initial.childRunner.subscribe(input, observer);
+      },
+    };
+    const revived = dispatcher(children as any).dispatcher;
+    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } });
+
+    expect(resumedAfterSequence).toBe(0);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBeGreaterThan(0);
+  });
+
+  test("persists and records budget failure only after a real usage delta", async () => {
+    const state = makeState();
+    const laneEvents: any[] = [];
+    const parentEvents: string[] = [];
+    const budgetFailures: unknown[] = [];
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => undefined },
+      budget: { assertBudget: async (value: MateriaCastState) => { if (value.runState.usage.tokens.total > 0) throw new Error("limit"); } },
+      onBudgetExceeded: async (_pi: unknown, _ctx: unknown, _state: unknown, error: unknown) => { budgetFailures.push(error); },
+      artifacts: {
+        appendEvent: async (_run: unknown, type: string) => { parentEvents.push(type); },
+        lane: {
+          initialize: async () => undefined,
+          appendEvent: async (input: unknown) => { laneEvents.push(input); },
+          writeTerminalResult: async () => undefined,
+          writeDiagnostics: async () => undefined,
+          writeUsage: async () => undefined,
+        },
+      },
+    } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const child = childRunner.listSnapshots()[0]!;
+    for (let index = 0; index < 100; index += 1) childRunner.emit(child.identity.childCastId, { type: "message_update", payload: { index } });
+    await flush(childRunner);
+    expect(laneEvents.map((entry) => entry.event.event.type)).toEqual(["parallel_lane_started"]);
+
+    childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage: { tokens: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0, total: 1 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+    await flush(childRunner);
+
+    expect(state.parallelRuns!.build!.phase).toBe("failed");
+    expect(budgetFailures).toHaveLength(1);
+    expect(parentEvents).toContain("parallel_budget_exceeded");
+    expect(laneEvents.map((entry) => entry.event.event.type)).toEqual(["parallel_lane_started", "usage_checkpoint", "parallel_lane_budget_exceeded"]);
   });
 
   test("cancels active and queued branches without workspace cleanup", async () => {
     const state = makeState();
-    const { childRunner, dispatcher: subject } = dispatcher();
+    const laneEvents: any[] = [];
+    const lane = {
+      initialize: async () => undefined,
+      appendEvent: async (input: unknown) => { laneEvents.push(input); },
+      writeTerminalResult: async () => undefined,
+      writeDiagnostics: async () => undefined,
+      writeUsage: async () => undefined,
+    };
+    const { childRunner, dispatcher: subject } = dispatcher(undefined, { artifacts: { lane, appendEvent: async () => undefined } });
     await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 2 } });
     await subject.cancel({ pi: {} as any, state, loopId: "build", reason: "parent abort" });
     await flush(childRunner);
@@ -364,6 +480,9 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots().every((child) => child.status === "interrupted")).toBe(true);
     expect(state.parallelRuns?.build?.phase).toBe("failed");
     expect(Object.values(state.parallelRuns?.build?.lanes ?? {}).every((lane) => lane.status === "interrupted")).toBe(true);
+    expect(laneEvents.map((entry) => entry.event.event.type)).toEqual([
+      "parallel_lane_started", "parallel_lane_started", "parallel_lane_cancelled", "parallel_lane_cancelled",
+    ]);
     const fresh = dispatcher(childRunner).dispatcher;
     expect(await fresh.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
   });
@@ -444,5 +563,46 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     release();
     await flush(childRunner);
     expect(state.runState.usage.tokens.total).toBe(7);
+  });
+
+  test("persists cancellation usage and watermark so revival is idempotent", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    let coordinatorAlive = false;
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      // Simulate a coordinator that crashes before receiving child events.
+      subscribe: (input: any, observer: any) => coordinatorAlive
+        ? childRunner.subscribe(input, observer)
+        : { childCastId: input.childCastId, unsubscribe: () => undefined },
+    };
+    const saved: MateriaCastState[] = [];
+    const statePort = { saveCastState: (_pi: unknown, value: MateriaCastState) => { saved.push(structuredClone(value)); } };
+    const initial = new ParallelLoopDispatcher({ children, state: statePort } as any);
+    await initial.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const child = childRunner.listSnapshots()[0]!;
+    const usage = { tokens: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, total: 7 }, cost: { input: 0.3, output: 0.4, cacheRead: 0, cacheWrite: 0, total: 0.7 } };
+    const checkpoint = childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
+    expect(state.runState.usage.tokens.total).toBe(0);
+
+    const cancelling = new ParallelLoopDispatcher({ children, state: statePort } as any);
+    await cancelling.cancel({ pi: {} as any, state, loopId: "build" });
+
+    const cancelledLane = state.parallelRuns!.build!.lanes["lane-a"]!;
+    expect(cancelledLane.usage).toEqual(usage);
+    expect(cancelledLane.lastEvent?.sequence).toBeGreaterThanOrEqual(checkpoint.sequence);
+    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.usage).toEqual(usage);
+    expect(state.runState.usage.tokens.total).toBe(7);
+
+    coordinatorAlive = true;
+    const revived = new ParallelLoopDispatcher({ children, state: statePort } as any);
+    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 1 } });
+    await flush(childRunner);
+
+    expect(state.runState.usage.tokens.total).toBe(7);
+    expect(state.runState.usage.cost.total).toBeCloseTo(0.7);
   });
 });

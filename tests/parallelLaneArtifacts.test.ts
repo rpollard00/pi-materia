@@ -40,8 +40,8 @@ describe("parallel lane artifact store", () => {
     const paths = await store.initialize(input);
 
     await Promise.all([
-      store.appendEvent({ ...input, event: { provenance: { childSequence: 1 }, event: { childCastId: "child-1", sequence: 1, type: "first", occurredAt: 1 } } }),
-      store.appendEvent({ ...input, event: { provenance: { childSequence: 2 }, event: { childCastId: "child-1", sequence: 2, type: "second", occurredAt: 2 } } }),
+      store.appendEvent({ ...input, event: { provenance: { laneId: "lane-a" }, event: { type: "parallel_lane_resumed", occurredAt: 1, status: "running" } } }),
+      store.appendEvent({ ...input, event: { provenance: { laneId: "lane-a" }, event: { type: "parallel_lane_terminal", occurredAt: 2, status: "accepted", usage } } }),
     ]);
     await store.writeUsage({ ...input, usage });
     const terminalOutput = { result: "complete-child-output", detail: "x".repeat(128_000) };
@@ -54,7 +54,8 @@ describe("parallel lane artifact store", () => {
     expect(paths.launchSpecPath).toContain(path.join("attempt-2", "run", "child-launch-attempt-2.json"));
     expect(JSON.parse(await readFile(paths.laneManifestPath, "utf8")).paths.eventStreamPath).toBe(paths.eventStreamPath);
     const events = (await readFile(paths.eventStreamPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(events.map((event) => event.event.sequence)).toEqual([1, 2]);
+    expect(events.map((event) => event.event.type)).toEqual(["parallel_lane_resumed", "parallel_lane_terminal"]);
+    expect(events.every((event) => event.event.output === undefined && event.event.payload === undefined)).toBe(true);
     const terminalArtifact = JSON.parse(await readFile(paths.terminalResultPath, "utf8"));
     expect(terminalArtifact).toMatchObject({ result: { accepted: true }, usage });
     expect(terminalArtifact.result.output).toEqual(terminalOutput);

@@ -1,6 +1,5 @@
 import type {
   ChildCastPaths,
-  ChildCastStreamEvent,
   ChildCastTerminalResult,
   ChildCastUsage,
 } from "./childCastRunner.js";
@@ -41,7 +40,14 @@ export interface ParallelLaneArtifactIdentity {
 
 export interface ParallelLaneEventArtifact {
   provenance: Readonly<Record<string, unknown>>;
-  event: ChildCastStreamEvent;
+  /** Coordinator-owned durable lifecycle record; never a raw child event. */
+  event: {
+    type: "parallel_lane_started" | "parallel_lane_resumed" | "usage_checkpoint" | "parallel_lane_terminal" | "parallel_lane_cancelled" | "parallel_lane_budget_exceeded";
+    occurredAt: number;
+    status?: string;
+    usage?: ChildCastUsage;
+    error?: string;
+  };
 }
 
 export interface ParallelLaneDiagnosticArtifact {
