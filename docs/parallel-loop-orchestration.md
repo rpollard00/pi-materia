@@ -129,11 +129,13 @@ Only after agent acceptance does `Finalize-JJ-Workspace` resolve stable change i
 
 ## 7. Persistence, cancellation, and revival
 
-Durable parallel state pins plan, graph, branch, child-session, attempt, and execution-scope identities. Lane states are `queued`, `running`, `accepted`, `failed`, or `interrupted`. Terminal scopes and outputs are retained for ordered fan-in.
+Durable parallel state pins plan, graph, branch, child-session, attempt, and execution-scope identities. Lane states are `queued`, `running`, `accepted`, `failed`, or `interrupted`. Terminal scopes and outputs are retained in recovery state for ordered fan-in, but are not copied into monitoring events.
 
-Cancellation is idempotent: it stops queued launches, aborts live children, drains available telemetry, marks nonterminal branches interrupted, and preserves state and artifacts. A fresh dispatcher can cancel persisted nonterminal runs.
+Parallel state is checkpointed only at durable boundaries: plan/run creation, child launch or resume, lane status transitions, a real cumulative usage delta, terminal result, cancellation, budget failure, and barrier phase changes. Message, token, tool, and other observational child callbacks may update transient progress and a replay watermark in memory, but do not save parent cast state or append generic child events. The next durable boundary checkpoints the relevant watermark. Cancellation first observes available cumulative usage and a safe watermark before aborting, so revival does not count replayed usage twice.
 
-`/materia revive <cast-id>` does not replan. It validates immutable plan and graph identity, complete child identity, retained initial data, scope and cwd, and artifact provenance. Accepted branches remain accepted; only failed or interrupted branches restart or resume. Attempts get distinct coordinator artifacts even when a child session retains older paths. Drift or missing scope data is an integrity failure, not a reason to guess.
+Cancellation is idempotent: it stops queued launches, aborts live children, drains available compact telemetry, marks nonterminal branches interrupted, and preserves the state and artifacts needed for recovery. A fresh dispatcher can cancel persisted nonterminal runs.
+
+`/materia revive <cast-id>` does not replan. It validates immutable plan and graph identity, complete child identity, retained initial data, scope and cwd, artifact provenance, usage baselines, and replay watermarks. Accepted branches remain accepted; only failed or interrupted branches restart or resume. Attempts get distinct coordinator artifacts even when a child session retains older paths. Event-tail eviction does not change sequence generation or these recovery identities. Drift or missing scope data is an integrity failure, not a reason to guess.
 
 ## 8. Artifacts and observability
 
@@ -150,6 +152,35 @@ The cast manifest points to `execution-scopes.json`; durable plan/run records al
 
 `lane.json` records the child-session paths used by that attempt (`sessionPath`, `artifactRoot`, and `runDirectory`). A newly started child normally uses paths below the same `attempt-<n>` directory, including `session.jsonl`, `run/child-launch[-attempt-n].json`, and `artifacts/`. A **resumed** child may retain session, run, and artifact paths created by an earlier attempt. The new attempt still owns only its fresh coordinator files above and references those retained child paths; it does not copy them into, or claim them as owned by, the new attempt directory.
 
-Exact child artifact contents may grow, but identities, child-path provenance, and per-attempt coordinator provenance remain stable. Events expose stream order, branch status, attempt, scope id/cwd/export names, terminal output, usage, cancellation, and barrier progress. They do not present VCS conflicts as intrinsic fan-in state. Child token and cost usage is counted once in parent totals.
+The lane `events.jsonl` allowlist is deliberately small:
+
+- `parallel_lane_started`
+- `parallel_lane_resumed`
+- `usage_checkpoint`
+- `parallel_lane_terminal`
+- `parallel_lane_cancelled`
+- `parallel_lane_budget_exceeded`
+
+The parent lifecycle stream allowlist is `parallel_dispatch_started`, `parallel_lane_started`, `parallel_lane_resumed`, `parallel_lane_terminal`, `parallel_branches_terminal`, `parallel_branches_failed`, `parallel_cancelled`, and `parallel_budget_exceeded` (plus bounded `parallel_artifact_failure` diagnostics). There is no `parallel_child_event` stream. Raw `message_update`, `tool_execution_update`, `entry_appended`, message, turn, tool, session, reasoning, tool argument/result, and terminal-marker payloads are not lifecycle events.
+
+Lifecycle payloads are compact. `parallel_dispatch_started` contains parent/run/loop provenance plus only `planId`, `baseScopeId`, normalized `queueOrder`, and `maxConcurrency`. Lane records contain stable provenance (`parentCastId`, `runId`, `loopId`, `laneId`, `childCastId`, attempt and stream/item indexes), status, strictly projected scalar usage when applicable, and a bounded error. Barrier records contain run provenance, status, and aggregate lane counts/status summaries. They never contain terminal output, message data, reasoning signatures, tool arguments/results, full execution scopes, export values, accepted branch results, or embedded cast state. This lifecycle-stream contract is not a transcript or fan-in transport. Child token and cost usage is cumulative, monotonic, and counted once in parent totals.
+
+Do not confuse lifecycle streams with `ParallelLaneMonitorSummary`, the bounded TUI/WebUI DTO derived from durable cast state. That state-derived summary currently includes child artifact paths, terminal scope identity/cwd/export names, and a bounded rendering of terminal output to help operators locate and inspect a lane. It is not appended to parent or lane event streams and does not weaken the lifecycle payload allowlist.
+
+Detailed evidence belongs in artifacts rather than parent or lane monitoring streams:
+
+- the child `session.jsonl` is the canonical Pi conversation/tool history;
+- `terminal-result.json` holds the complete child terminal result used by the coordinator;
+- `diagnostics.json` and `usage.json` hold attempt diagnostics and cumulative accounting;
+- child stdout/stderr files referenced by `lane.json` are capped captures for launch/protocol diagnosis; and
+- child socket artifacts under the referenced child artifact root hold socket-level evidence.
+
+Runner replay events and diagnostics are bounded tails, and stdout/stderr capture stops growing at configured byte limits. A terminal marker is consumed exactly once through the terminal channel; it is not retained in replay telemetry. A clean process close without an explicit accepted terminal result cannot make a lane eligible for fan-in.
+
+### Liveness and terminal resource retirement
+
+Eventing heartbeat is global to the active parent cast. When eventing and a positive heartbeat interval are configured, one `lifecycle.heartbeat` continues while the parent waits at the parallel barrier and stops when the cast becomes terminal; parallel lanes do not create one heartbeat per child or project token traffic as liveness. See [Runtime Eventing](runtime-eventing.md#73-heartbeat).
+
+A terminal marker establishes the child result, while process close remains the resource-liveness boundary. Before retirement, the runner awaits close as necessary so parsers and capped stdout/stderr writes are flushed. Once terminal artifacts and durable lane state are secured, the coordinator unsubscribes observers and releases process listeners, parsers, captures, replay tails, usage maps, prepared graphs, terminal queues, and parent-context references. Accepted child records are discarded after barrier settlement. Failed/interrupted attempts retain only the minimal identity, scope, path, usage, and watermark data required for supported resume. Generation checks prevent late callbacks from a retired run from mutating a later run that reuses the dispatcher.
 
 See [Graph semantics](graph-semantics.md), [Utility Materia](utility-materia.md), [Workflow safety](workflow-safety.md), and [Resilient Inference and Revival](resilient-inference-and-revival.md).

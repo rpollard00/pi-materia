@@ -56,10 +56,19 @@ Place `Spawn-JJ-Workspace` in the derived branch prelude. Each stream creates on
 
 - Streams queue in normalized schedule order. At most the effective concurrency bound are live.
 - Items remain sequential within a stream and keep their original work-item indexes.
-- The parent token budget is aggregate; parallelism does not raise it.
+- The parent token budget is aggregate; parallelism does not raise it. Real cumulative usage deltas are checkpointed and counted once.
+- Message, token, tool, and session callbacks are observational: they neither save parent state nor become generic lane events.
 - One failed branch does not immediately discard sibling diagnostics. The barrier waits for all terminal branches, then fails without partial fan-in.
 - Successful barrier output is ordered by schedule, never completion time. Generic branch state is not merged.
 - Empty plans complete without starting children or a normalization utility.
+
+If runtime eventing and a positive heartbeat interval are enabled, the single parent-cast `lifecycle.heartbeat` continues while the barrier is waiting. Child lanes do not each start a heartbeat. A child terminal marker is consumed once, but final resource retirement may wait for child process close so bounded captures and parsers are flushed. Process exit without an explicit accepted terminal result is not accepted fan-in evidence.
+
+### Durable checkpoints and retirement
+
+Expect parent cast-state writes only at durable boundaries: plan/run creation, launch or resume, lane status change, real cumulative usage delta, terminal result, cancellation, budget failure, and barrier phase change. High-volume observational callbacks update only transient progress until one of those boundaries. Therefore message volume should not increase parent state-save or lane artifact-event counts.
+
+After terminal evidence and lane state are durable, observers are unsubscribed and child process/listener/parser/capture references are released. Barrier settlement also clears accepted child records and coordinator event tails, usage maps, prepared graphs, terminal queues, and parent references. Failed/interrupted lanes keep only the recovery identity, paths, scope, usage baseline, and watermark needed to resume. Late callbacks are generation-isolated and cannot modify a subsequent run using the same dispatcher.
 
 ## Blackbelt checkpoints
 
@@ -75,22 +84,30 @@ After every branch is accepted, `Integrate-JJ-Workspaces` reads the schedule-ord
 
 ## Monitor and inspect
 
-The TUI/WebUI derive fork, branch-prelude, loop, and barrier visuals from the generator/consumer relationship. Runtime status shows ordered branches, attempts, scopes, output, queued/running/terminal counts, cancellation, and barrier progress. It should not label generic fan-in as a VCS merge or conflict.
+The TUI/WebUI derive fork, branch-prelude, loop, and barrier visuals from the generator/consumer relationship. Their `ParallelLaneMonitorSummary` is a bounded view derived from durable cast state, not a lifecycle event stream: it may expose child artifact paths, terminal scope identity/cwd/export names, and bounded terminal output alongside ordered branches, attempts, counts, cancellation, and barrier progress. This operator-facing state summary should not label generic fan-in as a VCS merge or conflict. Its bounded output and scope fields do not enter parent or lane lifecycle events.
+
+Lane `events.jsonl` is lifecycle-only. Its allowlist is `parallel_lane_started`, `parallel_lane_resumed`, `usage_checkpoint`, `parallel_lane_terminal`, `parallel_lane_cancelled`, and `parallel_lane_budget_exceeded`. The parent lifecycle stream allowlist is `parallel_dispatch_started`, `parallel_lane_started`, `parallel_lane_resumed`, `parallel_lane_terminal`, `parallel_branches_terminal`, `parallel_branches_failed`, `parallel_cancelled`, and `parallel_budget_exceeded`, plus bounded `parallel_artifact_failure` diagnostics. Expect no generic `parallel_child_event` records and no message, reasoning, tool, session, or terminal-marker payloads.
+
+`parallel_dispatch_started` contains parent/run/loop provenance plus only `planId`, `baseScopeId`, normalized `queueOrder`, and `maxConcurrency`. Other lifecycle records contain only stable cast/run/loop/lane/child provenance, attempt and stream/item indexes, normalized status, strictly projected scalar usage, a bounded error when needed, and—for a barrier—aggregate counts/status. Terminal output, full execution scopes, exports, accepted branch results, messages, reasoning signatures, tool arguments/results, and embedded cast state are intentionally excluded.
 
 Inspect, in order:
 
-1. cast state and `execution-scopes.json` for base, active, and branch scope identity/cwd;
-2. cast-state parallel run/plan records for pinned identities and stream order;
-3. `parallel/<loop-id>/lanes/<lane-id>/attempt-<n>/` for attempt-local coordinator identity, event, terminal, diagnostic, and usage files, then the child-session paths referenced by `lane.json` for launch, session, and child socket artifacts;
-4. utility socket artifacts for spawn, integration, review, and finalization outcomes.
+1. cast state and `execution-scopes.json` for durable base, active, and branch scope identity/cwd;
+2. cast-state parallel run/plan records for pinned identities, stream order, lane status, usage baseline, and replay watermark;
+3. `parallel/<loop-id>/lanes/<lane-id>/attempt-<n>/lane.json` and lifecycle-only `events.jsonl` for attempt identity and status history;
+4. `terminal-result.json` for the complete terminal result, `diagnostics.json` for bounded diagnostics, and `usage.json` for cumulative accounting;
+5. the child paths referenced by `lane.json`: `session.jsonl` for detailed conversation/tool evidence, capped child stdout/stderr for protocol and process diagnosis, and the child artifact root for socket artifacts; and
+6. utility socket artifacts for spawn, integration, review, and finalization outcomes.
+
+Do not troubleshoot missing detail by adding child payloads to monitoring events. Use the child-owned evidence above. Replay and diagnostic arrays are bounded tails, and stdout/stderr captures are capped, so a monitoring snapshot is not a complete transcript.
 
 On revival, do not assume the attempt number determines every child path. A resumed child can retain an earlier `sessionPath`, `runDirectory`, and `artifactRoot`; only the coordinator evidence in the current `attempt-<n>` directory is guaranteed to be current-attempt-owned.
 
-A replacement scope's terminal exports must appear at the barrier; seeing only the initial branch scope indicates a terminal-scope propagation problem.
+A replacement scope's terminal exports must appear in persisted recovery state and the in-process barrier result; they are deliberately absent from lifecycle events. Seeing only the initial branch scope at fan-in indicates a terminal-scope propagation problem.
 
 ## Cancel and revive
 
-Cancellation stops queued launches, terminates running child processes, drains available telemetry, marks nonterminal branches interrupted, and retains artifacts/scopes. It is safe to repeat.
+Cancellation stops queued launches, observes available cumulative usage and a safe replay watermark, terminates running child processes, marks nonterminal branches interrupted, and retains artifacts/scopes. This durable cancellation boundary prevents usage from being counted again when retained events replay. It is safe to repeat.
 
 Revive with:
 
