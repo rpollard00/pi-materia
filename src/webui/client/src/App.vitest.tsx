@@ -2774,7 +2774,7 @@ describe('Materia loadout grid editor', () => {
 
 
 
-  it('creates prompt materia, emits a saved event, and reloads without clobbering loadout draft edits', async () => {
+  it('selects and saves catalog-provided max thinking without clobbering loadout draft edits', async () => {
     let serverConfig = structuredClone(testConfig) as typeof testConfig & { materia?: Record<string, unknown> };
     const savedEvents: CustomEvent[] = [];
     window.addEventListener('materia:saved', (event) => savedEvents.push(event as CustomEvent), { once: true });
@@ -2782,10 +2782,10 @@ describe('Materia loadout grid editor', () => {
       if (url === '/api/models') {
         return new Response(JSON.stringify({
           ok: true,
-          activeModel: { value: 'openai/gpt-active', label: 'Active Test Model', supportedThinkingLevels: ['off', 'low', 'high'] },
+          activeModel: { value: 'openai/gpt-active', label: 'Active Test Model', supportedThinkingLevels: ['off', 'low', 'high', 'max'] },
           activeModelValue: 'openai/gpt-active',
-          activeThinking: 'low',
-          models: [{ value: 'openai/gpt-review', label: 'GPT Review (openai/gpt-review)', supportedThinkingLevels: ['off', 'high'] }],
+          activeThinking: 'max',
+          models: [{ value: 'openai/gpt-review', label: 'GPT Review (openai/gpt-review)', supportedThinkingLevels: ['off', 'high', 'max'] }],
         }));
       }
       if (init?.method === 'POST') {
@@ -2815,12 +2815,15 @@ describe('Materia loadout grid editor', () => {
     expect(thinkingSelect.value).toBe('');
     expect(thinkingSelect.options[0]?.textContent).toBe('Active Pi Thinking');
     await waitFor(() => expect(Array.from(modelSelect.options).map((option) => option.value)).toContain('openai/gpt-review'));
-    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'low', 'high']));
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'low', 'high', 'max']));
+    expect(Array.from(thinkingSelect.options).find((option) => option.value === 'max')?.textContent).toBe('Max');
+    expect(screen.getByTestId('materia-thinking-options-status').textContent).toContain('Active Pi thinking: Max.');
     fireEvent.change(await screen.findByTestId('materia-name'), { target: { value: 'Critique' } });
     fireEvent.change(screen.getByTestId('materia-prompt'), { target: { value: 'Review the output carefully.' } });
     fireEvent.change(modelSelect, { target: { value: 'openai/gpt-review' } });
-    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high']));
-    fireEvent.change(thinkingSelect, { target: { value: 'high' } });
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high', 'max']));
+    expect(screen.getByTestId('materia-thinking-options-status').textContent).toContain('Off, High, Max');
+    fireEvent.change(thinkingSelect, { target: { value: 'max' } });
     const colorPicker = screen.getByTestId('materia-color');
     expect(screen.queryByRole('radiogroup', { name: /materia color/i })).toBeNull();
     expect(screen.queryByRole('radio', { name: /purple/i })).toBeNull();
@@ -2866,7 +2869,7 @@ describe('Materia loadout grid editor', () => {
     const body = configPostBody(fetchMock);
     expect(body.target).toBe('user');
     expect(body.config).not.toHaveProperty('loadouts');
-    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', thinking: 'high', color: 'materia-color-purple', parse: 'json', multiTurn: true });
+    expect(body.config.materia.Critique).toMatchObject({ tools: 'none', prompt: 'Review the output carefully.', model: 'openai/gpt-review', thinking: 'max', color: 'materia-color-purple', parse: 'json', multiTurn: true });
     await waitFor(() => expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/config' && (call[1] as RequestInit | undefined)?.method !== 'POST').length).toBeGreaterThanOrEqual(2));
     expect(savedEvents[0].detail).toMatchObject({ id: 'Critique', name: 'Critique', behavior: 'prompt', requestedScope: 'user', scope: 'user' });
     await waitFor(() => expect(screen.getByTestId('materia-save-status').textContent).toContain('Saved reusable prompt materia Critique'));
@@ -2877,9 +2880,9 @@ describe('Materia loadout grid editor', () => {
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('preserves an existing unavailable model and current thinking value when saved unchanged', async () => {
+  it('preserves an original saved max value for an unavailable model when unchanged', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
-    (config.materia as Record<string, any>).Build = { ...config.materia.Build, model: 'current/missing-model', thinking: 'ultra' };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, model: 'current/missing-model', thinking: 'max' };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/models') {
         return new Response(JSON.stringify({
@@ -2907,19 +2910,19 @@ describe('Materia loadout grid editor', () => {
     expect(Array.from(modelSelect.options).map((option) => option.value)).toEqual(['', 'openai/gpt-review', 'anthropic/haiku', 'current/missing-model']);
     expect(Array.from(modelSelect.options).find((option) => option.value === 'current/missing-model')?.textContent).toContain('(unavailable)');
     const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
-    expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'ultra']);
-    expect(Array.from(thinkingSelect.options).find((option) => option.value === 'ultra')?.textContent).toContain('unsupported saved value');
+    expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'max']);
+    expect(Array.from(thinkingSelect.options).find((option) => option.value === 'max')?.textContent).toBe('Max (unsupported saved value)');
 
     fireEvent.click(screen.getByTestId('save-materia-form'));
 
     await waitForConfigPostCount(fetchMock, 1);
     const body = configPostBody(fetchMock);
-    expect(body.config.materia.Build).toMatchObject({ model: 'current/missing-model', thinking: 'ultra' });
+    expect(body.config.materia.Build).toMatchObject({ model: 'current/missing-model', thinking: 'max' });
   });
 
-  it('updates thinking choices from model metadata and resets unsupported saved thinking after model changes', async () => {
+  it('rehydrates max from config and clears it when the selected model does not support it', async () => {
     const config = structuredClone(testConfig) as typeof testConfig & { materia: Record<string, any> };
-    (config.materia as Record<string, any>).Build = { ...config.materia.Build, thinking: 'xhigh' };
+    (config.materia as Record<string, any>).Build = { ...config.materia.Build, thinking: 'max' };
     const fetchMock = vi.fn(async (url: string) => {
       if (url === '/api/models') {
         return new Response(JSON.stringify({
@@ -2928,7 +2931,7 @@ describe('Materia loadout grid editor', () => {
           activeModelValue: 'openai/gpt-active',
           activeThinking: 'medium',
           models: [
-            { value: 'openai/gpt-test', label: 'GPT Test', supportedThinkingLevels: ['off', 'high'] },
+            { value: 'openai/gpt-test', label: 'GPT Test', supportedThinkingLevels: ['off', 'high', 'max'] },
             { value: 'anthropic/haiku', label: 'Haiku', supportedThinkingLevels: ['off'] },
           ],
         }));
@@ -2944,14 +2947,15 @@ describe('Materia loadout grid editor', () => {
     const thinkingSelect = screen.getByTestId('materia-thinking') as HTMLSelectElement;
     await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'low', 'medium']));
     await clickMateriaSelectorRow('Build');
-    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high', 'xhigh']));
-    expect(thinkingSelect.value).toBe('xhigh');
+    await waitFor(() => expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off', 'high', 'max']));
+    expect(thinkingSelect.value).toBe('max');
+    expect(Array.from(thinkingSelect.options).find((option) => option.value === 'max')?.textContent).toBe('Max');
 
     fireEvent.change(modelSelect, { target: { value: 'anthropic/haiku' } });
 
     expect(thinkingSelect.value).toBe('');
     expect(Array.from(thinkingSelect.options).map((option) => option.value)).toEqual(['', 'off']);
-    expect(Array.from(thinkingSelect.options).map((option) => option.value)).not.toContain('xhigh');
+    expect(Array.from(thinkingSelect.options).map((option) => option.value)).not.toContain('max');
   });
 
   it('views, creates, and removes semantic Generator config without current fields', async () => {

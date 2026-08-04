@@ -118,7 +118,7 @@ export function thinkingSelectOptions(catalog: ModelCatalogResponse, form: Pick<
   ];
   const currentThinking = form.thinking.trim();
   if (currentThinking && !supported.includes(currentThinking) && isOriginalSavedThinking(form, original, form.model, currentThinking)) {
-    options.push({ value: currentThinking, label: `${currentThinking} (unsupported saved value)`, unavailable: true });
+    options.push({ value: currentThinking, label: `${thinkingLabel(currentThinking)} (unsupported saved value)`, unavailable: true });
   }
   return options;
 }

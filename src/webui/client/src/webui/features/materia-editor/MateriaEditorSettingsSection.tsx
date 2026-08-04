@@ -100,7 +100,7 @@ export function MateriaEditorSettingsSection({ form, modelOptions: modelSection,
                 <span className="materia-field-hint" data-testid="materia-thinking-options-status">
                   {materiaForm.model ? `Uses thinking levels for ${selectedModel?.label ?? materiaForm.model}.` : 'Uses thinking levels for the active Pi model.'}
                   {thinkingLevelsForSelection.length > 0 ? ` Offered: ${thinkingLevelsForSelection.map(thinkingLabel).join(', ')}.` : ''}
-                  {modelCatalog.activeThinking ? ` Active Pi thinking: ${modelCatalog.activeThinking}.` : ''}
+                  {modelCatalog.activeThinking ? ` Active Pi thinking: ${thinkingLabel(modelCatalog.activeThinking)}.` : ''}
                 </span>
               </label>
               <label className="graph-field">Tools

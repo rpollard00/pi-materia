@@ -60,7 +60,7 @@ describe('CentralModelPolicyPanel', () => {
           allow: [{ value: 'zai/glm-4.6' }],
           deny: [{ value: 'forbidden/model' }],
           prefer: [{ value: 'anthropic/claude', label: 'Claude' }],
-          thinking: { allow: ['medium', 'high'], max: 'high' },
+          thinking: { allow: ['medium', 'max'], max: 'max' },
           severity: 'advisory',
           version: '2',
           updatedAt: '2026-06-24T00:00:00.000Z',
@@ -73,8 +73,8 @@ describe('CentralModelPolicyPanel', () => {
     expect(within(doc).getByText('zai/glm-4.6')).toBeTruthy();
     expect(within(doc).getByText('forbidden/model')).toBeTruthy();
     expect(within(doc).getByText('Claude')).toBeTruthy();
-    expect(within(doc).getByText(/allow: Medium, High/)).toBeTruthy();
-    expect(within(doc).getByText(/max: High/)).toBeTruthy();
+    expect(within(doc).getByText(/allow: Medium, Max/)).toBeTruthy();
+    expect(within(doc).getByText(/max: Max/)).toBeTruthy();
     expect(within(doc).getByText('advisory')).toBeTruthy();
     expect(within(doc).getByText('2')).toBeTruthy();
   });
