@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { lstat, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createExecutionScope } from "../src/domain/executionScope.js";
@@ -10,6 +10,7 @@ import {
   integrateJjWorkspaceExports,
   type JjFanInInput,
   createJjWorkspaceBackend,
+  finalizeJjWorkspace,
   type JjWorkspaceRecord,
 } from "../src/infrastructure/index.js";
 import { executeBuiltInUtility } from "../src/utilities/utilityRegistry.js";
@@ -90,6 +91,47 @@ describe("Integrate-JJ-Workspaces", () => {
     expect(result.workspace.baseline).toEqual(result.integration.integrationRevision);
     expect(result.workspace.revision).not.toEqual(result.integration.integrationRevision);
     expect(await revisionAt(result.scope.cwd, "@-")).toEqual(result.integration.integrationRevision);
+  });
+
+  test("finalizes a meaningful fan-in and removes its parked source workspaces", async () => {
+    if (!(await hasJj())) return;
+    const fixture = await realFixture(2, true);
+    await realJj(["bookmark", "create", "blackbelt/end-to-end", "-r", "@"], fixture.repositoryRoot);
+
+    const integrated = await integrateJjWorkspaceExports(fixture.input);
+    const cleanup = integrated.scope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]!.value as any;
+    expect(integrated.integration.orderedChangeIds).toHaveLength(2);
+    expect(cleanup.sources).toHaveLength(2);
+    for (const lane of fixture.lanes) {
+      const parked = await revisionAt(lane.workspace.cwd, "@");
+      expect(await revisionAt(lane.workspace.cwd, "@-")).toEqual(fixture.baseline);
+      expect(integrated.integration.orderedChangeIds).not.toContain(parked.changeId);
+      expect(cleanup.sources.find((source: any) => source.laneId === lane.laneId)).toMatchObject({
+        workspaceName: lane.workspace.workspaceName,
+        owner: lane.workspace.owner,
+      });
+    }
+
+    const finalized = await finalizeJjWorkspace({
+      cwd: integrated.scope.cwd,
+      executionScope: integrated.scope,
+      baseScope: createExecutionScope({ id: "cast:parent:base", cwd: fixture.repositoryRoot }),
+      state: { envelope: { satisfied: true } },
+      bookmarkName: "blackbelt/end-to-end",
+      description: "feat: finalized meaningful fan-in",
+    });
+
+    expect(finalized.integrationRevision.changeId).toBe(integrated.integration.finalTip.changeId);
+    expect(finalized.cleanedWorkspaceNames).toEqual(expect.arrayContaining([
+      integrated.workspace.workspaceName,
+      ...fixture.lanes.map(({ workspace }) => workspace.workspaceName),
+    ]));
+    for (const lane of fixture.lanes) {
+      expect(await pathExists(lane.workspace.workspacePath)).toBe(false);
+      expect(await pathExists(lane.workspace.manifestPath)).toBe(false);
+    }
+    const listed = (await realJj(["workspace", "list"], fixture.repositoryRoot)).stdout;
+    for (const lane of fixture.lanes) expect(listed).not.toContain(`${lane.workspace.workspaceName}:`);
   });
 
   test("materializes one real workspace and emits its bounded result as utility state", async () => {
@@ -217,10 +259,7 @@ function fakeDeps(sources: Array<ReturnType<typeof source>>, outcome: "clean" | 
   };
 }
 
-async function realFixture(count: number): Promise<{
-  repositoryRoot: string;
-  input: Parameters<typeof integrateJjWorkspaceExports>[0];
-}> {
+async function realFixture(count: number, meaningful = false) {
   const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-integrate-repo-"));
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-integrate-workspaces-"));
   await realJj(["git", "init", repositoryRoot], process.cwd());
@@ -235,6 +274,11 @@ async function realFixture(count: number): Promise<{
       loopId: "spawn",
       laneId,
     });
+    if (meaningful) {
+      await writeFile(path.join(workspace.workspacePath, `lane-${index}.txt`), `lane ${index}\n`);
+      await realJj(["describe", "-m", `feat: lane ${index}`], workspace.workspacePath);
+      await realJj(["new"], workspace.workspacePath);
+    }
     const exportValue = {
       producer: "Spawn-JJ-Workspace",
       value: {
@@ -277,6 +321,8 @@ async function realFixture(count: number): Promise<{
   };
   return {
     repositoryRoot,
+    baseline,
+    lanes,
     input: {
       cwd: executionScope.cwd,
       castId: "parent",
@@ -285,6 +331,16 @@ async function realFixture(count: number): Promise<{
       state,
     },
   };
+}
+
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await lstat(target);
+    return true;
+  } catch (error: any) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
 }
 
 async function hasJj(): Promise<boolean> {

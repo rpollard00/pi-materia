@@ -95,12 +95,17 @@ function fakeFanInJj(repositoryRoot: string, options: {
       return { stdout: "", stderr: "", exitCode: 0, operationId: `operation-forget-${args[2]}` };
     }
     if (args[0] === "rebase") {
-      const sourceIndex = args.includes("-r") ? args.indexOf("-r") : args.indexOf("-s");
-      const source = args[sourceIndex + 1]!;
       const destination = args[args.indexOf("-d") + 1]!;
-      const fields = stackByIdentity.get(source);
-      if (fields) fields[2] = destination;
-      return { stdout: "Rebased 1 commits\n", stderr: "", exitCode: 0, operationId: "operation-linearize" };
+      const sources = args.flatMap((arg, index) => arg === "-r" || arg === "-s" ? [args[index + 1]!] : []);
+      let previous = destination;
+      for (const source of sources) {
+        const fields = stackByIdentity.get(source);
+        if (fields) {
+          fields[2] = previous;
+          previous = fields[0]!;
+        }
+      }
+      return { stdout: `Rebased ${sources.length} commits\n`, stderr: "", exitCode: 0, operationId: "operation-linearize" };
     }
     return { stdout: "", stderr: `unsupported fake command: ${args.join(" ")}`, exitCode: 1 };
   };
@@ -404,18 +409,20 @@ describe("jj workspace lifecycle backend", () => {
     expect(parkedManifest.revision).toEqual(parked);
   });
 
-  test("recovers a real-jj interruption after parking only a prefix of lanes", async () => {
+  test("recovers a real-jj interruption after rebasing a meaningful lane prefix", async () => {
     if (!(await hasRealJj())) return;
     const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-park-retry-"));
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
     await runRealJj(["git", "init", repositoryRoot], process.cwd());
-    let parkCalls = 0;
+    let integrationRebases = 0;
     let interrupt = true;
     const real = realJjExecutor();
     const command: JjCommandExecutor = async (input) => {
       const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
-      if (interrupt && args[0] === "rebase" && args.includes("-r") && ++parkCalls === 2) {
-        return { stdout: "", stderr: "simulated park interruption", exitCode: 1 };
+      const integrationRebase = args[0] === "rebase" && args.includes("-r")
+        && path.resolve(input.cwd) === path.resolve(repositoryRoot);
+      if (integrationRebase && ++integrationRebases === 2 && interrupt) {
+        return { stdout: "", stderr: "simulated integration interruption", exitCode: 1 };
       }
       return real(input);
     };
@@ -437,14 +444,22 @@ describe("jj workspace lifecycle backend", () => {
     };
 
     await expect(backend.fanIn(input)).rejects.toMatchObject({ code: "jj_command_failed" });
-    expect(JSON.parse(await readFile(lanes[0]!.manifestPath, "utf8")).fanInPreparation.parkedWorkspaceRevision).toBeDefined();
-    expect(JSON.parse(await readFile(lanes[1]!.manifestPath, "utf8")).fanInPreparation.parkedWorkspaceRevision).toBeUndefined();
+    const preparations = await Promise.all(lanes.map(async (lane) => JSON.parse(await readFile(lane.manifestPath, "utf8")).fanInPreparation));
+    expect(preparations.every((preparation) => preparation.parkedWorkspaceRevision !== undefined)).toBe(true);
+    const firstRewritten = await realRevision(repositoryRoot, preparations[0].meaningfulChanges[0].changeId);
+    expect(firstRewritten.commitId).not.toBe(preparations[0].meaningfulChanges[0].commitId);
+
     interrupt = false;
     const result = await backend.fanIn(input);
     expect(result.satisfied).toBe(true);
+    expect(result.rewrittenLaneTips.map(({ revision }) => revision.changeId)).toEqual(result.orderedChangeIds);
     expect(await realRevision(repositoryRoot, "keep-baseline")).toEqual(pinned.baseline);
     expect(await realRevision(repositoryRoot, "@")).toEqual(pinned.baseline);
-    for (const lane of lanes) expect(await realRevision(lane.workspacePath, "@-")).toEqual(pinned.baseline);
+    for (const [index, lane] of lanes.entries()) {
+      const parked = await realRevision(lane.workspacePath, "@");
+      expect(await realRevision(lane.workspacePath, "@-")).toEqual(pinned.baseline);
+      expect(result.orderedHeads[index]!.workspace.revision).toEqual(parked);
+    }
   });
 
   test("linearly stacks real-jj lanes in schedule order without merge or transient empty commits", async () => {
@@ -452,7 +467,17 @@ describe("jj workspace lifecycle backend", () => {
     const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-linear-"));
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
     await runRealJj(["git", "init", repositoryRoot], process.cwd());
-    const backend = createJjWorkspaceBackend({ repositoryRoot, workspaceRoot });
+    const real = realJjExecutor();
+    const integrationRebases: string[][] = [];
+    const backend = createJjWorkspaceBackend({
+      repositoryRoot,
+      workspaceRoot,
+      command: async (input) => {
+        const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
+        if (args[0] === "rebase" && path.resolve(input.cwd) === path.resolve(repositoryRoot)) integrationRebases.push(args);
+        return real(input);
+      },
+    });
     const pinned = await backend.pinBaseline(repositoryRoot);
     const laneA = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-a" });
     const noOp = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane-noop" });
@@ -474,6 +499,14 @@ describe("jj workspace lifecycle backend", () => {
     await runRealJj(["new"], laneB.workspacePath);
     const bWorking = await realRevision(laneB.workspacePath, "@");
 
+    // This head is deliberately descended from a prepared meaningful change,
+    // but is neither an accepted lane tip nor part of the prepared stack.
+    const unrelatedPath = await mkdtemp(path.join(os.tmpdir(), "materia-jj-unrelated-"));
+    await runRealJj(["workspace", "add", "--name", "unrelated-descendant", "--revision", b.commitId, unrelatedPath], repositoryRoot);
+    await writeFile(path.join(unrelatedPath, "unrelated.txt"), "outside fan-in\n");
+    await runRealJj(["describe", "-m", "test: unrelated descendant"], unrelatedPath);
+    const unrelated = await realRevision(unrelatedPath, "@");
+
     const result = await backend.fanIn({
       parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
       baseline: pinned.baseline, queueOrder: ["lane-a", "lane-noop", "lane-b"],
@@ -489,6 +522,22 @@ describe("jj workspace lifecycle backend", () => {
     expect(result.finalTip.changeId).toBe(b.changeId);
     expect(result.integrationRevision).toEqual(result.finalTip);
     expect(result.outcome).toBe("clean");
+    expect(result.orderedChangeIds).not.toContain(unrelated.changeId);
+    await runRealJj(["workspace", "update-stale"], unrelatedPath);
+    expect((await realRevision(unrelatedPath, "@")).changeId).toBe(unrelated.changeId);
+    const unrelatedInMeaningfulRange = await runRealJj([
+      "log", "-r", `${result.effectiveBase.commitId}::${result.finalTip.commitId} & ${unrelated.changeId}`,
+      "--no-graph", "-T", "change_id",
+    ], repositoryRoot);
+    expect(unrelatedInMeaningfulRange.stdout.trim()).toBe("");
+    for (const [lane, accepted] of [[result.orderedHeads[0]!, aWorking], [result.orderedHeads[2]!, bWorking]] as const) {
+      expect(lane.workspaceRevision).toEqual(accepted);
+      expect(lane.workspace.revision?.changeId).toBe(accepted.changeId);
+      expect(lane.workspace.revision?.commitId).not.toBe(accepted.commitId);
+    }
+    expect(integrationRebases).not.toHaveLength(0);
+    expect(integrationRebases.every((args) => !args.includes("-s") && args.filter((arg) => arg === "-r").length > 0)).toBe(true);
+    expect(integrationRebases.some((args) => args.filter((arg) => arg === "-r").length === 2)).toBe(true);
     const { stdout } = await runRealJj(["log", "-r", `${result.effectiveBase.commitId}::${result.finalTip.commitId}`, "--reversed", "--no-graph", "-T", 'change_id ++ "\\t" ++ parents.len() ++ "\\t" ++ empty ++ "\\t" ++ description.first_line() ++ "\\n"'], repositoryRoot);
     const history = stdout.trim().split(/\r?\n/).map((line) => line.split("\t"));
     expect(history.slice(1).map(([changeId]) => changeId)).toEqual(result.orderedChangeIds);

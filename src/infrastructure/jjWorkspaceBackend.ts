@@ -466,11 +466,16 @@ export class JjWorkspaceBackend {
               throw new JjWorkspaceError("fan_in_preparation_stack_drift", `Lane ${JSON.stringify(lane.laneId)} meaningful stack changed after preparation.`);
             }
           } else {
-            let previous = manifest.baseline.commitId;
+            // A previous attempt may already have rebased this exact stack.
+            // Commit ids then change, but change ids and intra-lane edges are
+            // stable. The root parent is checked against normalized fan-in
+            // order below, once every prepared lane is available.
+            let previous: string | undefined;
             try {
               for (const expected of commits) {
                 const actual = await this.#readStackRevision(manifest.repositoryRoot, expected.changeId);
-                if (!sameRevision(actual, expected) || actual.parents.length !== 1 || actual.parents[0] !== previous || actual.empty || actual.conflict) throw new Error("drift");
+                if (actual.changeId !== expected.changeId || actual.parents.length !== 1
+                  || (previous !== undefined && actual.parents[0] !== previous) || actual.empty) throw new Error("drift");
                 previous = actual.commitId;
               }
             } catch {
@@ -558,6 +563,10 @@ export class JjWorkspaceBackend {
         if (preparation.parkedWorkspaceRevision && !sameRevision(preparation.parkedWorkspaceRevision, parked)) {
           throw new JjWorkspaceError("fan_in_park_drift", `Lane ${JSON.stringify(lane.laneId)} parked workspace revision drifted.`);
         }
+        // Keep returned workspace provenance aligned with the owned working
+        // copy rather than the pre-park commit recorded at acceptance.
+        lane.workspace.revision = { commitId: parked.commitId, changeId: parked.changeId };
+        if (parkOperationId) lane.workspace.operationId = parkOperationId;
         if (!preparation.parkedWorkspaceRevision) {
           const parkedAt = this.#now();
           const parkedPreparation: JjFanInPreparation = {
@@ -591,13 +600,16 @@ export class JjWorkspaceBackend {
       let hasConflict = false;
 
       for (const lane of meaningfulHeads) {
-        const root = lane.commits[0]!;
-        const rootDetails = await this.#readStackRevision(capability.repositoryRoot, root.commitId);
+        const prepared = await Promise.all(lane.commits.map(({ changeId }) => this.#readStackRevision(capability.repositoryRoot, changeId)));
+        const rootDetails = prepared[0]!;
         if (rootDetails.parents.length !== 1) {
           throw new JjWorkspaceError("fan_in_lane_history_malformed", `Lane ${JSON.stringify(lane.laneId)} root is not a single-parent revision.`);
         }
+        // Select every prepared meaningful revision explicitly instead of
+        // moving a root subtree. This keeps parked tips and unrelated heads
+        // outside the selected range while preserving intra-lane edges.
         if (rootDetails.parents[0] !== finalTip.commitId) {
-          const rebaseArgs = ["rebase", "-s", root.commitId, "-d", finalTip.commitId];
+          const rebaseArgs = ["rebase", ...prepared.flatMap(({ commitId }) => ["-r", commitId]), "-d", finalTip.commitId];
           const rebased = await this.#run(rebaseArgs, capability.repositoryRoot);
           this.#requireSuccess(rebased, rebaseArgs, capability.repositoryRoot);
           operationId = rebased.operationId ?? operationId;
