@@ -37,6 +37,9 @@ const REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\n"';
 const OPERATION_TEMPLATE = 'id ++ "\\n"';
 const FAN_IN_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ conflicted_files.map(|f| f.path()).join("|") ++ "\\n"';
 const STACK_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
+const MAX_FAN_IN_LANES = 256;
+const MAX_FAN_IN_CHANGES_PER_LANE = 1_024;
+const MAX_FAN_IN_IDENTITY_LENGTH = 512;
 
 export interface JjCommandInput {
   executable: string;
@@ -144,6 +147,22 @@ export interface JjWorkspaceOwner {
 export type JjWorkspaceLifecycleState = "active" | "forgotten";
 
 /** Durable ownership record kept outside the child working copy. */
+export interface JjFanInPreparation {
+  version: 1;
+  /** Fan-in attempt identity; distinct from the producer workspace owner. */
+  parentCastId: string;
+  loopId: string;
+  runId: string;
+  owner: JjWorkspaceOwner;
+  baseline: JjRevisionIdentity;
+  workspaceRevision: JjRevisionIdentity;
+  streamIndex: number;
+  queueIndex: number;
+  /** Stable identities in baseline-to-tip order; the empty workspace revision is excluded. */
+  meaningfulChanges: JjRevisionIdentity[];
+  preparedAt: number;
+}
+
 export interface JjWorkspaceManifest {
   version: typeof JJ_WORKSPACE_MANIFEST_VERSION;
   backend: "jj";
@@ -160,6 +179,8 @@ export interface JjWorkspaceManifest {
   updatedAt: number;
   forgottenAt?: number;
   forgetOperationId?: string;
+  /** Recoverable, ownership-scoped checkpoint written before fan-in rewrites. */
+  fanInPreparation?: JjFanInPreparation;
 }
 
 /** Public record returned by lifecycle operations. */
@@ -422,6 +443,36 @@ export class JjWorkspaceBackend {
           throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted working revision changed before fan-in.`);
         }
         const commits = await this.#deriveMeaningfulStack(manifest.workspacePath, manifest.baseline, acceptedWorkingRevision, lane.laneId);
+        if (commits.length > MAX_FAN_IN_CHANGES_PER_LANE) {
+          throw new JjWorkspaceError("fan_in_preparation_too_large", `Lane ${JSON.stringify(lane.laneId)} exceeds the recoverable fan-in preparation limit.`);
+        }
+        const checkpointedAt = manifest.fanInPreparation?.preparedAt ?? this.#now();
+        const preparation: JjFanInPreparation = {
+          version: 1,
+          parentCastId: input.parentCastId,
+          loopId: input.loopId,
+          runId: input.runId,
+          owner: { ...manifest.owner },
+          baseline: { ...input.baseline },
+          workspaceRevision: { ...acceptedWorkingRevision },
+          streamIndex: lane.streamIndex,
+          queueIndex: lane.queueIndex,
+          meaningfulChanges: commits.map((revision) => ({ ...revision })),
+          preparedAt: checkpointedAt,
+        };
+        assertBoundedFanInPreparation(preparation, lane.laneId);
+        if (manifest.fanInPreparation) {
+          assertCompatibleFanInPreparation(manifest.fanInPreparation, preparation, lane.laneId);
+        } else {
+          // Publish each validated lane immediately. If preparation is
+          // interrupted, a retry can prove and resume the compatible prefix;
+          // no jj rewrite occurs until every ordered lane has this checkpoint.
+          await writeJsonAtomically(manifestPathFor(manifest.workspaceRoot, manifest.workspaceName), {
+            ...manifest,
+            fanInPreparation: preparation,
+            updatedAt: checkpointedAt,
+          });
+        }
         orderedHeads.push({
           laneId: lane.laneId,
           streamIndex: lane.streamIndex,
@@ -1277,6 +1328,10 @@ function validateFanInInput(input: JjFanInInput): void {
   }
   if (!Array.isArray(input.queueOrder) || input.queueOrder.length === 0) throw new JjWorkspaceError("fan_in_order_invalid", "Fan-in queueOrder must be non-empty.");
   if (!Array.isArray(input.lanes)) throw new JjWorkspaceError("fan_in_lanes_invalid", "Fan-in lanes must be an array.");
+  if (input.queueOrder.length > MAX_FAN_IN_LANES || input.lanes.length > MAX_FAN_IN_LANES) throw new JjWorkspaceError("fan_in_preparation_too_large", "Fan-in exceeds the recoverable preparation lane limit.");
+  for (const value of [input.parentCastId, input.loopId, input.runId, input.baseline.commitId, input.baseline.changeId, ...input.queueOrder]) {
+    if (value.length > MAX_FAN_IN_IDENTITY_LENGTH) throw new JjWorkspaceError("fan_in_preparation_too_large", "Fan-in contains an identity that exceeds the recoverable preparation limit.");
+  }
 }
 
 function orderFanInLanes(input: JjFanInInput): JjFanInLaneInput[] {
@@ -1304,6 +1359,49 @@ function orderFanInLanes(input: JjFanInInput): JjFanInLaneInput[] {
   }
   if (seen.size !== byId.size) throw new JjWorkspaceError("fan_in_order_incomplete", "Fan-in queueOrder does not cover every lane.");
   return ordered;
+}
+
+function assertBoundedFanInPreparation(preparation: JjFanInPreparation, laneId: string): void {
+  const strings = [
+    preparation.parentCastId, preparation.loopId, preparation.runId,
+    preparation.owner.parentCastId, preparation.owner.loopId, preparation.owner.laneId,
+    preparation.baseline.commitId, preparation.baseline.changeId,
+    preparation.workspaceRevision.commitId, preparation.workspaceRevision.changeId,
+    ...preparation.meaningfulChanges.flatMap(({ commitId, changeId }) => [commitId, changeId]),
+  ];
+  const indexes = [preparation.streamIndex, preparation.queueIndex];
+  if (strings.some((value) => typeof value !== "string" || value.length === 0 || value.length > MAX_FAN_IN_IDENTITY_LENGTH)
+    || indexes.some((value) => !Number.isSafeInteger(value) || value < 0 || value >= MAX_FAN_IN_LANES)
+    || preparation.meaningfulChanges.length > MAX_FAN_IN_CHANGES_PER_LANE
+    || !Number.isFinite(preparation.preparedAt)) {
+    throw new JjWorkspaceError("fan_in_preparation_too_large", `Lane ${JSON.stringify(laneId)} cannot be represented by a bounded recoverable fan-in preparation.`);
+  }
+}
+
+function assertCompatibleFanInPreparation(existing: JjFanInPreparation, current: JjFanInPreparation, laneId: string): void {
+  if (!sameOwner(existing.owner, current.owner)) {
+    throw new JjWorkspaceError("fan_in_preparation_owner_drift", `Lane ${JSON.stringify(laneId)} fan-in preparation belongs to different ownership.`);
+  }
+  if (existing.parentCastId !== current.parentCastId || existing.loopId !== current.loopId || existing.runId !== current.runId) {
+    throw new JjWorkspaceError("fan_in_preparation_identity_drift", `Lane ${JSON.stringify(laneId)} was prepared for a different fan-in identity.`);
+  }
+  if (!sameRevision(existing.baseline, current.baseline)) {
+    throw new JjWorkspaceError("fan_in_preparation_baseline_drift", `Lane ${JSON.stringify(laneId)} fan-in preparation has a different baseline.`);
+  }
+  if (!sameRevision(existing.workspaceRevision, current.workspaceRevision)
+    || existing.streamIndex !== current.streamIndex
+    || existing.queueIndex !== current.queueIndex
+    || !sameRevisionList(existing.meaningfulChanges, current.meaningfulChanges)) {
+    throw new JjWorkspaceError("fan_in_preparation_stack_drift", `Lane ${JSON.stringify(laneId)} no longer matches its recoverable fan-in preparation.`);
+  }
+}
+
+function sameOwner(left: JjWorkspaceOwner, right: JjWorkspaceOwner): boolean {
+  return left.parentCastId === right.parentCastId && left.loopId === right.loopId && left.laneId === right.laneId;
+}
+
+function sameRevisionList(left: readonly JjRevisionIdentity[], right: readonly JjRevisionIdentity[]): boolean {
+  return left.length === right.length && left.every((revision, index) => sameRevision(revision, right[index]!));
 }
 
 function parseStackRevision(line: string): StackRevision | undefined {

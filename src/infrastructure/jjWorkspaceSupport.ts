@@ -8,6 +8,7 @@ import {
   JJ_WORKSPACE_ROOT_MANIFEST,
   JjWorkspaceError,
   type JjCommandExecutor,
+  type JjFanInPreparation,
   type JjRevisionIdentity,
   type JjWorkspaceCreateInput,
   type JjWorkspaceLifecycleState,
@@ -186,6 +187,7 @@ export function parseManifest(value: unknown, file: string): JjWorkspaceManifest
   if (path.basename(value.workspacePath as string) !== value.workspaceName || value.workspaceName === "." || value.workspaceName === ".." || value.workspaceName.includes(path.sep)) {
     throw new JjWorkspaceError("manifest_invalid", `Workspace ownership manifest ${JSON.stringify(file)} has an unsafe workspace name or path.`);
   }
+  const fanInPreparation = value.fanInPreparation === undefined ? undefined : parseFanInPreparation(value.fanInPreparation, owner, file);
   return {
     version: JJ_WORKSPACE_MANIFEST_VERSION,
     backend: "jj",
@@ -202,6 +204,35 @@ export function parseManifest(value: unknown, file: string): JjWorkspaceManifest
     updatedAt: value.updatedAt as number,
     ...(typeof value.forgottenAt === "number" ? { forgottenAt: value.forgottenAt } : {}),
     ...(typeof value.forgetOperationId === "string" ? { forgetOperationId: value.forgetOperationId } : {}),
+    ...(fanInPreparation ? { fanInPreparation } : {}),
+  };
+}
+
+function parseFanInPreparation(value: unknown, manifestOwner: Record<string, any>, file: string): JjFanInPreparation {
+  const invalid = () => new JjWorkspaceError("manifest_invalid", `Workspace ownership manifest ${JSON.stringify(file)} has an invalid bounded fan-in preparation.`);
+  if (!isRecord(value) || value.version !== 1 || !isRecord(value.owner)
+    || ["parentCastId", "loopId", "runId"].some((key) => typeof value[key] !== "string" || value[key].length === 0 || value[key].length > 512)
+    || !isRevision(value.baseline) || !isRevision(value.workspaceRevision)
+    || !Number.isSafeInteger(value.streamIndex) || value.streamIndex < 0 || value.streamIndex >= 256
+    || !Number.isSafeInteger(value.queueIndex) || value.queueIndex < 0 || value.queueIndex >= 256
+    || !Number.isFinite(value.preparedAt) || !Array.isArray(value.meaningfulChanges) || value.meaningfulChanges.length > 1_024
+    || value.meaningfulChanges.some((revision) => !isRevision(revision))) throw invalid();
+  const owner = value.owner;
+  if (["parentCastId", "loopId", "laneId"].some((key) => typeof owner[key] !== "string" || owner[key].length === 0 || owner[key].length > 512)
+    || owner.parentCastId !== manifestOwner.parentCastId || owner.loopId !== manifestOwner.loopId || owner.laneId !== manifestOwner.laneId
+    || [value.baseline, value.workspaceRevision, ...value.meaningfulChanges].some((revision) => revision.commitId.length > 512 || revision.changeId.length > 512)) throw invalid();
+  return {
+    version: 1,
+    parentCastId: value.parentCastId,
+    loopId: value.loopId,
+    runId: value.runId,
+    owner: { parentCastId: owner.parentCastId, loopId: owner.loopId, laneId: owner.laneId },
+    baseline: { commitId: value.baseline.commitId, changeId: value.baseline.changeId },
+    workspaceRevision: { commitId: value.workspaceRevision.commitId, changeId: value.workspaceRevision.changeId },
+    streamIndex: value.streamIndex,
+    queueIndex: value.queueIndex,
+    meaningfulChanges: value.meaningfulChanges.map((revision) => ({ commitId: revision.commitId, changeId: revision.changeId })),
+    preparedAt: value.preparedAt,
   };
 }
 

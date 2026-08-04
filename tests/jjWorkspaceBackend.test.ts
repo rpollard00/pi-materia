@@ -172,6 +172,113 @@ describe("jj workspace lifecycle backend", () => {
     expect(result.integrationRevision).toEqual(pinned.baseline);
   });
 
+  test("atomically checkpoints partial fan-in preparation and resumes only the same run and stack", async () => {
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
+    const fake = fakeFanInJj(repositoryRoot);
+    let stackReads = 0;
+    let interruptAt: number | undefined = 1;
+    const command: JjCommandExecutor = async (input) => {
+      const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
+      if (args[0] === "log" && String(args[args.indexOf("-r") + 1]).includes("::") && ++stackReads === interruptAt) {
+        throw new Error("simulated interruption during preparation");
+      }
+      return fake.command(input);
+    };
+    const backend = createJjWorkspaceBackend({ workspaceRoot, command });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    const ownerA = { parentCastId: "child-cast-a", loopId: "child-loop", laneId: "lane-a" };
+    const ownerB = { parentCastId: "child-cast-b", loopId: "child-loop", laneId: "lane-b" };
+    const laneA = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, ...ownerA });
+    const laneB = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, ...ownerB });
+    const input = {
+      parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
+      baseline: pinned.baseline, queueOrder: ["lane-a", "lane-b"],
+      lanes: [
+        { laneId: "lane-a", owner: ownerA, streamIndex: 0, queueIndex: 0, workItemIndexes: [0], status: "accepted" as const, acceptedHead: laneA.revision, workspace: laneA },
+        { laneId: "lane-b", owner: ownerB, streamIndex: 1, queueIndex: 1, workItemIndexes: [1], status: "accepted" as const, acceptedHead: laneB.revision, workspace: laneB },
+      ],
+    };
+
+    await expect(backend.fanIn(input)).rejects.toThrow("simulated interruption");
+    expect(JSON.parse(await readFile(laneA.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
+    expect(JSON.parse(await readFile(laneB.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
+
+    stackReads = 0;
+    interruptAt = 2;
+    await expect(backend.fanIn(input)).rejects.toThrow("simulated interruption");
+    const partialA = JSON.parse(await readFile(laneA.manifestPath, "utf8"));
+    const partialB = JSON.parse(await readFile(laneB.manifestPath, "utf8"));
+    expect(partialA.fanInPreparation).toMatchObject({
+      version: 1,
+      parentCastId: "cast",
+      loopId: "build",
+      runId: "run",
+      owner: ownerA,
+      baseline: pinned.baseline,
+      workspaceRevision: laneA.revision,
+      streamIndex: 0,
+      queueIndex: 0,
+      meaningfulChanges: [],
+    });
+    expect(partialB.fanInPreparation).toBeUndefined();
+    expect(fake.calls.some(({ args }) => args.includes("rebase"))).toBe(false);
+
+    interruptAt = undefined;
+    await backend.fanIn(input);
+    expect(JSON.parse(await readFile(laneB.manifestPath, "utf8")).fanInPreparation).toMatchObject({ parentCastId: "cast", loopId: "build", runId: "run" });
+    await expect(backend.fanIn({ ...input, parentCastId: "other-cast" })).rejects.toMatchObject({ code: "fan_in_preparation_identity_drift" });
+    await expect(backend.fanIn({ ...input, loopId: "other-loop" })).rejects.toMatchObject({ code: "fan_in_preparation_identity_drift" });
+    await expect(backend.fanIn({ ...input, runId: "other-run" })).rejects.toMatchObject({ code: "fan_in_preparation_identity_drift" });
+
+    const changed = JSON.parse(await readFile(laneA.manifestPath, "utf8"));
+    changed.fanInPreparation.meaningfulChanges = [{ commitId: "foreign", changeId: "foreign-change" }];
+    await writeFile(laneA.manifestPath, `${JSON.stringify(changed)}\n`);
+    await expect(backend.fanIn(input)).rejects.toMatchObject({ code: "fan_in_preparation_stack_drift" });
+  });
+
+  test("rejects unbounded owner, index, and derived revision fields before publishing preparation", async () => {
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
+    const oversized = "x".repeat(513);
+    const fake = fakeFanInJj(repositoryRoot);
+    const backend = createJjWorkspaceBackend({ workspaceRoot, command: fake.command });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    const owner = { parentCastId: oversized, loopId: "child-loop", laneId: "lane" };
+    const lane = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, ...owner });
+    const baseInput = {
+      parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
+      baseline: pinned.baseline, queueOrder: ["lane"],
+      lanes: [{ laneId: "lane", owner, streamIndex: 0, queueIndex: 0, workItemIndexes: [0], status: "accepted" as const, acceptedHead: lane.revision, workspace: lane }],
+    };
+
+    await expect(backend.fanIn(baseInput)).rejects.toMatchObject({ code: "fan_in_preparation_too_large" });
+    expect(JSON.parse(await readFile(lane.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
+
+    const boundedOwner = { parentCastId: "child-cast", loopId: "child-loop", laneId: "lane" };
+    const boundedLane = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, ...boundedOwner });
+    const boundedInput = {
+      ...baseInput,
+      lanes: [{ ...baseInput.lanes[0]!, owner: boundedOwner, workspace: boundedLane, acceptedHead: boundedLane.revision }],
+    };
+    await expect(backend.fanIn({ ...boundedInput, lanes: [{ ...boundedInput.lanes[0]!, queueIndex: 256 }] })).rejects.toMatchObject({ code: "fan_in_preparation_too_large" });
+    expect(JSON.parse(await readFile(boundedLane.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
+
+    const revisionFake = fakeFanInJj(repositoryRoot, {
+      stackOutput: `baseline\tbaseline-change\troot\tfalse\tfalse\n${oversized}\tmeaningful-change\tbaseline\tfalse\tfalse\nlane-working\tchange-lane-working\t${oversized}\tfalse\ttrue\n`,
+    });
+    const revisionBackend = createJjWorkspaceBackend({ workspaceRoot, command: revisionFake.command });
+    const revisionOwner = { parentCastId: "child-cast", loopId: "child-loop", laneId: "lane-revision" };
+    const revisionLane = await revisionBackend.create({ cwd: repositoryRoot, baseline: pinned.baseline, ...revisionOwner });
+    const revisionInput = {
+      ...boundedInput,
+      queueOrder: ["lane-revision"],
+      lanes: [{ ...boundedInput.lanes[0]!, laneId: "lane-revision", owner: revisionOwner, workspace: revisionLane, acceptedHead: revisionLane.revision }],
+    };
+    await expect(revisionBackend.fanIn(revisionInput)).rejects.toMatchObject({ code: "fan_in_preparation_too_large" });
+    expect(JSON.parse(await readFile(revisionLane.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
+  });
+
   test("derives ordered meaningful commits and removes only an empty cast boundary from the effective base", async () => {
     const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
