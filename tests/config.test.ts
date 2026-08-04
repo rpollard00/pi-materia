@@ -403,11 +403,11 @@ describe("layered config loading and persistence", () => {
         },
       }), "utf8");
 
-      await expect(saveRoleGenerationPreference({ thinking: "  medium" })).resolves.toEqual({ model: "provider/existing", thinking: "medium" });
+      await expect(saveRoleGenerationPreference({ thinking: "  max  " })).resolves.toEqual({ model: "provider/existing", thinking: "max" });
       expect((await loadProfileConfig()).roleGeneration).toEqual({
         enabled: false,
         model: "provider/existing",
-        thinking: "medium",
+        thinking: "max",
         extraInstructions: "Keep it focused.",
         useReadOnlyProjectContext: true,
       });
@@ -426,7 +426,7 @@ describe("layered config loading and persistence", () => {
     }
   });
 
-  test("rejects invalid role-generation model preference before modifying profile", async () => {
+  test("rejects invalid role-generation preferences before modifying profile", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-"));
     const previous = process.env.PI_MATERIA_PROFILE_DIR;
     process.env.PI_MATERIA_PROFILE_DIR = dir;
@@ -436,6 +436,8 @@ describe("layered config loading and persistence", () => {
       const before = await readFile(getUserProfileConfigPath(), "utf8");
 
       await expect(saveRoleGenerationModelPreference("unqualified-model")).rejects.toThrow(/provider-qualified/);
+      await expect(saveRoleGenerationPreference({ thinking: "turbo" })).rejects.toThrow(/max/);
+      await expect(saveRoleGenerationPreference({ thinking: "   " })).rejects.toThrow(/max/);
 
       expect(await readFile(getUserProfileConfigPath(), "utf8")).toBe(before);
     } finally {

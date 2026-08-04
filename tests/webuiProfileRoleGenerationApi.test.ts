@@ -89,24 +89,31 @@ describe("/api/profile/role-generation", () => {
     expect(JSON.parse(await readFile(getUserProfileConfigPath(), "utf8")).roleGeneration.model).toBe("obsolete-provider/missing-model");
   });
 
-  test("accepts partial thinking updates and preserves omitted fields", async () => {
+  test("accepts trimmed max thinking updates, reloads them, and preserves omitted fields", async () => {
     const profileDir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-api-"));
     await mkdir(profileDir, { recursive: true });
     const profileFile = path.join(profileDir, "config.json");
     await writeFile(profileFile, JSON.stringify({ roleGeneration: { model: "provider/existing", extraInstructions: "Keep me." } }), "utf8");
     const { baseUrl } = await startProfileServer(profileDir);
 
-    const response = await postPreference(baseUrl, { thinking: "high" });
+    const response = await postPreference(baseUrl, { thinking: "  max  " });
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, model: "provider/existing", thinking: "high" });
+    expect(await response.json()).toEqual({ ok: true, model: "provider/existing", thinking: "max" });
     expect(JSON.parse(await readFile(profileFile, "utf8")).roleGeneration).toEqual({
       enabled: true,
       useReadOnlyProjectContext: false,
       model: "provider/existing",
       extraInstructions: "Keep me.",
-      thinking: "high",
+      thinking: "max",
     });
+
+    const reloaded = await fetch(`${baseUrl}/api/profile/role-generation`);
+    expect(await reloaded.json()).toEqual({ ok: true, model: "provider/existing", thinking: "max" });
+
+    const cleared = await patchPreference(baseUrl, { thinking: null });
+    expect(await cleared.json()).toEqual({ ok: true, model: "provider/existing", thinking: null });
+    expect(JSON.parse(await readFile(profileFile, "utf8")).roleGeneration.extraInstructions).toBe("Keep me.");
   });
 
   test("persists and rehydrates max thinking", async () => {
@@ -168,7 +175,9 @@ describe("/api/profile/role-generation", () => {
     for (const body of [{ model: 42 }, { model: "unqualified" }, { model: "bad provider/model" }, { thinking: 42 }, { thinking: "turbo" }, { thinking: "   " }]) {
       const response = await patchPreference(baseUrl, body);
       expect(response.status).toBe(400);
-      expect((await response.json()).ok).toBe(false);
+      const result = await response.json();
+      expect(result.ok).toBe(false);
+      if ('thinking' in body) expect(result.error.message).toContain("max");
       expect(await readFile(profileFile, "utf8")).toBe(before);
     }
   });

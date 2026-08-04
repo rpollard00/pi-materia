@@ -243,7 +243,7 @@ export async function saveRoleGenerationPreference(update: RoleGenerationPrefere
   if (nextModel && !isProviderQualifiedModelId(nextModel)) {
     throw new Error('Invalid role-generation model. Expected a provider-qualified model id such as "provider/model".');
   }
-  if (nextThinking && !isMateriaThinkingLevel(nextThinking)) {
+  if (hasThinking && nextThinking !== null && !isMateriaThinkingLevel(nextThinking)) {
     throw new Error(`Invalid role-generation thinking. Expected one of: ${MATERIA_THINKING_LEVELS.join(', ')}.`);
   }
   const profile = await loadProfileConfig();
