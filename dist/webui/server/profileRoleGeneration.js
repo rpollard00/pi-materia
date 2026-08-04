@@ -34,7 +34,7 @@ function parsePreferencePayload(body) {
     }
     if ('thinking' in body) {
         if (!(typeof body.thinking === 'string' || body.thinking === null))
-            return { ok: false, code: 'invalid_thinking', message: 'Expected field "thinking" to be one of off, minimal, low, medium, high, xhigh, or null.' };
+            return { ok: false, code: 'invalid_thinking', message: `Expected field "thinking" to be one of ${MATERIA_THINKING_LEVELS.join(', ')}, or null.` };
         const trimmedThinking = typeof body.thinking === 'string' ? body.thinking.trim() : null;
         if (typeof body.thinking === 'string' && !isMateriaThinkingLevel(trimmedThinking))
             return { ok: false, code: 'invalid_thinking', message: `Invalid role-generation thinking. Expected one of: ${MATERIA_THINKING_LEVELS.join(', ')}.` };

@@ -90,7 +90,21 @@ The parked workspace heads and the publishable chain are therefore separate topo
 
 ## Monitor and inspect
 
-The TUI/WebUI derive fork, branch-prelude, loop, and barrier visuals from the generator/consumer relationship. Their `ParallelLaneMonitorSummary` is a bounded view derived from durable cast state, not a lifecycle event stream: it may expose child artifact paths, terminal scope identity/cwd/export names, and bounded terminal output alongside ordered branches, attempts, counts, cancellation, and barrier progress. This operator-facing state summary should not label generic fan-in as a VCS merge or conflict. Its bounded output and scope fields do not enter parent or lane lifecycle events.
+The TUI/WebUI derive fork, branch-prelude, loop, and barrier visuals from the generator/consumer relationship. Their `ParallelLaneMonitorSummary` is a bounded view derived from durable cast state, not a lifecycle event stream: it may expose child artifact paths, terminal scope identity/cwd/export names, bounded terminal output, and nominal progress alongside ordered branches, attempts, counts, cancellation, and barrier progress. This operator-facing state summary should not label generic fan-in as a VCS merge or conflict. Its bounded output, scope, and progress fields do not enter parent or lane lifecycle events.
+
+### Read the live progress view
+
+The main TUI shows one width-bounded line per stream in normalized schedule order. Each line contains an ANSI-safe progress bar, the bounded stream name, a floor percentage, and `position/total`, plus the lane status. The nominal total is the number of ordered nodes in the compiled consuming loop multiplied by the stream's assigned item count. For zero-based item cursor `i`, one-based active loop-node ordinal `j`, and loop-node count `L`, the position is `(i * L) + j`, clamped to the nominal bounds.
+
+The branch prelude is setup rather than per-item progress, so queued lanes and lanes still in the prelude display `0/total`. Forward loop routes increase the count. A `not_satisfied` edge to an earlier node can visibly rewind the bar, while same-node retries and recovery turns leave it unchanged. Treat the percentage as nominal graph traversal, not estimated wall-clock completion.
+
+An accepted lane displays `Completed` at `total/total` and remains visible while siblings run. A failed or interrupted lane displays `Failed` or `Interrupted` at its last valid position rather than 100%. Queued and running lanes are labeled accordingly. Lines truncate responsively instead of wrapping beyond the terminal width.
+
+This view is an anchored `belowEditor` widget, not a floating, focus-capturing overlay and not an editor replacement. It redraws in place without stealing focus, so typing a slash command continues to work normally. The widget is removed when the barrier settles, the cast fails or is cancelled, the parent advances, or the session shuts down. Run ownership prevents delayed refreshes from restoring a stale widget.
+
+Node-progress checkpoints are compact and emitted only when the nominal position changes. They contain bounded scalar identity and position fields—not work-item content, messages, tools, sessions, generic payloads, or cast state—and their parser rejects malformed, oversized, negative, and out-of-range records. Legitimate rewinds are accepted only from a newer guarded sequence; duplicates, same-node activity, stale attempts, and stale callbacks are ignored. Replay remains bounded.
+
+These presentation checkpoints do not cause parent state saves and are not written to parent lifecycle events, lane `events.jsonl`, or other lifecycle artifacts. The next ordinary durable boundary may checkpoint the latest position and replay watermark. Therefore high callback volume does not bypass the same persistence, event-amplification, and replay safeguards used for high-volume fan-out.
 
 Lane `events.jsonl` is lifecycle-only. Its allowlist is `parallel_lane_started`, `parallel_lane_resumed`, `usage_checkpoint`, `parallel_lane_terminal`, `parallel_lane_cancelled`, and `parallel_lane_budget_exceeded`. The parent lifecycle stream allowlist is `parallel_dispatch_started`, `parallel_lane_started`, `parallel_lane_resumed`, `parallel_lane_terminal`, `parallel_branches_terminal`, `parallel_branches_failed`, `parallel_cancelled`, and `parallel_budget_exceeded`, plus bounded `parallel_artifact_failure` diagnostics. Expect no generic `parallel_child_event` records and no message, reasoning, tool, session, or terminal-marker payloads.
 

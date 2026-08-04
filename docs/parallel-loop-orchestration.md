@@ -169,7 +169,26 @@ The parent lifecycle stream allowlist is `parallel_dispatch_started`, `parallel_
 
 Lifecycle payloads are compact. `parallel_dispatch_started` contains parent/run/loop provenance plus only `planId`, `baseScopeId`, normalized `queueOrder`, and `maxConcurrency`. Lane records contain stable provenance (`parentCastId`, `runId`, `loopId`, `laneId`, `childCastId`, attempt and stream/item indexes), status, strictly projected scalar usage when applicable, and a bounded error. Barrier records contain run provenance, status, and aggregate lane counts/status summaries. They never contain terminal output, message data, reasoning signatures, tool arguments/results, full execution scopes, export values, accepted branch results, or embedded cast state. This lifecycle-stream contract is not a transcript or fan-in transport. Child token and cost usage is cumulative, monotonic, and counted once in parent totals.
 
-Do not confuse lifecycle streams with `ParallelLaneMonitorSummary`, the bounded TUI/WebUI DTO derived from durable cast state. That state-derived summary currently includes child artifact paths, terminal scope identity/cwd/export names, and a bounded rendering of terminal output to help operators locate and inspect a lane. It is not appended to parent or lane event streams and does not weaken the lifecycle payload allowlist.
+Do not confuse lifecycle streams with `ParallelLaneMonitorSummary`, the bounded TUI/WebUI DTO derived from durable cast state. That state-derived summary currently includes child artifact paths, terminal scope identity/cwd/export names, a bounded rendering of terminal output, and nominal lane progress to help operators locate and inspect a lane. It is not appended to parent or lane event streams and does not weaken the lifecycle payload allowlist.
+
+### Nominal lane progress
+
+Progress measures traversal of the compiled consuming loop, not tokens, elapsed time, or subjective completion. Let `L` be the number of nodes in that loop's stable ordered node list and `W` the number of work items assigned to the stream. The nominal total is:
+
+```text
+total = L * W
+position = (itemCursor * L) + loopNodeOrdinal
+```
+
+`itemCursor` is zero-based and `loopNodeOrdinal` is one-based. Both values are derived from the child's current compiled-loop location, and the result is clamped to `0..total` when projecting defensive runtime state. Queued lanes and children in the branch prelude are `0/total`: prelude nodes run once per stream but are deliberately excluded from both the numerator and denominator.
+
+A route to a later loop node moves the position forward. A `not_satisfied` route to an earlier loop node may move it backward, so position is not required to be monotonic. A retry or recovery turn that remains on the same loop node leaves the position unchanged. This is nominal node traversal rather than a guarantee about remaining time or effort.
+
+Accepted terminal lanes are projected as `total/total` and displayed as `Completed`, including while siblings are still active. Failed and interrupted lanes retain their last valid position and display `Failed` or `Interrupted`; they are not promoted to 100%. Queued and running lanes retain their corresponding status labels.
+
+Child node-progress checkpoints use a dedicated compact protocol record containing only bounded scalar identity/position fields. Emission is deduplicated by nominal position, so same-node retries and repeated callbacks do not produce another checkpoint; a legitimate rewind does. The subprocess parser strictly projects supported fields and rejects malformed, oversized, negative, or out-of-range records. Accepted checkpoints share the runner's bounded replay tail and remain subject to run, lane, attempt, child, generation, sequence, and stale-callback guards.
+
+These checkpoints are transient presentation telemetry. They never carry work-item content, messages, reasoning, tools, session data, generic payloads, or cast state. They are excluded from parent lifecycle events, lane `events.jsonl`, and lifecycle artifacts, and they do not independently save parent cast state. A later existing durable boundary may persist the latest progress and replay watermark. This preserves the bounded replay, lifecycle allowlists, and durable-boundary write protections required under high-volume fan-out.
 
 Detailed evidence belongs in artifacts rather than parent or lane monitoring streams:
 
@@ -186,5 +205,7 @@ Runner replay events and diagnostics are bounded tails, and stdout/stderr captur
 Eventing heartbeat is global to the active parent cast. When eventing and a positive heartbeat interval are configured, one `lifecycle.heartbeat` continues while the parent waits at the parallel barrier and stops when the cast becomes terminal; parallel lanes do not create one heartbeat per child or project token traffic as liveness. See [Runtime Eventing](runtime-eventing.md#73-heartbeat).
 
 A terminal marker establishes the child result, while process close remains the resource-liveness boundary. Before retirement, the runner awaits close as necessary so parsers and capped stdout/stderr writes are flushed. Once terminal artifacts and durable lane state are secured, the coordinator unsubscribes observers and releases process listeners, parsers, captures, replay tails, usage maps, prepared graphs, terminal queues, and parent-context references. Accepted child records are discarded after barrier settlement. Failed/interrupted attempts retain only the minimal identity, scope, path, usage, and watermark data required for supported resume. Generation checks prevent late callbacks from a retired run from mutating a later run that reuses the dispatcher.
+
+The main TUI renders active parallel progress as an anchored `belowEditor` widget rather than a focus-capturing overlay or replacement editor. This keeps slash-command input focused while allowing in-place redraws. The widget is owned by the current parallel run and is cleared after barrier settlement, failure, cancellation, parent advancement, or session shutdown; stale callbacks from a retired run cannot remount it.
 
 See [Graph semantics](graph-semantics.md), [Utility Materia](utility-materia.md), [Workflow safety](workflow-safety.md), and [Resilient Inference and Revival](resilient-inference-and-revival.md).
