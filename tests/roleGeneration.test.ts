@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/handoff/roleGeneration.js";
 
 const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api", reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high" } };
-const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: null, medium: null, high: "high", xhigh: null } };
+const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: null, medium: null, high: "high", xhigh: null, max: "max" } };
 
 function fakePi(thinking = "medium"): ExtensionAPI {
   return { getThinkingLevel: () => thinking } as unknown as ExtensionAPI;
@@ -122,6 +122,18 @@ describe("Materia role prompt generation service", () => {
     expect(settings.warnings).toEqual([]);
     expect(settings.modelResolution).toEqual({ requestedModel: "override-provider/role-model", effectiveModel: "override-provider/role-model", fallback: false, warnings: [] });
     expect(settings.thinkingResolution).toEqual({ requestedThinking: "minimal", effectiveThinking: "minimal", fallback: false, warnings: [] });
+  });
+
+  test("applies max when the generation model supports it independently of xhigh", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("high"), fakeCtx(), {
+      enabled: true,
+      model: "override-provider/role-model",
+      thinking: "max",
+    });
+
+    expect(settings.thinking).toBe("max");
+    expect(settings.warnings).toEqual([]);
+    expect(settings.thinkingResolution).toEqual({ requestedThinking: "max", effectiveThinking: "max", fallback: false, warnings: [] });
   });
 
   test("inherits active thinking only when supported by the effective generation model", async () => {

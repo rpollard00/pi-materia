@@ -64,10 +64,11 @@ function GenerationModelProbe() {
       <output aria-label="persisted-generation-thinking">{generationThinking.persistedThinking ?? ''}</output>
       <output aria-label="stale-generation-thinking-warning">{generationThinking.stalePreferenceWarning}</output>
       <output aria-label="generation-thinking-options">{generationThinking.availableOptions.map((option) => option.value || '<active>').join(',')}</output>
+      <output aria-label="generation-thinking-labels">{generationThinking.availableOptions.map((option) => option.label).join(',')}</output>
       <output aria-label="thinking-save-error">{generationThinking.saveError}</output>
       <button type="button" onClick={() => { void generationModel.changeModel('openai/gpt-alt'); }}>choose alt</button>
       <button type="button" onClick={() => { void generationModel.changeModel(''); }}>choose active</button>
-      <button type="button" onClick={() => { void generationThinking.changeThinking('high'); }}>choose high thinking</button>
+      <button type="button" onClick={() => { void generationThinking.changeThinking('max'); }}>choose max thinking</button>
     </>
   );
 }
@@ -164,12 +165,12 @@ describe('useMateriaEditorController', () => {
     expect(screen.getByLabelText('stale-generation-warning').textContent).toContain('Saved generation model is unavailable');
   });
 
-  it('exposes generation thinking options from the selected generation model', async () => {
+  it('rehydrates max and labels it from a selected generation model even when xhigh is absent', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt', thinking: 'high' }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt', thinking: 'max' }));
       if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', activeThinking: 'medium', models: [
         { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['low'] },
-        { value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: ['low', 'high'] },
+        { value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: ['low', 'max'] },
       ] }));
       return new Response(JSON.stringify({ ok: true }));
     });
@@ -178,15 +179,16 @@ describe('useMateriaEditorController', () => {
     render(<GenerationModelProbe />);
 
     await waitFor(() => expect(screen.getByLabelText('preference-status').textContent).toBe('ready'));
-    await waitFor(() => expect(screen.getByLabelText('generation-thinking-options').textContent).toBe('<active>,low,high'));
-    expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('high');
-    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('high');
+    await waitFor(() => expect(screen.getByLabelText('generation-thinking-options').textContent).toBe('<active>,low,max'));
+    expect(screen.getByLabelText('generation-thinking-labels').textContent).toBe('Active Pi Thinking (Medium),Low,Max');
+    expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('max');
+    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('max');
     expect(screen.getByLabelText('stale-generation-thinking-warning').textContent).toBe('');
   });
 
   it('falls generation thinking back to Active Pi Thinking for stale saved values without clearing them', async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt', thinking: 'xhigh' }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt', thinking: 'max' }));
       if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [
         { value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: ['low', 'high'] },
       ] }));
@@ -199,16 +201,16 @@ describe('useMateriaEditorController', () => {
     await waitFor(() => expect(screen.getByLabelText('preference-status').textContent).toBe('ready'));
     await waitFor(() => expect(screen.getByLabelText('generation-thinking-options').textContent).toBe('<active>,low,high'));
     expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('');
-    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('xhigh');
+    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('max');
     expect(screen.getByLabelText('stale-generation-thinking-warning').textContent).toContain('Saved generation thinking is unsupported');
   });
 
-  it('clears explicit generation thinking when a user-selected generation model does not support it', async () => {
+  it('clears explicit max generation thinking when a user-selected generation model does not support it', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt', thinking: null }));
-      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null, thinking: 'high' }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null, thinking: 'max' }));
       if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [
-        { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['high'] },
+        { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['max'] },
         { value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: ['low'] },
       ] }));
       return new Response(JSON.stringify({ ok: true }));
@@ -216,7 +218,7 @@ describe('useMateriaEditorController', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     render(<GenerationModelProbe />);
-    await waitFor(() => expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('high'));
+    await waitFor(() => expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('max'));
 
     fireEvent.click(screen.getByText('choose alt'));
 
@@ -225,12 +227,12 @@ describe('useMateriaEditorController', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/profile/role-generation', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ model: 'openai/gpt-alt', thinking: null }) }));
   });
 
-  it('persists generation thinking changes independently from model preferences', async () => {
+  it('persists max generation thinking independently from model preferences', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: true, model: null, thinking: 'high' }));
+      if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: true, model: null, thinking: 'max' }));
       if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null, thinking: null }));
       if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [
-        { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['high'] },
+        { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['high', 'max'] },
         { value: 'openai/gpt-alt', label: 'GPT Alt', supportedThinkingLevels: ['low'] },
       ] }));
       return new Response(JSON.stringify({ ok: true }));
@@ -240,11 +242,11 @@ describe('useMateriaEditorController', () => {
     render(<GenerationModelProbe />);
     await waitFor(() => expect(screen.getByLabelText('preference-status').textContent).toBe('ready'));
 
-    fireEvent.click(screen.getByText('choose high thinking'));
+    fireEvent.click(screen.getByText('choose max thinking'));
 
-    await waitFor(() => expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('high'));
-    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('high');
-    expect(fetchMock).toHaveBeenCalledWith('/api/profile/role-generation', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ thinking: 'high' }) }));
+    await waitFor(() => expect(screen.getByLabelText('selected-generation-thinking').textContent).toBe('max'));
+    expect(screen.getByLabelText('persisted-generation-thinking').textContent).toBe('max');
+    expect(fetchMock).toHaveBeenCalledWith('/api/profile/role-generation', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ thinking: 'max' }) }));
   });
 
   it('persists generation-model changes immediately and keeps the last saved value on failure', async () => {

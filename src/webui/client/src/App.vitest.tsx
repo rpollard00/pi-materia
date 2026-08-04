@@ -3116,6 +3116,25 @@ describe('Materia loadout grid editor', () => {
     expect(within(select).getByRole('option', { name: 'GPT Alt' })).toHaveProperty('value', 'openai/gpt-alt');
   });
 
+  it('offers and rehydrates Max prompt-generation thinking without requiring X-High', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === '/api/models') return new Response(JSON.stringify({ ok: true, activeModelValue: 'openai/gpt-active', models: [
+        { value: 'openai/gpt-active', label: 'GPT Active', supportedThinkingLevels: ['high', 'max'] },
+      ] }));
+      if (url === '/api/profile/role-generation') return new Response(JSON.stringify({ ok: true, model: null, thinking: 'max' }));
+      return new Response(JSON.stringify({ ok: true, source: 'test', config: testConfig }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await openTab('Materia Editor');
+    const select = await screen.findByTestId('generation-thinking-select') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('max'));
+    expect(within(select).getByRole('option', { name: 'Max' })).toHaveProperty('value', 'max');
+    expect(within(select).queryByRole('option', { name: 'X-High' })).toBeNull();
+  });
+
   it('persists selected prompt-generation models through the profile preference API', async () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/profile/role-generation' && init?.method === 'PATCH') return new Response(JSON.stringify({ ok: true, model: 'openai/gpt-alt' }));

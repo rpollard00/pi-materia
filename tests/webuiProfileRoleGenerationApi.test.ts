@@ -109,6 +109,19 @@ describe("/api/profile/role-generation", () => {
     });
   });
 
+  test("persists and rehydrates max thinking", async () => {
+    const { baseUrl } = await startProfileServer();
+
+    const response = await patchPreference(baseUrl, { thinking: "max" });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, model: null, thinking: "max" });
+    expect(JSON.parse(await readFile(getUserProfileConfigPath(), "utf8")).roleGeneration.thinking).toBe("max");
+
+    const rehydrated = await fetch(`${baseUrl}/api/profile/role-generation`);
+    expect(await rehydrated.json()).toEqual({ ok: true, model: null, thinking: "max" });
+  });
+
   test("clears null and blank model values while preserving role-generation siblings", async () => {
     const profileDir = await mkdtemp(path.join(tmpdir(), "pi-materia-profile-api-"));
     await mkdir(profileDir, { recursive: true });
