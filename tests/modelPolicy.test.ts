@@ -19,6 +19,7 @@ import {
   unavailablePreferredModels,
   type ModelPolicyDocument,
 } from "../src/domain/modelPolicy.js";
+import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel } from "../src/domain/thinking.js";
 // The application control-plane surface must re-export the same contracts.
 import {
   evaluateModelPolicy as evaluateModelPolicyViaApp,
@@ -32,6 +33,12 @@ function doc(overrides: Partial<ModelPolicyDocument> & Pick<ModelPolicyDocument,
 }
 
 describe("model policy — document guards", () => {
+  test("canonical thinking levels rank max after xhigh and reject unknown values", () => {
+    expect(MATERIA_THINKING_LEVELS.slice(-2)).toEqual(["xhigh", "max"]);
+    expect(isMateriaThinkingLevel("max")).toBe(true);
+    expect(isMateriaThinkingLevel("turbo")).toBe(false);
+  });
+
   test("isModelPolicyModelRef validates value", () => {
     expect(isModelPolicyModelRef({ value: "zai/glm-4.6" })).toBe(true);
     expect(isModelPolicyModelRef({ value: "zai/glm-4.6", label: "GLM" })).toBe(true);
@@ -51,6 +58,7 @@ describe("model policy — document guards", () => {
   test("isModelPolicyThinkingConstraint", () => {
     expect(isModelPolicyThinkingConstraint({ allow: ["low", "medium"] })).toBe(true);
     expect(isModelPolicyThinkingConstraint({ max: "high" })).toBe(true);
+    expect(isModelPolicyThinkingConstraint({ allow: ["xhigh", "max"], max: "max" })).toBe(true);
     expect(isModelPolicyThinkingConstraint({})).toBe(true);
     expect(isModelPolicyThinkingConstraint({ allow: ["low", "nuclear"] })).toBe(false);
     expect(isModelPolicyThinkingConstraint({ max: "turbo" })).toBe(false);
@@ -108,7 +116,10 @@ describe("model policy — low-level helpers", () => {
     const ceiling = { max: "medium" as const };
     expect(modelPolicyAllowsThinking(ceiling, "medium")).toBe(true);
     expect(modelPolicyAllowsThinking(ceiling, "high")).toBe(false);
+    expect(modelPolicyAllowsThinking(ceiling, "max")).toBe(false);
     expect(modelPolicyAllowsThinking(ceiling, "off")).toBe(true);
+    expect(modelPolicyAllowsThinking({ max: "xhigh" }, "max")).toBe(false);
+    expect(modelPolicyAllowsThinking({ max: "max" }, "max")).toBe(true);
   });
 
   test("suggestThinkingLevel clamps within the constraint", () => {
@@ -118,6 +129,7 @@ describe("model policy — low-level helpers", () => {
     expect(suggestThinkingLevel({ allow: ["low", "medium", "high"] })).toBe("high");
     // allow + max → highest allowed within ceiling
     expect(suggestThinkingLevel({ allow: ["low", "medium", "high"], max: "medium" })).toBe("medium");
+    expect(suggestThinkingLevel({ allow: ["high", "xhigh", "max"], max: "xhigh" })).toBe("xhigh");
     // max excludes every allowed level → contradictory; no level satisfies
     expect(suggestThinkingLevel({ allow: ["high", "xhigh"], max: "low" })).toBeUndefined();
     expect(suggestThinkingLevel({ allow: [] })).toBeUndefined();
@@ -214,9 +226,9 @@ describe("model policy — evaluateModelPolicy selection", () => {
     expect(present.warnings).toEqual([]);
   });
 
-  test("thinking violation clamps instead of hard-denying, with a suggestion", () => {
+  test("thinking violation clamps max instead of hard-denying, with a suggestion", () => {
     const policy = doc({ thinking: { max: "medium" } });
-    const result = evaluateModelPolicy({ policy, candidate: { modelValue: "zai/glm-4.6", thinkingLevel: "xhigh" }, available });
+    const result = evaluateModelPolicy({ policy, candidate: { modelValue: "zai/glm-4.6", thinkingLevel: "max" }, available });
     expect(result.status).toBe("allowed");
     expect(result.suggestedThinkingLevel).toBe("medium");
     expect(result.warnings.some((w) => w.includes("suggested clamp"))).toBe(true);

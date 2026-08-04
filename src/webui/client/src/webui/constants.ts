@@ -12,6 +12,7 @@ export const thinkingLevelLabels: Record<string, string> = {
   medium: 'Medium',
   high: 'High',
   xhigh: 'X-High',
+  max: 'Max',
 };
 
 export const socketLayoutOffsetX = 32;

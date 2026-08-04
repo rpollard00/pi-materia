@@ -15,7 +15,7 @@ import { loadoutSockets } from "../loadout/loadoutAccessors.js";
 import { resolveDefaultLoadout, resolveLoadoutSelection, resolveQuestDefaultLoadout } from "../loadout/defaultLoadoutResolver.js";
 import { normalizeMateriaParallelCapabilities, normalizePersistedConfigForApplication, normalizePersistedLoadoutForApplication, serializeCurrentPersistedConfig, serializeCurrentProfileConfig } from "../schema/persistence.js";
 import { validateToolScopeSpecShape, validToolScopeShapeDescription } from "../domain/toolScope.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
+import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 import type { EventingConfig, EventSinkConfig, LoadedConfig, MateriaConfigLayer, MateriaConfigLayerScope, MateriaProfileConfig, MateriaRoleGenerationProfileConfig, MateriaConfig, MateriaConfigPatch, MateriaFinalizationConfig, MateriaSaveTarget, PiMateriaConfig, MateriaPipelineConfig, LoadoutUserLockState, MateriaUserLockState } from "../types.js";
 import {
   type CentralCatalogConfigSource,
@@ -244,7 +244,7 @@ export async function saveRoleGenerationPreference(update: RoleGenerationPrefere
     throw new Error('Invalid role-generation model. Expected a provider-qualified model id such as "provider/model".');
   }
   if (nextThinking && !isMateriaThinkingLevel(nextThinking)) {
-    throw new Error('Invalid role-generation thinking. Expected one of: off, minimal, low, medium, high, xhigh.');
+    throw new Error(`Invalid role-generation thinking. Expected one of: ${MATERIA_THINKING_LEVELS.join(', ')}.`);
   }
   const profile = await loadProfileConfig();
   const roleGeneration = { ...(profile.roleGeneration ?? defaultRoleGenerationProfileConfig()) };
@@ -501,9 +501,9 @@ function normalizeRoleGenerationProfileConfig(value: unknown, file: string): Mat
     else if (typeof value.thinking === "string") {
       const thinking = value.thinking.trim();
       if (isMateriaThinkingLevel(thinking)) config.thinking = thinking;
-      else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected one of off, minimal, low, medium, high, xhigh, or null.");
+      else warnInvalidProfileConfig(file, `Ignoring invalid roleGeneration.thinking. Expected one of ${MATERIA_THINKING_LEVELS.join(', ')}, or null.`);
     }
-    else warnInvalidProfileConfig(file, "Ignoring invalid roleGeneration.thinking. Expected one of off, minimal, low, medium, high, xhigh, or null.");
+    else warnInvalidProfileConfig(file, `Ignoring invalid roleGeneration.thinking. Expected one of ${MATERIA_THINKING_LEVELS.join(', ')}, or null.`);
   }
   if (value.extraInstructions !== undefined) {
     if (typeof value.extraInstructions === "string") config.extraInstructions = value.extraInstructions.trim() || undefined;

@@ -6,7 +6,7 @@
  * layer where it can be imported by other domain modules (e.g. model policy)
  * without crossing layer boundaries.
  */
-export const MATERIA_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export const MATERIA_THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 export type MateriaThinkingLevel = (typeof MATERIA_THINKING_LEVELS)[number];
 

@@ -64,6 +64,7 @@ describe("GET /api/models", () => {
         medium: null,
         high: "high",
         xhigh: "xhigh",
+        max: "max",
       },
     };
     const nonReasoningModel = {
@@ -112,7 +113,7 @@ describe("GET /api/models", () => {
       input: ["text", "image"],
       contextWindow: 400_000,
       maxTokens: 128_000,
-      supportedThinkingLevels: ["minimal", "low", "high", "xhigh"],
+      supportedThinkingLevels: ["minimal", "low", "high", "xhigh", "max"],
     });
     expect(body.models[1]).toMatchObject({
       value: "anthropic/claude-haiku-test",

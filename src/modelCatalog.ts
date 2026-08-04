@@ -1,5 +1,6 @@
+import { MATERIA_THINKING_LEVELS, type MateriaThinkingLevel } from './domain/thinking.js';
+
 type MaybePromise<T> = T | Promise<T>;
-type MateriaThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 type MateriaModelRegistryLike = {
   getAvailable?: () => MaybePromise<unknown[]>;
@@ -34,8 +35,9 @@ export interface MateriaModelCatalogResponse {
   warnings?: string[];
 }
 
-const THINKING_LEVEL_ORDER: MateriaThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+const THINKING_LEVEL_ORDER: readonly MateriaThinkingLevel[] = MATERIA_THINKING_LEVELS;
 const STANDARD_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high'];
+const XHIGH_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = [...STANDARD_REASONING_THINKING_LEVELS, 'xhigh'];
 const NON_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = ['off'];
 
 export async function buildMateriaModelCatalog(source?: MateriaModelCatalogSource): Promise<MateriaModelCatalogResponse> {
@@ -155,12 +157,12 @@ function supportedThinkingLevelsFor(model: Record<string, unknown>, reasoning: b
     return THINKING_LEVEL_ORDER.filter((level) => {
       const mapped = map[level];
       if (mapped === null) return false;
-      if (level === 'xhigh') return mapped !== undefined;
+      if (level === 'xhigh' || level === 'max') return mapped !== undefined;
       return true;
     });
   }
 
-  return locallySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+  return locallySupportsXhigh(model) ? [...XHIGH_REASONING_THINKING_LEVELS] : [...STANDARD_REASONING_THINKING_LEVELS];
 }
 
 function locallySupportsXhigh(model: Record<string, unknown>): boolean {
