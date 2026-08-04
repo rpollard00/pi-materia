@@ -3,7 +3,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { buildRoleGenerationPrompt, generateMateriaRolePrompt, resolveRoleGenerationSettings } from "../src/handoff/roleGeneration.js";
 
 const activeModel = { provider: "active-provider", id: "active-model", name: "Active", api: "active-api", reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high" } };
-const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: null, medium: null, high: "high", xhigh: null, max: "max" } };
+const overrideModel = { provider: "override-provider", id: "role-model", name: "Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: null, medium: null, high: "high", xhigh: null } };
+const maxOverrideModel = { provider: "override-provider", id: "max-role-model", name: "Max Role", api: "override-api", reasoning: true, thinkingLevelMap: { off: null, minimal: "minimal", low: "low", medium: "medium", high: "high", xhigh: null, max: "max" } };
 
 function fakePi(thinking = "medium"): ExtensionAPI {
   return { getThinkingLevel: () => thinking } as unknown as ExtensionAPI;
@@ -15,8 +16,8 @@ function fakeCtx(branch: unknown[] = []): ExtensionContext {
     model: activeModel,
     modelRegistry: {
       find: (provider: string, id: string) => provider === overrideModel.provider && id === overrideModel.id ? overrideModel : undefined,
-      getAll: () => [activeModel, overrideModel],
-      getAvailable: () => [activeModel, overrideModel],
+      getAll: () => [activeModel, overrideModel, maxOverrideModel],
+      getAvailable: () => [activeModel, overrideModel, maxOverrideModel],
     },
     sessionManager: {
       getBranch: () => branch,
@@ -124,15 +125,17 @@ describe("Materia role prompt generation service", () => {
     expect(settings.thinkingResolution).toEqual({ requestedThinking: "minimal", effectiveThinking: "minimal", fallback: false, warnings: [] });
   });
 
-  test("applies max when the generation model supports it independently of xhigh", async () => {
-    const settings = await resolveRoleGenerationSettings(fakePi("high"), fakeCtx(), {
+  test("applies max thinking when the effective model advertises max without xhigh", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("medium"), fakeCtx(), {
       enabled: true,
-      model: "override-provider/role-model",
+      model: "override-provider/max-role-model",
       thinking: "max",
     });
 
+    expect(settings.model).toBe(maxOverrideModel);
     expect(settings.thinking).toBe("max");
     expect(settings.warnings).toEqual([]);
+    expect(settings.modelResolution).toEqual({ requestedModel: "override-provider/max-role-model", effectiveModel: "override-provider/max-role-model", fallback: false, warnings: [] });
     expect(settings.thinkingResolution).toEqual({ requestedThinking: "max", effectiveThinking: "max", fallback: false, warnings: [] });
   });
 
@@ -164,6 +167,25 @@ describe("Materia role prompt generation service", () => {
       effectiveThinking: "high",
       fallback: true,
       warnings: ['Saved generation thinking "low" is unsupported for override-provider/role-model; using Active Pi Thinking.'],
+    });
+  });
+
+  test("falls back to active thinking when max is unsupported by the effective model", async () => {
+    const settings = await resolveRoleGenerationSettings(fakePi("high"), fakeCtx(), {
+      enabled: true,
+      model: "override-provider/role-model",
+      thinking: "max",
+    });
+
+    const warning = 'Saved generation thinking "max" is unsupported for override-provider/role-model; using Active Pi Thinking.';
+    expect(settings.model).toBe(overrideModel);
+    expect(settings.thinking).toBe("high");
+    expect(settings.warnings).toEqual([warning]);
+    expect(settings.thinkingResolution).toEqual({
+      requestedThinking: "max",
+      effectiveThinking: "high",
+      fallback: true,
+      warnings: [warning],
     });
   });
 

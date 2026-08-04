@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createAgentSession, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import { loadProfileConfig } from "../config/config.js";
 import { CANONICAL_WORK_ITEMS_GENERATOR_CONFIG } from "../graph/generator.js";
 import { getActiveModelInfo } from "../config/modelSettings.js";
@@ -150,7 +150,7 @@ export async function resolveRoleGenerationModelChoice(
   const activeLabel = activeModel ? `${activeModel.provider}/${activeModel.id}` : null;
   const fallback = (warnings: string[]): ResolvedRoleGenerationModelChoice => ({
     model: activeModel,
-    supportedThinkingLevels: catalogModelForValue(catalog, activeLabel)?.supportedThinkingLevels.filter(isMateriaThinkingLevel),
+    supportedThinkingLevels: supportedThinkingLevelsForModel(activeModel, catalogModelForValue(catalog, activeLabel)?.supportedThinkingLevels),
     resolution: { requestedModel, effectiveModel: activeLabel, fallback: requestedModel !== null, warnings },
   });
 
@@ -176,9 +176,20 @@ export async function resolveRoleGenerationModelChoice(
   const model = matches[0];
   return {
     model,
-    supportedThinkingLevels: catalogModel.supportedThinkingLevels.filter(isMateriaThinkingLevel),
+    supportedThinkingLevels: supportedThinkingLevelsForModel(model, catalogModel.supportedThinkingLevels),
     resolution: { requestedModel, effectiveModel: catalogModel.value, fallback: false, warnings: [] },
   };
+}
+
+function supportedThinkingLevelsForModel(
+  model: Model<Api> | undefined,
+  catalogLevels: MateriaThinkingLevel[] | undefined,
+): MateriaThinkingLevel[] | undefined {
+  if (!model) return catalogLevels;
+  return [...new Set([
+    ...(catalogLevels ?? []),
+    ...getSupportedThinkingLevels(model).filter(isMateriaThinkingLevel),
+  ])];
 }
 
 async function defaultMateriaRolePromptGenerator(input: MateriaRolePromptGeneratorInput): Promise<string> {
