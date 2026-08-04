@@ -307,8 +307,13 @@ describe("application prompt assembly", () => {
     expect(reusablePrompt).not.toContain("stream");
     expect(reusablePrompt).not.toContain("lane");
     expect(prompt).toContain("Intrinsic parallel planning is enabled for this generator");
-    expect(prompt).toContain("small number of balanced, ordered streams");
-    expect(prompt).toContain("Keep dependent or order-sensitive items in the same stream");
+    expect(prompt).toContain("Every stream starts concurrently from the same pinned baseline");
+    expect(prompt).toContain("stream order controls deterministic fan-in and must not be used to express execution dependencies");
+    expect(prompt).toContain("Prioritize independence over balancing stream sizes");
+    expect(prompt).toContain("Keep shared contracts, dependent or order-sensitive work");
+    expect(prompt).toContain("likely to overlap in the same files or modules in one stream");
+    expect(prompt).toContain("Avoid broad cross-stream ownership");
+    expect(prompt).toContain("use a single stream when the work cannot be separated safely");
     expect(prompt).toContain("Emit the required top-level parallelSchedule sidecar");
     expect(prompt).toContain('"parallelSchedule" at $.parallelSchedule: object');
   });
@@ -323,6 +328,8 @@ describe("application prompt assembly", () => {
     expect(prompt).not.toContain("Intrinsic parallel planning");
     expect(prompt).not.toContain("parallelSchedule");
     expect(prompt).not.toContain("ordered streams");
+    expect(prompt).not.toContain("same pinned baseline");
+    expect(prompt).not.toContain("Prioritize independence over balancing stream sizes");
   });
 
   test("tool-backed parallel generators receive schedule tool guidance instead of textual sidecar instructions", () => {
@@ -363,9 +370,15 @@ describe("application prompt assembly", () => {
 
     expect(refinement).not.toContain("parallelSchedule");
     expect(refinement).not.toContain("Intrinsic parallel planning");
+    expect(refinement).not.toContain("same pinned baseline");
+    expect(refinement).not.toContain("Prioritize independence over balancing stream sizes");
     expect(finalization).toContain("parallelSchedule");
     expect(finalization).toContain("Intrinsic parallel planning");
+    expect(finalization).toContain("Every stream starts concurrently from the same pinned baseline");
+    expect(finalization).toContain("stream order controls deterministic fan-in");
+    expect(finalization).toContain("use a single stream when the work cannot be separated safely");
     expect(syntheticFinalization).toContain("Intrinsic parallel planning");
+    expect(syntheticFinalization).toContain("Every stream starts concurrently from the same pinned baseline");
   });
 
   test("assembles linear integration review guidance without obsolete workspace merge instructions", () => {
