@@ -185,6 +185,10 @@ describe("parallel loop child loadout compiler", () => {
     expect(prelude.materia).toMatchObject({ type: "utility", utility: "spawn-scope" });
     expect((prelude.materia as { parallel?: boolean }).parallel).toBeUndefined();
     expect(child.loops?.work?.sockets).toEqual([result.value.socketIdMap["Socket-2"], result.value.socketIdMap["Socket-3"]]);
+    expect(result.value.nominalProgress).toEqual({
+      orderedLoopSocketIds: [result.value.socketIdMap["Socket-2"], result.value.socketIdMap["Socket-3"]],
+      workItemCount: 1,
+    });
     expect(result.value.initialData).toEqual({ workItems: [{ title: "one", context: "1" }], workItemIndexes: [1] });
     expect(child.sockets[result.value.socketIdMap["Socket-1"] ?? "missing"]).toBeUndefined();
   });

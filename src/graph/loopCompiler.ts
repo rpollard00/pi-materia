@@ -1,4 +1,5 @@
 import { parseHandoffWorkItem, type HandoffWorkItem } from "../domain/handoff.js";
+import type { NominalParallelLaneProgressDefinition } from "../domain/parallelProgress.js";
 import { ok, type DomainIssue, type DomainResult } from "../domain/result.js";
 import { TERMINAL_ADVANCE_TARGET } from "../domain/socket.js";
 import { loadoutSockets } from "../loadout/loadoutAccessors.js";
@@ -59,6 +60,8 @@ export interface CompiledLoopChildLoadout<TLoadout extends LoopCompilerPipeline 
   socketIdRemapping: readonly LoopSocketIdRemapping[];
   /** The source loop remains identifiable while the child has no parallel metadata. */
   loopId: string;
+  /** Ordered nominal work definition; branch-prelude sockets are excluded. */
+  nominalProgress: NominalParallelLaneProgressDefinition;
   /** Stable, ephemeral identity for this compiled child. */
   childLoadoutId: string;
   /** The selected member that receives the child entry. */
@@ -160,6 +163,10 @@ export function compileLoopRegionToChildLoadout(
     workItems: parsedStream.map(cloneWorkItem),
     workItemIndexes: [...resolvedStream.workItemIndexes],
   };
+  const nominalProgress: NominalParallelLaneProgressDefinition = {
+    orderedLoopSocketIds: [...(childLoop.sockets ?? [])],
+    workItemCount: initialData.workItems.length,
+  };
   const childLoadoutId = childLoadoutIdentity(source, input.loopId, input.laneId ?? resolvedStream.laneId);
 
   if (isResolvedPipeline(source)) {
@@ -198,6 +205,7 @@ export function compileLoopRegionToChildLoadout(
       socketIdMap,
       socketIdRemapping,
       loopId: input.loopId,
+      nominalProgress,
       childLoadoutId,
       sourceEntrySocketId,
       childEntrySocketId,
@@ -212,6 +220,7 @@ export function compileLoopRegionToChildLoadout(
     socketIdMap,
     socketIdRemapping,
     loopId: input.loopId,
+    nominalProgress,
     childLoadoutId,
     sourceEntrySocketId,
     childEntrySocketId,

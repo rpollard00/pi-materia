@@ -2,6 +2,7 @@ export * from "./result.js";
 export * from "./parallelLoop.js";
 export * from "./parallelSafety.js";
 export * from "./parallelRunTypes.js";
+export * from "./parallelProgress.js";
 export * from "./parallelRun.js";
 export * from "./parallelFanIn.js";
 export * from "./socket.js";
