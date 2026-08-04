@@ -13,6 +13,7 @@ import { loadoutPickerCandidates } from "./loadout/loadoutPickerCandidates.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
+import { clearParallelProgressWidget, syncParallelProgressWidgetFromCast } from "./presentation/parallelProgressWidget.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { runChildCastLaunch } from "./runtime/childCastLaunch.js";
 import { emitChildUsageCheckpoint } from "./runtime/childUsageCheckpoints.js";
@@ -177,6 +178,7 @@ export default function piMateria(pi: ExtensionAPI) {
     }
     const state = adapters.states.loadActive(ctx);
     if (!state?.active) return;
+    syncParallelProgressWidgetFromCast(ctx, state);
     ctx.ui.setStatus("materia", adapters.statusPresenter.statusLabel(state));
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
@@ -194,6 +196,7 @@ export default function piMateria(pi: ExtensionAPI) {
         // records its best-effort cancellation state before this point.
       }
     }
+    clearParallelProgressWidget(ctx);
     clearWidgetTicker(ctx);
     closeMateriaWebUiForSession(ctx);
   });

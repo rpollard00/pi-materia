@@ -13,6 +13,7 @@ import { clearCastState, listLatestCastStates, listResumableCastStates, listRevi
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
 import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
+import { mountParallelProgressWidget, refreshParallelProgressWidget } from "../presentation/parallelProgressWidget.js";
 import { recordUsageModelSelection } from "../telemetry/usage.js";
 import type { MateriaCastState } from "../types.js";
 import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";
@@ -229,6 +230,8 @@ parallelLoopDispatcher = createParallelLoopDispatcher({
     assertBudget: async (state, ctx) => assertBudget(await loadConfigFromState(state), state.runState, ctx),
   },
   onBudgetExceeded: async (pi, ctx, state, error, entryId) => failCast(pi, ctx, state, error, entryId),
+  onProgressStart: mountParallelProgressWidget,
+  onProgressChange: refreshParallelProgressWidget,
 });
 
 const { completeSocket, startSocket } = createSocketExecution({

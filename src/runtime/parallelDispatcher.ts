@@ -105,6 +105,8 @@ export interface ParallelLoopDispatcherDependencies {
   runtimeEvents?: { emit(state: MateriaCastState, type: string, payload: Record<string, unknown>): Promise<void> };
   budget?: { assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void> };
   onBudgetExceeded?(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId: string): Promise<void>;
+  /** Mount presentation for a newly owned coordinator run. */
+  onProgressStart?(ctx: ExtensionContext, run: MateriaParallelRunState): void;
   /** Best-effort redraw request after an observable lane progress/status change. */
   onProgressChange?(run: MateriaParallelRunState): void;
   now?: () => number;
@@ -222,6 +224,7 @@ export class ParallelLoopDispatcher {
       this.#terminalPromise = undefined;
       replaceParallelState(input.state, attachParallelRunToCastState(input.state, run));
       this.#deps.state.saveCastState(input.pi, input.state);
+      try { this.#deps.onProgressStart?.(input.ctx, run); } catch { /* presentation is best effort */ }
       await this.#appendEvent(input.state, "parallel_dispatch_started", {
         parentCastId: input.state.castId,
         loopId: input.loopId,
@@ -350,6 +353,7 @@ export class ParallelLoopDispatcher {
     this.#terminalPromise = undefined;
     replaceParallelState(input.state, { ...input.state, active: true, awaitingResponse: false, socketState: "running_parallel", failedReason: undefined, parallelRuns: { ...(input.state.parallelRuns ?? {}), [input.loopId]: next } });
     this.#deps.state.saveCastState(input.pi, input.state);
+    try { this.#deps.onProgressStart?.(input.ctx, next); } catch { /* presentation is best effort */ }
     await input.onPrepared?.();
     await this.#pump();
     await this.#maybeAllTerminal(this.#input, input.state);
@@ -825,6 +829,7 @@ export class ParallelLoopDispatcher {
     if (!changed.applied) return;
     replaceParallelState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: changed.state } });
     this.#run = changed.state; this.#deps.state.saveCastState(input.pi, state);
+    this.#requestProgressRefresh();
   }
 
   #applyLaneTransition(input: ParallelLoopDispatchInput, state: MateriaCastState, transition: Omit<Parameters<typeof applyParallelTransitionToCastState>[1], "parentCastId" | "castId" | "loopId" | "runId">, persist = true): boolean {
