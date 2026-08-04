@@ -353,6 +353,13 @@ describe("application prompt assembly", () => {
 
     for (const text of [prompt, synthetic]) {
       expect(text).toContain("materia_handoff_set_parallel_schedule");
+      expect(text).toContain("Every stream starts concurrently from the same pinned baseline");
+      expect(text).toContain("stream order controls deterministic fan-in and must not be used to express execution dependencies");
+      expect(text).toContain("Prioritize independence over balancing stream sizes");
+      expect(text).toContain("Keep shared contracts, dependent or order-sensitive work");
+      expect(text).toContain("likely to overlap in the same files or modules in one stream");
+      expect(text).toContain("Avoid broad cross-stream ownership");
+      expect(text).toContain("use a single stream when the work cannot be separated safely");
       expect(text).toContain("Cover every final work-item index exactly once");
       expect(text).not.toContain("Emit the required top-level parallelSchedule sidecar");
     }
@@ -367,6 +374,19 @@ describe("application prompt assembly", () => {
     const refinement = buildSocketPrompt(state(socket), socket);
     const finalization = buildMultiTurnFinalizationPrompt(state(socket, { multiTurnFinalizing: true }), socket);
     const syntheticFinalization = buildSyntheticCastContext(state(socket, { multiTurnFinalizing: true }));
+    const toolFinalizationState = state(socket, {
+      multiTurnFinalizing: true,
+      agentFinalization: {
+        strategy: "tool_backed",
+        configuredStrategy: "tool_backed",
+        reason: "qualified_tool_model",
+        phase: "active",
+        socketId: socket.id,
+        socketVisit: 1,
+        finalizationAttempt: 1,
+      },
+    });
+    const toolFinalization = buildMultiTurnFinalizationPrompt(toolFinalizationState, socket);
 
     expect(refinement).not.toContain("parallelSchedule");
     expect(refinement).not.toContain("Intrinsic parallel planning");
@@ -379,6 +399,10 @@ describe("application prompt assembly", () => {
     expect(finalization).toContain("use a single stream when the work cannot be separated safely");
     expect(syntheticFinalization).toContain("Intrinsic parallel planning");
     expect(syntheticFinalization).toContain("Every stream starts concurrently from the same pinned baseline");
+    expect(toolFinalization).toContain("materia_handoff_set_parallel_schedule");
+    expect(toolFinalization).toContain("Every stream starts concurrently from the same pinned baseline");
+    expect(toolFinalization).toContain("use a single stream when the work cannot be separated safely");
+    expect(toolFinalization).not.toContain("Emit the required top-level parallelSchedule sidecar");
   });
 
   test("assembles linear integration review guidance without obsolete workspace merge instructions", () => {

@@ -6,6 +6,7 @@ import {
   HANDOFF_WORK_ITEMS_FIELD,
   PARALLEL_SCHEDULE_FIELD,
 } from "../handoff/handoffContract.js";
+import { formatParallelPlanningGuidance } from "../handoff/parallelPlanningGuidance.js";
 import { deriveSocketOutputRequirements } from "../handoff/socketOutputRequirements.js";
 import { formatConciseValidationIssues } from "../handoff/validationFeedback.js";
 import { isToolBackedFinalizationActive } from "../runtime/finalizationStrategy.js";
@@ -449,18 +450,10 @@ export function syntheticHandoffContractContext(state: MateriaCastState): string
 
 function parallelPlanningGuidance(parallel: boolean, toolBacked: boolean): string | undefined {
   if (!parallel) return undefined;
-  if (toolBacked) {
-    return [
-      "Intrinsic parallel planning is enabled for this generator. Partition the final workItems into a small number of balanced, ordered streams that can execute concurrently. Keep dependent or order-sensitive items in the same stream and preserve their required order; use unique, stable, descriptive stream names.",
-      `After submitting every work item, call ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once with version 1 and ordered streams of workItemIndexes. Cover every final work-item index exactly once; do not submit stream metadata as work items or textual JSON.`,
-    ].join("\n");
-  }
-  return [
-    "Intrinsic parallel planning is enabled for this generator. Every stream starts concurrently from the same pinned baseline; stream order controls deterministic fan-in and must not be used to express execution dependencies.",
-    "Prioritize independence over balancing stream sizes. Keep shared contracts, dependent or order-sensitive work, and work likely to overlap in the same files or modules in one stream, preserving required intra-stream order. Avoid broad cross-stream ownership; use a single stream when the work cannot be separated safely.",
-    "Use unique, stable, descriptive stream names.",
-    `Emit the required top-level ${PARALLEL_SCHEDULE_FIELD} sidecar with version 1 and ordered streams of workItemIndexes. Cover every final work-item index exactly once; do not copy stream metadata into workItems.`,
-  ].join("\n");
+  const submissionInstruction = toolBacked
+    ? `After submitting every work item, call ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once with version 1 and ordered streams of workItemIndexes; do not author textual JSON.`
+    : `Emit the required top-level ${PARALLEL_SCHEDULE_FIELD} sidecar with version 1 and ordered streams of workItemIndexes.`;
+  return formatParallelPlanningGuidance(submissionInstruction);
 }
 
 /**

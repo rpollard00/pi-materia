@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { EVENT_SEVERITY_LEVELS } from "../domain/eventing.js";
 import { HandoffJsonValidationError, type HandoffValidationIssue } from "../handoff/handoffValidation.js";
+import { formatParallelPlanningGuidance } from "../handoff/parallelPlanningGuidance.js";
 import { formatConciseValidationIssues } from "../handoff/validationFeedback.js";
 import {
   AgentHandoffBuilder,
@@ -169,7 +170,7 @@ export function createAgentHandoffTools(options: CreateAgentHandoffToolsOptions)
     const setParallelSchedule = defineTool({
       name: AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule,
       label: "Set Parallel Planner Schedule",
-      description: "Set the version-1 ordered stream sidecar for the canonical workItems array. Use a small number of balanced streams, keep dependent or order-sensitive items together in required order, and assign every item index exactly once.",
+      description: formatParallelPlanningGuidance("Set the version-1 ordered stream sidecar for the canonical workItems array."),
       parameters: SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS,
       prepareArguments: handoffArgumentPreparer(AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule, SET_AGENT_HANDOFF_PARALLEL_SCHEDULE_PARAMETERS),
       executionMode: "sequential",
@@ -318,7 +319,7 @@ function capabilityGuidelines(capabilities: AgentHandoffCapabilities): string[] 
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.beginWorkItems} only when an explicitly empty workItems result is required.`);
   }
   if (capabilities.parallelSchedule) {
-    guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once after submitting workItems. Provide a small number of balanced ordered streams, keep dependencies in stream order, and cover every work-item index exactly once.`);
+    guidelines.push(formatParallelPlanningGuidance(`Use ${AGENT_HANDOFF_TOOL_NAMES.setParallelSchedule} exactly once after submitting workItems with version 1 and ordered streams of workItemIndexes.`));
   }
   if (capabilities.satisfied) {
     guidelines.push(`Use ${AGENT_HANDOFF_TOOL_NAMES.setSatisfied} to supply this socket's required graph-control result.`);

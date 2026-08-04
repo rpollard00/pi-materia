@@ -25,6 +25,7 @@ const scope = {
 function builderOptions(input: {
   socket?: Parameters<typeof deriveSocketOutputRequirements>[0]["socket"];
   workItemsProducer?: boolean;
+  parallel?: boolean;
   allowEventSideChannel?: boolean;
 } = {}): AgentHandoffBuilderOptions {
   const socket = input.socket ?? { parse: "json" as const };
@@ -34,6 +35,7 @@ function builderOptions(input: {
       socket,
       socketId: scope.socketId,
       workItemsProducer: input.workItemsProducer,
+      parallel: input.parallel,
     }),
     workItemsProducer: input.workItemsProducer,
     allowEventSideChannel: input.allowEventSideChannel,
@@ -105,6 +107,30 @@ describe("ergonomic agent handoff tools", () => {
     ]);
     expect(graphControl.tools.emitEvent).toBeUndefined();
     expect(graphControl.definitions.every((tool) => tool.executionMode === "sequential")).toBe(true);
+  });
+
+  test("scopes shared parallel orchestration guardrails to qualified planner tools", () => {
+    const ordinary = createAgentHandoffTools({
+      builder: new AgentHandoffBuilder(builderOptions({ workItemsProducer: true })),
+    });
+    expect(ordinary.tools.setParallelSchedule).toBeUndefined();
+    expect(ordinary.tools.commit.promptGuidelines?.join("\n")).not.toContain("same pinned baseline");
+
+    const parallel = createAgentHandoffTools({
+      builder: new AgentHandoffBuilder(builderOptions({ workItemsProducer: true, parallel: true })),
+    });
+    const description = parallel.tools.setParallelSchedule!.description;
+    const guidelines = parallel.tools.commit.promptGuidelines?.join("\n") ?? "";
+    for (const text of [description, guidelines]) {
+      expect(text).toContain("Every stream starts concurrently from the same pinned baseline");
+      expect(text).toContain("stream order controls deterministic fan-in and must not be used to express execution dependencies");
+      expect(text).toContain("Prioritize independence over balancing stream sizes");
+      expect(text).toContain("Keep shared contracts, dependent or order-sensitive work");
+      expect(text).toContain("likely to overlap in the same files or modules in one stream");
+      expect(text).toContain("Avoid broad cross-stream ownership");
+      expect(text).toContain("use a single stream when the work cannot be separated safely");
+      expect(text).toContain("Cover every final work-item index exactly once");
+    }
   });
 
   test("uses narrow schemas and Pi validation before builder execution", () => {
