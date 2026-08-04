@@ -576,10 +576,12 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const saved: MateriaCastState[] = [];
     const forwarded: Array<{ type: string; data: unknown }> = [];
     const laneEvents: any[] = [];
+    let budgetChecks = 0;
     const childRunner = createFakeChildCastRunner({ now: () => 10, maxRetainedEvents: 32 });
     const subject = new ParallelLoopDispatcher({
       children: childRunner,
       state: { saveCastState: (_pi: unknown, value: MateriaCastState) => { saved.push(structuredClone(value)); } },
+      budget: { assertBudget: async () => { budgetChecks += 1; } },
       artifacts: {
         appendEvent: async (_run: unknown, type: string, data: unknown) => { forwarded.push({ type, data }); },
         lane: {
@@ -596,10 +598,13 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const savesAfterLaunch = saved.length;
     const artifactsAfterLaunch = forwarded.length;
     const laneArtifactsAfterLaunch = laneEvents.length;
+    const budgetChecksAfterLaunch = budgetChecks;
     expect(laneEvents.map((entry) => entry.event.event.type)).toEqual(["parallel_lane_started"]);
 
+    const mirroredUsage = { tokens: { input: 10_000, output: 10_000, cacheRead: 0, cacheWrite: 0, total: 20_000 }, cost: { input: 10, output: 10, cacheRead: 0, cacheWrite: 0, total: 20 } };
+    const noisyTypes = ["message_end", "turn_end", "tool_call", "tool_execution_end"];
     for (let index = 0; index < 1_000; index += 1) {
-      childRunner.emit(child.identity.childCastId, { type: "message_update", payload: { index, token: "x".repeat(100) } });
+      childRunner.emit(child.identity.childCastId, { type: noisyTypes[index % noisyTypes.length]!, payload: { index, token: "x".repeat(100) }, usage: mirroredUsage });
     }
     await flush(childRunner);
 
@@ -612,6 +617,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
 
     const usage = { tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 }, cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 } };
     childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
+    for (let index = 0; index < 100; index += 1) childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
     await flush(childRunner);
 
     expect(saved).toHaveLength(savesAfterLaunch + 1);
@@ -620,7 +626,29 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(laneEvents.at(-1).event.event).toMatchObject({ type: "usage_checkpoint", usage });
     expect(state.runState.usage.tokens.total).toBe(5);
     expect(state.runState.usage.cost.total).toBe(0.5);
-    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(1_002);
+    expect(budgetChecks).toBe(budgetChecksAfterLaunch + 1);
+
+    const laterUsage = { tokens: { input: 4, output: 5, cacheRead: 0, cacheWrite: 0, total: 9 }, cost: { input: 0.4, output: 0.5, cacheRead: 0, cacheWrite: 0, total: 0.9 } };
+    childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage: laterUsage });
+    for (let index = 0; index < 25; index += 1) childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
+    await flush(childRunner);
+
+    expect(saved).toHaveLength(savesAfterLaunch + 2);
+    expect(laneEvents).toHaveLength(laneArtifactsAfterLaunch + 2);
+    expect(laneEvents.at(-1).event.event).toMatchObject({ type: "usage_checkpoint", usage: laterUsage });
+    expect(state.runState.usage.tokens.total).toBe(9);
+    expect(state.runState.usage.cost.total).toBe(0.9);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.usage).toEqual(laterUsage);
+    expect((await childRunner.observe({ childCastId: child.identity.childCastId }))!.snapshot.usage).toEqual(laterUsage);
+    expect(budgetChecks).toBe(budgetChecksAfterLaunch + 2);
+
+    // A stale terminal aggregate reconciles against the consumed checkpoint
+    // watermark instead of regressing it or charging the same usage again.
+    childRunner.complete(child.identity.childCastId, { accepted: true, usage });
+    await flush(childRunner);
+    expect(state.runState.usage.tokens.total).toBe(9);
+    expect(state.runState.usage.cost.total).toBe(0.9);
+    expect(budgetChecks).toBe(budgetChecksAfterLaunch + 2);
   });
 
   test("replays from a stale durable watermark when reviving a child", async () => {
@@ -829,7 +857,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
     const child = childRunner.listSnapshots()[0]!;
     childRunner.emit(child.identity.childCastId, {
-      type: "socket_output",
+      type: "usage_checkpoint",
       usage: { tokens: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, total: 7 }, cost: { input: 0.3, output: 0.4, cacheRead: 0, cacheWrite: 0, total: 0.7 } },
     });
 

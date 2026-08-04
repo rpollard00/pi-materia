@@ -8,6 +8,7 @@ import {
   DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
   DEFAULT_CHILD_CAST_RETAINED_EVENTS,
   EMPTY_CHILD_CAST_USAGE,
+  mergeChildCastUsage,
   type ChildCastAbortInput,
   type ChildCastAbortResult,
   type ChildCastCompiledLoadout,
@@ -22,7 +23,6 @@ import {
   type ChildCastStreamEvent,
   type ChildCastSubscription,
   type ChildCastTerminalResult,
-  type ChildCastUsage,
   type ResumeChildCastInput,
   type StartChildCastInput,
 } from "../application/index.js";
@@ -30,7 +30,6 @@ import {
   boundedMessage,
   buildPiChildArgs,
   callObserver,
-  childUsage,
   clone,
   createBoundedCapture,
   createChildConfig,
@@ -529,7 +528,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     }
     const usage = usageCheckpointFromEvent(parsed);
     if (usage) {
-      record.snapshot.usage = clone(usage);
+      record.snapshot.usage = mergeChildCastUsage(record.snapshot.usage, usage);
       this.#emit(record, { type: "usage_checkpoint", usage });
       return;
     }
@@ -576,23 +575,12 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       return;
     }
 
-    const rawUsage = event.usage
-      ?? (isRecord(event.result) ? event.result.usage : undefined)
-      ?? (isRecord(event.message) ? event.message.usage : undefined);
-    const usage = childUsage(rawUsage);
+    const usage = usageCheckpointFromEvent(event);
     if (!usage) return;
-    // Pi reports flat message_end usage per message, not per session. Project a
-    // cumulative checkpoint so dispatcher deltas cannot regress when a later
-    // message is smaller. Nested usage is already aggregate-shaped.
-    const checkpoint = isRecord(rawUsage) && !isRecord(rawUsage.tokens)
-      ? addUsage(record.snapshot.usage, usage)
-      : usage;
-    record.snapshot.usage = clone(checkpoint);
+    record.snapshot.usage = mergeChildCastUsage(record.snapshot.usage, usage);
     this.#emit(record, {
       type: "usage_checkpoint",
-      usage: checkpoint,
-      ...(typeof event.socketId === "string" ? { socketId: event.socketId } : {}),
-      ...(typeof event.workItemId === "string" ? { workItemId: event.workItemId } : {}),
+      usage,
       ...(typeof event.occurredAt === "number" ? { occurredAt: event.occurredAt } : {}),
     });
   }
@@ -702,7 +690,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     record.snapshot.status = result.status;
     record.snapshot.accepted = result.accepted;
     if (result.executionScope) record.snapshot.executionScope = cloneExecutionScope(result.executionScope);
-    if (result.usage) record.snapshot.usage = clone(result.usage);
+    if (result.usage) record.snapshot.usage = mergeChildCastUsage(record.snapshot.usage, result.usage);
     record.snapshot.updatedAt = result.endedAt;
     if (record.snapshot.abort && result.abortReason) record.snapshot.abort.completedAt = result.endedAt;
     for (const observer of record.observers.values()) void callObserver(observer.onTerminal, clone(result));
@@ -719,8 +707,16 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
 export type PiChildCastRunnerPort = PiChildCastRunner;
 
 const DISCARDED_CHILD_EVENT_TYPES = new Set([
+  "agent_start",
+  "agent_end",
+  "turn_start",
+  "turn_end",
+  "message_start",
   "message_update",
+  "message_end",
+  "tool_execution_start",
   "tool_execution_update",
+  "tool_execution_end",
   "entry_appended",
   "message",
   "turn",
@@ -736,25 +732,6 @@ const CHILD_PROTOCOL_EVENT_TYPES = new Set([
 
 function retainTail<T>(values: readonly T[], value: T, limit: number): T[] {
   return values.length < limit ? [...values, value] : [...values.slice(values.length - limit + 1), value];
-}
-
-function addUsage(left: ChildCastUsage, right: ChildCastUsage): ChildCastUsage {
-  return {
-    tokens: {
-      input: left.tokens.input + right.tokens.input,
-      output: left.tokens.output + right.tokens.output,
-      cacheRead: left.tokens.cacheRead + right.tokens.cacheRead,
-      cacheWrite: left.tokens.cacheWrite + right.tokens.cacheWrite,
-      total: left.tokens.total + right.tokens.total,
-    },
-    cost: {
-      input: left.cost.input + right.cost.input,
-      output: left.cost.output + right.cost.output,
-      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
-      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
-      total: left.cost.total + right.cost.total,
-    },
-  };
 }
 
 /** Read only a leading JSON string `type` value without parsing the payload. */

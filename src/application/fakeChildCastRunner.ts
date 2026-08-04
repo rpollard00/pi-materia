@@ -3,6 +3,7 @@ import {
   DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
   DEFAULT_CHILD_CAST_RETAINED_EVENTS,
   EMPTY_CHILD_CAST_USAGE,
+  mergeChildCastUsage,
   type ChildCastAbortInput,
   type ChildCastDiagnostic,
   type ChildCastObserver,
@@ -235,7 +236,9 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
     };
     this.nextSequences.set(childCastId, event.sequence + 1);
-    const nextUsage = input.usage ? clone(input.usage) : existing.usage;
+    const nextUsage = input.type === "usage_checkpoint" && input.usage
+      ? mergeChildCastUsage(existing.usage, input.usage)
+      : existing.usage;
     this.records.set(childCastId, { ...existing, updatedAt: timestamp, usage: nextUsage, events: retainTail(existing.events, event, this.maxRetainedEvents) });
     this.notifyEvent(childCastId, event);
     return clone(event);
@@ -306,12 +309,13 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     if (existing.terminalResult) return this.requireSnapshot(childCastId);
     const timestamp = result.endedAt;
     const { usage, ...terminalResult } = result;
+    const snapshotUsage = usage ? mergeChildCastUsage(existing.usage, usage) : existing.usage;
     this.records.set(childCastId, {
       ...existing,
       status: result.status,
       accepted: result.accepted,
       updatedAt: timestamp,
-      ...(usage ? { usage: clone(usage) } : {}),
+      usage: snapshotUsage,
       ...(result.executionScope ? { executionScope: cloneExecutionScope(result.executionScope) } : {}),
       terminalResult: clone({ ...terminalResult, ...(usage ? { usage } : {}) }),
     });

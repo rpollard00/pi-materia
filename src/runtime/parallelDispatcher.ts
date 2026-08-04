@@ -466,8 +466,10 @@ export class ParallelLoopDispatcher {
     if (this.#run?.runId !== active.artifactIdentity.runId || this.#active.get(stream.laneId) !== active) return;
     // Usage already delivered by the child runner remains authoritative during
     // cancellation. Other late callbacks must not mutate a terminal lane.
-    const usage = isParallelUsage(event.usage) ? compactParallelUsage(event.usage) : undefined;
-    if (this.#cancelRequested && !usage) return;
+    const checkpoint = event.type === "usage_checkpoint" && isParallelUsage(event.usage)
+      ? compactParallelUsage(event.usage)
+      : undefined;
+    if (this.#cancelRequested && !checkpoint) return;
     const previous = this.#eventTails.get(active.childCastId) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(async () => {
       // The callback may have been queued before its run settled. Do not let an
@@ -477,7 +479,9 @@ export class ParallelLoopDispatcher {
       // live coordinator so the next durable transition can checkpoint it,
       // but do not amplify token/message traffic into parent persistence or
       // monitoring artifacts. Child-owned session/stdout artifacts retain the
-      // detailed evidence.
+      // detailed evidence. Merge checkpoints only after entering this serialized
+      // tail so a queued stale callback cannot regress the lane baseline.
+      const usage = checkpoint ? cumulativeUsage([this.#latestUsage.get(active.childCastId), checkpoint]) : undefined;
       const applied = this.#applyLaneTransition(input, state, { laneId: stream.laneId, attempt: active.attempt, childCastId: event.childCastId, lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt }, ...(usage ? { usage } : {}), timestamp: event.occurredAt }, false);
       // A real cumulative usage delta is itself a durable boundary. The usage
       // checkpoint saves both accounting and the latest replay watermark.
@@ -497,8 +501,11 @@ export class ParallelLoopDispatcher {
     // may take ownership while it is pending, so never continue using global
     // coordinator fields until ownership has been revalidated.
     if (!this.#ownsClaimedLane(input, state, active)) return;
-    const selectedUsage = highestUsage([observation && isParallelUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined, isParallelUsage(result.usage) ? result.usage : undefined, this.#latestUsage.get(active.childCastId)]);
-    const usage = selectedUsage ? compactParallelUsage(selectedUsage) : undefined;
+    const usage = cumulativeUsage([
+      observation && isParallelUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined,
+      isParallelUsage(result.usage) ? result.usage : undefined,
+      this.#latestUsage.get(active.childCastId),
+    ]);
     if (usage) await this.#aggregateUsage(state, input, stream, active, usage);
     // Budget enforcement retires the run and deliberately clears its failure
     // sentinel. Generation ownership is therefore the durable stop condition.
@@ -627,7 +634,11 @@ export class ParallelLoopDispatcher {
         if (!lane) continue;
         const observation = await this.#deps.children.observe({ childCastId }).catch(() => undefined);
         if (!observation || !isParallelUsage(observation.snapshot.usage)) continue;
-        const observedUsage = compactParallelUsage(observation.snapshot.usage);
+        const observedUsage = cumulativeUsage([
+          observation.snapshot.usage,
+          this.#latestUsage.get(childCastId),
+          lane.usage && isParallelUsage(lane.usage) ? lane.usage : undefined,
+        ])!;
         if (!this.#latestUsage.has(childCastId) && lane.usage) this.#latestUsage.set(childCastId, compactParallelUsage(lane.usage));
         const latestEvent = [...observation.snapshot.events, ...observation.events]
           .reduce<ChildCastStreamEvent | undefined>((latest, event) => !latest || event.sequence > latest.sequence ? event : latest, undefined);
@@ -722,8 +733,9 @@ export class ParallelLoopDispatcher {
     // records. Live callback aggregation, however, must remain generation-owned
     // across every artifact write before it can touch coordinator state again.
     if (enforceBudget && !this.#ownsClaimedLane(input, state, active)) return;
-    const delta = usageDelta(this.#latestUsage.get(active.childCastId), usage);
-    this.#latestUsage.set(active.childCastId, usage);
+    const cumulative = cumulativeUsage([this.#latestUsage.get(active.childCastId), usage])!;
+    const delta = usageDelta(this.#latestUsage.get(active.childCastId), cumulative);
+    this.#latestUsage.set(active.childCastId, cumulative);
     if (!hasUsage(delta)) return;
     const report = state.runState.usage;
     report.byMateria ??= {}; report.bySocket ??= {}; report.byTask ??= {}; report.byAttempt ??= {};
@@ -732,9 +744,9 @@ export class ParallelLoopDispatcher {
     const write = this.#deps.artifacts?.writeUsage;
     if (write) { this.#usageWriteTail = this.#usageWriteTail.catch(() => undefined).then(() => write(state.runState)); await this.#usageWriteTail.catch(() => undefined); }
     if (enforceBudget && !this.#ownsClaimedLane(input, state, active)) return;
-    await this.#deps.artifacts?.lane?.writeUsage({ ...active.artifactIdentity, usage }).catch(() => undefined);
+    await this.#deps.artifacts?.lane?.writeUsage({ ...active.artifactIdentity, usage: cumulative }).catch(() => undefined);
     if (enforceBudget && !this.#ownsClaimedLane(input, state, active)) return;
-    await this.#appendLaneLifecycle(active, state, input.loopId, stream, "usage_checkpoint", this.#now(), { usage });
+    await this.#appendLaneLifecycle(active, state, input.loopId, stream, "usage_checkpoint", this.#now(), { usage: cumulative });
     if (enforceBudget && !this.#ownsClaimedLane(input, state, active)) return;
     try { await this.#deps.budget?.assertBudget?.(state, input.ctx); }
     catch (error) {
@@ -991,7 +1003,15 @@ function barrierSummary(run: MateriaParallelRunState, phase: "accepted" | "faile
 }
 function boundedFailureReason(value: string, max = 1_000): string { const text = value.trim() || "parallel execution failed"; return text.length <= max ? text : `${text.slice(0, max - 1)}…`; }
 function toParallelDiagnostic(value: unknown): ParallelLaneDiagnosticArtifact { const record = isRecord(value) ? value : {}; return { code: boundedFailureReason(typeof record.code === "string" ? record.code : "child_diagnostic", 120), message: boundedFailureReason(typeof record.message === "string" ? record.message : "Child emitted a diagnostic."), severity: record.severity === "info" || record.severity === "error" ? record.severity : "warning", occurredAt: typeof record.occurredAt === "number" ? record.occurredAt : Date.now() }; }
-function highestUsage(values: readonly (MateriaParallelUsageTotals | undefined)[]): MateriaParallelUsageTotals | undefined { return values.filter((value): value is MateriaParallelUsageTotals => value !== undefined).sort((a, b) => b.tokens.total - a.tokens.total)[0]; }
+function cumulativeUsage(values: readonly (MateriaParallelUsageTotals | undefined)[]): MateriaParallelUsageTotals | undefined {
+  const available = values.filter((value): value is MateriaParallelUsageTotals => value !== undefined);
+  if (available.length === 0) return undefined;
+  const maximum = (select: (value: MateriaParallelUsageTotals) => number) => Math.max(...available.map(select));
+  return {
+    tokens: { input: maximum((value) => value.tokens.input), output: maximum((value) => value.tokens.output), cacheRead: maximum((value) => value.tokens.cacheRead), cacheWrite: maximum((value) => value.tokens.cacheWrite), total: maximum((value) => value.tokens.total) },
+    cost: { input: maximum((value) => value.cost.input), output: maximum((value) => value.cost.output), cacheRead: maximum((value) => value.cost.cacheRead), cacheWrite: maximum((value) => value.cost.cacheWrite), total: maximum((value) => value.cost.total) },
+  };
+}
 function usageDelta(previous: MateriaParallelUsageTotals | undefined, current: MateriaParallelUsageTotals): MateriaParallelUsageTotals { const p = previous ?? { tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }; const delta = (a: number, b: number) => Math.max(0, a - b); return { tokens: { input: delta(current.tokens.input, p.tokens.input), output: delta(current.tokens.output, p.tokens.output), cacheRead: delta(current.tokens.cacheRead, p.tokens.cacheRead), cacheWrite: delta(current.tokens.cacheWrite, p.tokens.cacheWrite), total: delta(current.tokens.total, p.tokens.total) }, cost: { input: delta(current.cost.input, p.cost.input), output: delta(current.cost.output, p.cost.output), cacheRead: delta(current.cost.cacheRead, p.cost.cacheRead), cacheWrite: delta(current.cost.cacheWrite, p.cost.cacheWrite), total: delta(current.cost.total, p.cost.total) } }; }
-function hasUsage(value: MateriaParallelUsageTotals): boolean { return value.tokens.total > 0 || value.cost.total > 0; }
+function hasUsage(value: MateriaParallelUsageTotals): boolean { return Object.values(value.tokens).some((amount) => amount > 0) || Object.values(value.cost).some((amount) => amount > 0); }
 function isRecord(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }

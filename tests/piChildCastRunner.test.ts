@@ -130,7 +130,7 @@ describe("Pi child cast runner", () => {
     expect(children[1]!.listenerCount("close")).toBe(0);
   });
 
-  test("discards event storms and projects only compact usage telemetry", async () => {
+  test("discards generic event usage and accepts only canonical usage checkpoints", async () => {
     let child!: FakeChild;
     const runner = createPiChildCastRunner({
       spawnProcess: () => {
@@ -168,6 +168,13 @@ describe("Pi child cast runner", () => {
         payload: { toolResult: large },
       })}\n`);
     }
+    const checkpoints = [
+      { tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 }, cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } },
+      { tokens: { input: 2, output: 4, cacheRead: 4, cacheWrite: 5, total: 15 }, cost: { input: 2, output: 4, cacheRead: 4, cacheWrite: 5, total: 15 } },
+      { tokens: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 }, cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 } },
+    ];
+    for (const usage of checkpoints) child.stdout.write(`${JSON.stringify({ type: "pi_materia_child_usage", usage })}\n`);
+    expect((await runner.observe({ childCastId: "child-1" }))?.snapshot.usage).toEqual(checkpoints[1]);
     child.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: {
       status: "succeeded",
       accepted: true,
@@ -184,15 +191,16 @@ describe("Pi child cast runner", () => {
     const projected = observation?.events.filter((event) => event.type === "usage_checkpoint") ?? [];
     expect(projected).toHaveLength(3);
     expect(projected.every((event) => event.payload === undefined)).toBe(true);
-    expect(projected.map((event) => event.usage?.tokens.total)).toEqual([10, 14, 15]);
-    expect(projected[2]?.usage).toEqual({
+    expect(projected.map((event) => event.usage?.tokens.total)).toEqual([10, 15, 10]);
+    expect(projected[1]?.usage).toEqual({
       tokens: { input: 2, output: 4, cacheRead: 4, cacheWrite: 5, total: 15 },
       cost: { input: 2, output: 4, cacheRead: 4, cacheWrite: 5, total: 15 },
     });
-    // The nested terminal aggregate is authoritative over message checkpoints.
+    // Terminal reconciliation advances newer scalars without regressing the
+    // canonical checkpoint baseline.
     expect(observation?.snapshot.usage).toEqual({
       tokens: { input: 20, output: 20, cacheRead: 20, cacheWrite: 20, total: 80 },
-      cost: { input: 2, output: 2, cacheRead: 2, cacheWrite: 2, total: 8 },
+      cost: { input: 2, output: 4, cacheRead: 4, cacheWrite: 5, total: 15 },
     });
     expect(JSON.stringify(observation?.events)).not.toContain(secret);
     expect(JSON.stringify(observation?.snapshot)).not.toContain(secret);
@@ -233,7 +241,7 @@ describe("Pi child cast runner", () => {
     const observation = await runner.observe({ childCastId: "child-1" });
     expect(observation?.snapshot.events).toHaveLength(32);
     expect(observation?.snapshot.diagnostics).toHaveLength(8);
-    expect(observation?.snapshot.events[0]!.sequence).toBeGreaterThan(5_000);
+    expect(observation?.snapshot.events[0]!.sequence).toBeGreaterThan(2_900);
     expect(observation?.snapshot.usage.tokens.total).toBe(6_000);
     expect(observation?.snapshot.executionScope).toMatchObject({ id: "scope-retained", state: { recovery: "stable" } });
     expect(observation?.snapshot.identity).toEqual(input().identity);

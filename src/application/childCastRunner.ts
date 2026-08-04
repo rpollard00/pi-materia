@@ -60,6 +60,26 @@ export const EMPTY_CHILD_CAST_USAGE: ChildCastUsage = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
+/** Preserve the monotonic baseline of cumulative child usage checkpoints. */
+export function mergeChildCastUsage(previous: ChildCastUsage, checkpoint: ChildCastUsage): ChildCastUsage {
+  return {
+    tokens: {
+      input: Math.max(previous.tokens.input, checkpoint.tokens.input),
+      output: Math.max(previous.tokens.output, checkpoint.tokens.output),
+      cacheRead: Math.max(previous.tokens.cacheRead, checkpoint.tokens.cacheRead),
+      cacheWrite: Math.max(previous.tokens.cacheWrite, checkpoint.tokens.cacheWrite),
+      total: Math.max(previous.tokens.total, checkpoint.tokens.total),
+    },
+    cost: {
+      input: Math.max(previous.cost.input, checkpoint.cost.input),
+      output: Math.max(previous.cost.output, checkpoint.cost.output),
+      cacheRead: Math.max(previous.cost.cacheRead, checkpoint.cost.cacheRead),
+      cacheWrite: Math.max(previous.cost.cacheWrite, checkpoint.cost.cacheWrite),
+      total: Math.max(previous.cost.total, checkpoint.cost.total),
+    },
+  };
+}
+
 /** Default replay tails retained by child runners; sequence numbers remain global. */
 export const DEFAULT_CHILD_CAST_RETAINED_EVENTS = 256;
 export const DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS = 64;
