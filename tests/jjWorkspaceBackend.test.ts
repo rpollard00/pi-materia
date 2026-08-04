@@ -66,7 +66,7 @@ function fakeFanInJj(repositoryRoot: string, options: {
       const inLane = path.resolve(input.cwd) !== path.resolve(repositoryRoot);
       if (template.includes("parents.map") && template.includes("empty")) {
         if (revset.includes("::")) return { stdout: options.stackOutput ?? "baseline\tbaseline-change\troot\tfalse\tfalse\nlane-working\tchange-lane-working\tbaseline\tfalse\ttrue\n", stderr: "", exitCode: 0 };
-        const fields = stackByIdentity.get(revset);
+        const fields = stackByIdentity.get(revset === "@" && inLane ? "lane-working" : revset);
         if (fields) return { stdout: `${fields.join("\t")}\n`, stderr: "", exitCode: 0 };
       }
       if (template.includes("parents.map")) {
@@ -95,7 +95,8 @@ function fakeFanInJj(repositoryRoot: string, options: {
       return { stdout: "", stderr: "", exitCode: 0, operationId: `operation-forget-${args[2]}` };
     }
     if (args[0] === "rebase") {
-      const source = args[args.indexOf("-s") + 1]!;
+      const sourceIndex = args.includes("-r") ? args.indexOf("-r") : args.indexOf("-s");
+      const source = args[sourceIndex + 1]!;
       const destination = args[args.indexOf("-d") + 1]!;
       const fields = stackByIdentity.get(source);
       if (fields) fields[2] = destination;
@@ -279,6 +280,55 @@ describe("jj workspace lifecycle backend", () => {
     expect(JSON.parse(await readFile(revisionLane.manifestPath, "utf8")).fanInPreparation).toBeUndefined();
   });
 
+  test("rejects unbounded parked provenance before publication and resumes from the parked jj revision", async () => {
+    for (const invalidField of ["operation-too-long", "operation-empty", "revision", "timestamp"] as const) {
+      const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), `materia-jj-park-${invalidField}-`));
+      const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
+      const fake = fakeFanInJj(repositoryRoot, {
+        stackOutput: "baseline\tbaseline-change\troot\tfalse\tfalse\nmeaningful\tmeaningful-change\tbaseline\tfalse\tfalse\nlane-working\tchange-lane-working\tmeaningful\tfalse\ttrue\n",
+      });
+      let rejectPark = true;
+      let clock = 100;
+      const command: JjCommandExecutor = async (input) => {
+        const result = await fake.command(input);
+        const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
+        if (rejectPark && args[0] === "rebase" && args[args.indexOf("-r") + 1] === "lane-working") {
+          if (invalidField === "timestamp") clock = Number.NaN;
+          if (invalidField === "operation-too-long") return { ...result, operationId: "x".repeat(513) };
+          if (invalidField === "operation-empty") return { ...result, operationId: "" };
+        }
+        if (rejectPark && invalidField === "revision" && args[0] === "log" && args[args.indexOf("-r") + 1] === "@"
+          && (args[args.indexOf("-T") + 1] ?? "").includes("empty") && result.stdout.includes("\tbaseline\t")) {
+          return { ...result, stdout: `${"x".repeat(513)}\tchange-lane-working\tbaseline\tfalse\ttrue\n` };
+        }
+        return result;
+      };
+      const backend = createJjWorkspaceBackend({ workspaceRoot, command, now: () => clock });
+      const pinned = await backend.pinBaseline(repositoryRoot);
+      const lane = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane" });
+      const input = {
+        parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot,
+        baseline: pinned.baseline, queueOrder: ["lane"],
+        lanes: [{ laneId: "lane", streamIndex: 0, queueIndex: 0, workItemIndexes: [0], status: "accepted" as const, acceptedHead: lane.revision, workspace: lane }],
+      };
+
+      await expect(backend.fanIn(input)).rejects.toMatchObject({ code: "fan_in_preparation_too_large" });
+      const recoverable = JSON.parse(await readFile(lane.manifestPath, "utf8"));
+      expect(recoverable.fanInPreparation.parkedWorkspaceRevision).toBeUndefined();
+      expect(recoverable.fanInPreparation.preparedAt).toBe(100);
+
+      rejectPark = false;
+      clock = 200;
+      await expect(backend.fanIn(input)).resolves.toMatchObject({ satisfied: true });
+      const resumed = JSON.parse(await readFile(lane.manifestPath, "utf8"));
+      expect(resumed.fanInPreparation).toMatchObject({
+        parkedWorkspaceRevision: { changeId: "change-lane-working" },
+        parkedAt: 200,
+        parkOperationId: "operation-latest",
+      });
+    }
+  });
+
   test("derives ordered meaningful commits and removes only an empty cast boundary from the effective base", async () => {
     const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-repo-"));
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-workspaces-"));
@@ -345,6 +395,56 @@ describe("jj workspace lifecycle backend", () => {
     expect(result.orderedHeads[0]?.workspaceRevision).toEqual(working);
     expect(result.orderedHeads[0]?.commits).not.toContainEqual(working);
     expect(result.effectiveBase).toEqual(effectiveBase);
+    const parked = await realRevision(lane.workspacePath, "@");
+    const parkedParent = await realRevision(lane.workspacePath, "@-");
+    const parkedManifest = JSON.parse(await readFile(lane.manifestPath, "utf8"));
+    expect(parked.changeId).toBe(working.changeId);
+    expect(parkedParent).toEqual(pinned.baseline);
+    expect(parkedManifest.fanInPreparation.parkedWorkspaceRevision).toEqual(parked);
+    expect(parkedManifest.revision).toEqual(parked);
+  });
+
+  test("recovers a real-jj interruption after parking only a prefix of lanes", async () => {
+    if (!(await hasRealJj())) return;
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-park-retry-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
+    await runRealJj(["git", "init", repositoryRoot], process.cwd());
+    let parkCalls = 0;
+    let interrupt = true;
+    const real = realJjExecutor();
+    const command: JjCommandExecutor = async (input) => {
+      const args = input.args.filter((arg) => arg !== "--ignore-working-copy");
+      if (interrupt && args[0] === "rebase" && args.includes("-r") && ++parkCalls === 2) {
+        return { stdout: "", stderr: "simulated park interruption", exitCode: 1 };
+      }
+      return real(input);
+    };
+    const backend = createJjWorkspaceBackend({ repositoryRoot, workspaceRoot, command });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+    await runRealJj(["bookmark", "create", "keep-baseline", "-r", pinned.baseline.commitId], repositoryRoot);
+    const lanes = await Promise.all(["lane-a", "lane-b"].map((laneId) => backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId })));
+    const accepted = [];
+    for (const [index, lane] of lanes.entries()) {
+      await writeFile(path.join(lane.workspacePath, `${index}.txt`), `${index}\n`);
+      await runRealJj(["describe", "-m", `feat: lane ${index}`], lane.workspacePath);
+      await runRealJj(["new"], lane.workspacePath);
+      accepted.push(await realRevision(lane.workspacePath, "@"));
+    }
+    const input = {
+      parentCastId: "cast", loopId: "build", runId: "run", cwd: repositoryRoot, baseline: pinned.baseline,
+      queueOrder: ["lane-a", "lane-b"],
+      lanes: lanes.map((lane, index) => ({ laneId: `lane-${index === 0 ? "a" : "b"}`, streamIndex: index, queueIndex: index, workItemIndexes: [index], status: "accepted" as const, acceptedHead: accepted[index]!, workspace: lane })),
+    };
+
+    await expect(backend.fanIn(input)).rejects.toMatchObject({ code: "jj_command_failed" });
+    expect(JSON.parse(await readFile(lanes[0]!.manifestPath, "utf8")).fanInPreparation.parkedWorkspaceRevision).toBeDefined();
+    expect(JSON.parse(await readFile(lanes[1]!.manifestPath, "utf8")).fanInPreparation.parkedWorkspaceRevision).toBeUndefined();
+    interrupt = false;
+    const result = await backend.fanIn(input);
+    expect(result.satisfied).toBe(true);
+    expect(await realRevision(repositoryRoot, "keep-baseline")).toEqual(pinned.baseline);
+    expect(await realRevision(repositoryRoot, "@")).toEqual(pinned.baseline);
+    for (const lane of lanes) expect(await realRevision(lane.workspacePath, "@-")).toEqual(pinned.baseline);
   });
 
   test("linearly stacks real-jj lanes in schedule order without merge or transient empty commits", async () => {

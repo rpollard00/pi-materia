@@ -161,6 +161,10 @@ export interface JjFanInPreparation {
   /** Stable identities in baseline-to-tip order; the empty workspace revision is excluded. */
   meaningfulChanges: JjRevisionIdentity[];
   preparedAt: number;
+  /** Verified empty workspace revision after it has been parked at the baseline. */
+  parkedWorkspaceRevision?: JjRevisionIdentity;
+  parkedAt?: number;
+  parkOperationId?: string;
 }
 
 export interface JjWorkspaceManifest {
@@ -438,15 +442,52 @@ export class JjWorkspaceBackend {
         if (!isCleanJjStatus(laneStatus.stdout)) {
           throw new JjWorkspaceError("fan_in_lane_dirty", `Lane ${JSON.stringify(lane.laneId)} workspace has uncheckpointed changes.`);
         }
-        const acceptedWorkingRevision = await this.#readRevision(manifest.workspacePath, lane.acceptedHead!.commitId);
-        if (!sameRevision(acceptedWorkingRevision, lane.acceptedHead!) || !sameRevision(acceptedWorkingRevision, inspection.currentRevision)) {
-          throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted working revision changed before fan-in.`);
+        const existingPreparation = manifest.fanInPreparation;
+        let acceptedWorkingRevision: JjRevisionIdentity;
+        let commits: JjRevisionIdentity[];
+        if (existingPreparation) {
+          // The accepted commit id is expected to have been rewritten after a
+          // successful park. Its stable change id and the durable preparation
+          // remain the authority for a retry.
+          if (!sameRevision(existingPreparation.workspaceRevision, lane.acceptedHead!)
+            || inspection.currentRevision.changeId !== existingPreparation.workspaceRevision.changeId) {
+            throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted working revision changed before fan-in.`);
+          }
+          acceptedWorkingRevision = { ...existingPreparation.workspaceRevision };
+          commits = existingPreparation.meaningfulChanges.map((revision) => ({ ...revision }));
+          const currentDetails = await this.#readStackRevision(manifest.workspacePath, "@");
+          const alreadyParked = currentDetails.parents.length === 1 && currentDetails.parents[0] === manifest.baseline.commitId;
+          if (!alreadyParked) {
+            if (!sameRevision(currentDetails, existingPreparation.workspaceRevision)) {
+              throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} prepared working revision drifted before parking.`);
+            }
+            const derived = await this.#deriveMeaningfulStack(manifest.workspacePath, manifest.baseline, acceptedWorkingRevision, lane.laneId);
+            if (!sameRevisionList(derived, commits)) {
+              throw new JjWorkspaceError("fan_in_preparation_stack_drift", `Lane ${JSON.stringify(lane.laneId)} meaningful stack changed after preparation.`);
+            }
+          } else {
+            let previous = manifest.baseline.commitId;
+            try {
+              for (const expected of commits) {
+                const actual = await this.#readStackRevision(manifest.repositoryRoot, expected.changeId);
+                if (!sameRevision(actual, expected) || actual.parents.length !== 1 || actual.parents[0] !== previous || actual.empty || actual.conflict) throw new Error("drift");
+                previous = actual.commitId;
+              }
+            } catch {
+              throw new JjWorkspaceError("fan_in_preparation_stack_drift", `Lane ${JSON.stringify(lane.laneId)} meaningful stack changed after parking.`);
+            }
+          }
+        } else {
+          acceptedWorkingRevision = await this.#readRevision(manifest.workspacePath, lane.acceptedHead!.commitId);
+          if (!sameRevision(acceptedWorkingRevision, lane.acceptedHead!) || !sameRevision(acceptedWorkingRevision, inspection.currentRevision)) {
+            throw new JjWorkspaceError("fan_in_head_drift", `Lane ${JSON.stringify(lane.laneId)} accepted working revision changed before fan-in.`);
+          }
+          commits = await this.#deriveMeaningfulStack(manifest.workspacePath, manifest.baseline, acceptedWorkingRevision, lane.laneId);
         }
-        const commits = await this.#deriveMeaningfulStack(manifest.workspacePath, manifest.baseline, acceptedWorkingRevision, lane.laneId);
         if (commits.length > MAX_FAN_IN_CHANGES_PER_LANE) {
           throw new JjWorkspaceError("fan_in_preparation_too_large", `Lane ${JSON.stringify(lane.laneId)} exceeds the recoverable fan-in preparation limit.`);
         }
-        const checkpointedAt = manifest.fanInPreparation?.preparedAt ?? this.#now();
+        const checkpointedAt = existingPreparation?.preparedAt ?? this.#now();
         const preparation: JjFanInPreparation = {
           version: 1,
           parentCastId: input.parentCastId,
@@ -459,6 +500,11 @@ export class JjWorkspaceBackend {
           queueIndex: lane.queueIndex,
           meaningfulChanges: commits.map((revision) => ({ ...revision })),
           preparedAt: checkpointedAt,
+          ...(existingPreparation?.parkedWorkspaceRevision ? {
+            parkedWorkspaceRevision: { ...existingPreparation.parkedWorkspaceRevision },
+            parkedAt: existingPreparation.parkedAt,
+            parkOperationId: existingPreparation.parkOperationId,
+          } : {}),
         };
         assertBoundedFanInPreparation(preparation, lane.laneId);
         if (manifest.fanInPreparation) {
@@ -483,6 +529,54 @@ export class JjWorkspaceBackend {
           workspace: workspaceOwnershipFromManifest(manifest),
           workspaceRevision: acceptedWorkingRevision,
         });
+      }
+
+      // Only after every lane has been validated and checkpointed, detach each
+      // exact empty workspace tip from its meaningful stack. Run in the owned
+      // workspace so jj refreshes that workspace's files and WC metadata.
+      for (const lane of orderedHeads) {
+        const manifest = await this.#loadOwnedReference(lane.workspace);
+        const preparation = manifest.fanInPreparation!;
+        const before = await this.#readStackRevision(manifest.workspacePath, "@");
+        if (before.changeId !== preparation.workspaceRevision.changeId || !before.empty || before.conflict || before.parents.length !== 1) {
+          throw new JjWorkspaceError("fan_in_park_drift", `Lane ${JSON.stringify(lane.laneId)} working revision is not the accepted clean empty single-parent tip.`);
+        }
+        let parked = before;
+        let parkOperationId = preparation.parkOperationId;
+        if (before.parents[0] !== manifest.baseline.commitId) {
+          const parkArgs = ["rebase", "-r", before.commitId, "-d", manifest.baseline.commitId];
+          const result = await this.#run(parkArgs, manifest.workspacePath, false);
+          this.#requireSuccess(result, parkArgs, manifest.workspacePath, false);
+          parkOperationId = result.operationId ?? await this.#latestOperationId(manifest.repositoryRoot);
+          parked = await this.#readStackRevision(manifest.workspacePath, "@");
+        }
+        const tracked = await this.#isTracked(manifest.repositoryRoot, manifest.workspaceName);
+        if (!tracked || parked.changeId !== preparation.workspaceRevision.changeId || !parked.empty || parked.conflict
+          || parked.parents.length !== 1 || parked.parents[0] !== manifest.baseline.commitId) {
+          throw new JjWorkspaceError("fan_in_park_failed", `Lane ${JSON.stringify(lane.laneId)} workspace tip could not be verified at its pinned baseline.`);
+        }
+        if (preparation.parkedWorkspaceRevision && !sameRevision(preparation.parkedWorkspaceRevision, parked)) {
+          throw new JjWorkspaceError("fan_in_park_drift", `Lane ${JSON.stringify(lane.laneId)} parked workspace revision drifted.`);
+        }
+        if (!preparation.parkedWorkspaceRevision) {
+          const parkedAt = this.#now();
+          const parkedPreparation: JjFanInPreparation = {
+            ...preparation,
+            parkedWorkspaceRevision: { commitId: parked.commitId, changeId: parked.changeId },
+            parkedAt,
+            parkOperationId: parkOperationId ?? await this.#latestOperationId(manifest.repositoryRoot),
+          };
+          // A successful jj rewrite must not publish a checkpoint that the
+          // next retry cannot load. Validate all newly derived provenance
+          // before replacing the last recoverable preparation.
+          assertBoundedFanInPreparation(parkedPreparation, lane.laneId);
+          await writeJsonAtomically(manifestPathFor(manifest.workspaceRoot, manifest.workspaceName), {
+            ...manifest,
+            revision: { commitId: parked.commitId, changeId: parked.changeId },
+            fanInPreparation: parkedPreparation,
+            updatedAt: parkedAt,
+          });
+        }
       }
 
       const meaningfulHeads = orderedHeads.filter(({ commits }) => commits.length > 0);
@@ -1368,12 +1462,14 @@ function assertBoundedFanInPreparation(preparation: JjFanInPreparation, laneId: 
     preparation.baseline.commitId, preparation.baseline.changeId,
     preparation.workspaceRevision.commitId, preparation.workspaceRevision.changeId,
     ...preparation.meaningfulChanges.flatMap(({ commitId, changeId }) => [commitId, changeId]),
+    ...(preparation.parkedWorkspaceRevision ? [preparation.parkedWorkspaceRevision.commitId, preparation.parkedWorkspaceRevision.changeId, preparation.parkOperationId ?? ""] : []),
   ];
   const indexes = [preparation.streamIndex, preparation.queueIndex];
   if (strings.some((value) => typeof value !== "string" || value.length === 0 || value.length > MAX_FAN_IN_IDENTITY_LENGTH)
     || indexes.some((value) => !Number.isSafeInteger(value) || value < 0 || value >= MAX_FAN_IN_LANES)
     || preparation.meaningfulChanges.length > MAX_FAN_IN_CHANGES_PER_LANE
-    || !Number.isFinite(preparation.preparedAt)) {
+    || !Number.isFinite(preparation.preparedAt)
+    || (preparation.parkedWorkspaceRevision !== undefined && !Number.isFinite(preparation.parkedAt))) {
     throw new JjWorkspaceError("fan_in_preparation_too_large", `Lane ${JSON.stringify(laneId)} cannot be represented by a bounded recoverable fan-in preparation.`);
   }
 }

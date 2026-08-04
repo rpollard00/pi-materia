@@ -217,10 +217,14 @@ function parseFanInPreparation(value: unknown, manifestOwner: Record<string, any
     || !Number.isSafeInteger(value.queueIndex) || value.queueIndex < 0 || value.queueIndex >= 256
     || !Number.isFinite(value.preparedAt) || !Array.isArray(value.meaningfulChanges) || value.meaningfulChanges.length > 1_024
     || value.meaningfulChanges.some((revision) => !isRevision(revision))) throw invalid();
+  const hasParking = value.parkedWorkspaceRevision !== undefined || value.parkedAt !== undefined || value.parkOperationId !== undefined;
+  if (hasParking && (!isRevision(value.parkedWorkspaceRevision) || !Number.isFinite(value.parkedAt)
+    || typeof value.parkOperationId !== "string" || value.parkOperationId.length === 0 || value.parkOperationId.length > 512)) throw invalid();
   const owner = value.owner;
   if (["parentCastId", "loopId", "laneId"].some((key) => typeof owner[key] !== "string" || owner[key].length === 0 || owner[key].length > 512)
     || owner.parentCastId !== manifestOwner.parentCastId || owner.loopId !== manifestOwner.loopId || owner.laneId !== manifestOwner.laneId
-    || [value.baseline, value.workspaceRevision, ...value.meaningfulChanges].some((revision) => revision.commitId.length > 512 || revision.changeId.length > 512)) throw invalid();
+    || [value.baseline, value.workspaceRevision, ...value.meaningfulChanges, ...(hasParking ? [value.parkedWorkspaceRevision] : [])]
+      .some((revision) => revision.commitId.length > 512 || revision.changeId.length > 512)) throw invalid();
   return {
     version: 1,
     parentCastId: value.parentCastId,
@@ -233,6 +237,11 @@ function parseFanInPreparation(value: unknown, manifestOwner: Record<string, any
     queueIndex: value.queueIndex,
     meaningfulChanges: value.meaningfulChanges.map((revision) => ({ commitId: revision.commitId, changeId: revision.changeId })),
     preparedAt: value.preparedAt,
+    ...(hasParking ? {
+      parkedWorkspaceRevision: { commitId: value.parkedWorkspaceRevision.commitId, changeId: value.parkedWorkspaceRevision.changeId },
+      parkedAt: value.parkedAt,
+      parkOperationId: value.parkOperationId,
+    } : {}),
   };
 }
 
