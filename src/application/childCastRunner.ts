@@ -1,4 +1,5 @@
 import type { ExecutionScope } from "../domain/executionScope.js";
+import type { NominalParallelLaneProgressDefinition } from "../domain/parallelProgress.js";
 import type {
   MateriaPipelineConfig,
   ResolvedMateriaPipeline,
@@ -22,6 +23,8 @@ export interface ChildCastCompiledLoadout {
   loadout: ChildCastPipeline;
   /** State seeded into the child cast before its first socket starts. */
   initialData: Readonly<Record<string, unknown>>;
+  /** Content-free graph metadata used only by the isolated child progress emitter. */
+  nominalProgress?: NominalParallelLaneProgressDefinition;
   /** Optional provenance retained for artifacts and diagnostics. */
   loopId?: string;
   laneId?: string;
@@ -54,6 +57,7 @@ export interface ChildCastUsage {
 }
 
 export const CHILD_USAGE_CHECKPOINT_EVENT_TYPE = "pi_materia_child_usage" as const;
+export const CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE = "pi_materia_child_progress" as const;
 
 export const EMPTY_CHILD_CAST_USAGE: ChildCastUsage = {
   tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },

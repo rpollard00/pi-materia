@@ -2,8 +2,10 @@ import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ChildCastLaunchSpec } from "../application/childCastRunner.js";
 import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
+import type { NominalParallelLaneProgressDefinition } from "../domain/parallelProgress.js";
 import type { MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 import type { MateriaPluginAdapters } from "./pluginAdapters.js";
+import { beginChildProgressCheckpointEmission } from "./childProgressCheckpoints.js";
 import { beginChildUsageCheckpointEmission } from "./childUsageCheckpoints.js";
 
 /**
@@ -24,6 +26,13 @@ export async function runChildCastLaunch(
     : adapters.pipeline.resolve(loaded.config);
 
   const stopUsageCheckpoints = beginChildUsageCheckpointEmission();
+  const progressDefinition = validNominalProgress(spec.compiledLoadout.nominalProgress);
+  const stopProgressCheckpoints = progressDefinition
+    ? beginChildProgressCheckpointEmission(
+        progressDefinition,
+        childLoopCursor(pipeline, spec.compiledLoadout.loopId),
+      )
+    : () => undefined;
   try {
     await adapters.lifecycle.start(
       pi,
@@ -56,6 +65,7 @@ export async function runChildCastLaunch(
     const result = terminalResult(state);
     emitChildTerminal(result);
   } finally {
+    stopProgressCheckpoints();
     stopUsageCheckpoints();
   }
 }
@@ -164,6 +174,22 @@ function validExecutionScope(value: unknown): boolean {
 
 function isResolvedPipeline(value: unknown): value is ResolvedMateriaPipeline {
   return isRecord(value) && isRecord(value.entry) && isRecord(value.entry.socket) && isRecord(value.entry.materia);
+}
+
+function validNominalProgress(value: unknown): NominalParallelLaneProgressDefinition | undefined {
+  if (!isRecord(value) || !Array.isArray(value.orderedLoopSocketIds)) return undefined;
+  if (!value.orderedLoopSocketIds.every((id) => typeof id === "string" && id.length > 0)) return undefined;
+  if (typeof value.workItemCount !== "number" || !Number.isSafeInteger(value.workItemCount) || value.workItemCount < 0) return undefined;
+  return {
+    orderedLoopSocketIds: [...value.orderedLoopSocketIds] as string[],
+    workItemCount: value.workItemCount,
+  };
+}
+
+function childLoopCursor(pipeline: ResolvedMateriaPipeline, loopId: string | undefined): string {
+  const selected = loopId !== undefined ? pipeline.loops?.[loopId] : undefined;
+  const loop = selected ?? Object.values(pipeline.loops ?? {}).find((candidate) => candidate?.iterator);
+  return loop?.iterator?.cursor ?? "workItemIndex";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

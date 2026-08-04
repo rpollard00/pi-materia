@@ -37,6 +37,7 @@ import type {
   AdvancementLifecycleDiagnostics,
   SendMateriaTurnOptions,
 } from "./agentPromptDispatch.js";
+import { emitChildNodeProgressCheckpoint } from "./childProgressCheckpoints.js";
 import type { LifecycleEventOverrides } from "./nativeEventing.js";
 import {
   resolvedMateriaDisplayName,
@@ -370,6 +371,7 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
 
     state.phase = socket.id;
     setCurrentSocketId(state, socket.id);
+    emitChildNodeProgressCheckpoint(state, socket.id);
     state.currentMateria = socketMateriaName(socket);
     state.currentMateriaModel = undefined;
     state.awaitingResponse = isAgentResolvedSocket(socket);

@@ -433,6 +433,7 @@ export class ParallelLoopDispatcher {
         childLoadoutId: prepared.compiledLoadout.childLoadoutId,
         loadout: prepared.compiledLoadout.loadout,
         initialData: { ...prepared.compiledLoadout.initialData, ...boundedParallelChildData(this.#run!, prepared.stream) },
+        nominalProgress: prepared.compiledLoadout.nominalProgress,
         loopId: input.loopId,
         laneId: lane.laneId,
       },
@@ -975,6 +976,7 @@ function expectedChildCompiledLoadout(run: MateriaParallelRunState, prepared: Pr
     childLoadoutId: prepared.compiledLoadout.childLoadoutId,
     loadout: prepared.compiledLoadout.loadout,
     initialData: { ...prepared.compiledLoadout.initialData, ...boundedParallelChildData(run, prepared.stream) },
+    nominalProgress: prepared.compiledLoadout.nominalProgress,
     loopId: run.loopId,
     laneId: prepared.stream.laneId,
   };
