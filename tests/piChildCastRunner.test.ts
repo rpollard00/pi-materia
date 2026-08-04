@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { describe, expect, test } from "bun:test";
-import { createPiChildCastRunner, type PiChildProcessSpawner } from "../src/infrastructure/index.js";
+import { createPiChildCastRunner, usageCheckpointFromEvent, type PiChildProcessSpawner } from "../src/infrastructure/index.js";
 import type { StartChildCastInput } from "../src/application/index.js";
 
 class FakeChild extends EventEmitter {
@@ -281,6 +281,40 @@ describe("Pi child cast runner", () => {
     expect(observation?.snapshot.diagnostics).toEqual([]);
     expect(JSON.stringify(observation?.events)).not.toContain("FULL_RESULT_ONLY_IN_TERMINAL_CHANNEL");
     expect(await readFile("/tmp/lane-a/artifacts/child-stdout.jsonl", "utf8")).toContain("FULL_RESULT_ONLY_IN_TERMINAL_CHANNEL");
+  });
+
+  test("parses dedicated checkpoints and accepts them from guarded stderr", async () => {
+    const usage = {
+      tokens: { input: 5, output: 3, cacheRead: 2, cacheWrite: 1, total: 11 },
+      cost: { input: 0.5, output: 0.3, cacheRead: 0.2, cacheWrite: 0.1, total: 1.1 },
+    };
+    expect(usageCheckpointFromEvent({ type: "pi_materia_child_usage", usage })).toEqual(usage);
+    expect(usageCheckpointFromEvent({ type: "message_end", usage })).toBeUndefined();
+    expect(usageCheckpointFromEvent({
+      type: "pi_materia_child_usage",
+      usage: { ...usage, tokens: { ...usage.tokens, total: Number.POSITIVE_INFINITY } },
+    })).toBeUndefined();
+
+    let child!: FakeChild;
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        child = new FakeChild();
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 145,
+    });
+    await runner.start(input());
+    child.stderr.write(`${JSON.stringify({ type: "pi_materia_child_usage", usage })}\n`);
+    child.stderr.write('{"type":"pi_materia_child_terminal","result":{"status":"succeeded","accepted":true,"endedAt":146}}\n');
+    child.finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const observation = await runner.observe({ childCastId: "child-1" });
+    expect(observation?.events.filter((event) => event.type === "usage_checkpoint")).toEqual([
+      expect.objectContaining({ usage }),
+    ]);
+    expect(observation?.snapshot.diagnostics).toEqual([]);
   });
 
   test("accepts the terminal marker from stderr when print mode redirects extension stdout", async () => {

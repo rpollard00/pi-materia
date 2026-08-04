@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cloneExecutionScope } from "../domain/executionScope.js";
 import {
+  CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
   DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
   DEFAULT_CHILD_CAST_RETAINED_EVENTS,
   EMPTY_CHILD_CAST_USAGE,
@@ -42,12 +43,13 @@ import {
   processPlatformSupportsProcessGroups,
   terminateProcessTree,
   terminalFromEvent,
+  usageCheckpointFromEvent,
   validateStartInput,
   writeJsonAtomically,
   type BoundedCapture,
 } from "./piChildCastSupport.js";
 
-export { buildPiChildArgs, parsePiJsonEventLine } from "./piChildCastSupport.js";
+export { buildPiChildArgs, parsePiJsonEventLine, usageCheckpointFromEvent } from "./piChildCastSupport.js";
 
 /** Current on-disk protocol understood by the child-launch extension. */
 export const PI_CHILD_LAUNCH_SPEC_VERSION = 1 as const;
@@ -510,7 +512,7 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
   #handleStderrLine(record: MutableChildRecord | undefined, line: string): void {
     if (!record || line.length === 0 || record.terminalResult) return;
     const leadingType = leadingJsonEventType(line);
-    if (leadingType !== undefined && !TERMINAL_EVENT_TYPES.has(leadingType)) {
+    if (leadingType !== undefined && !CHILD_PROTOCOL_EVENT_TYPES.has(leadingType)) {
       record.stderrHadNonTerminalOutput = true;
       return;
     }
@@ -520,12 +522,18 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       return;
     }
     const terminal = terminalFromEvent(parsed, this.#now);
-    if (!terminal) {
-      record.stderrHadNonTerminalOutput = true;
+    if (terminal) {
+      record.stderrTerminalSeen = true;
+      this.#finish(record, terminal);
       return;
     }
-    record.stderrTerminalSeen = true;
-    this.#finish(record, terminal);
+    const usage = usageCheckpointFromEvent(parsed);
+    if (usage) {
+      record.snapshot.usage = clone(usage);
+      this.#emit(record, { type: "usage_checkpoint", usage });
+      return;
+    }
+    record.stderrHadNonTerminalOutput = true;
   }
 
   #handleStdoutLine(record: MutableChildRecord | undefined, line: string): void {
@@ -719,7 +727,12 @@ const DISCARDED_CHILD_EVENT_TYPES = new Set([
   "tool",
   "session",
 ]);
-const TERMINAL_EVENT_TYPES = new Set(["pi_materia_child_terminal", "child_terminal", "terminal"]);
+const CHILD_PROTOCOL_EVENT_TYPES = new Set([
+  "pi_materia_child_terminal",
+  "child_terminal",
+  "terminal",
+  CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
+]);
 
 function retainTail<T>(values: readonly T[], value: T, limit: number): T[] {
   return values.length < limit ? [...values, value] : [...values.slice(values.length - limit + 1), value];

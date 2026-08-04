@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { rename, writeFile } from "node:fs/promises";
 import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import {
+  CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
   type ChildCastCompiledLoadout,
   type ChildCastTerminalResult,
   type ChildCastUsage,
@@ -181,6 +182,10 @@ export function extractEventOutput(event: Record<string, unknown>): unknown {
   if (Object.prototype.hasOwnProperty.call(event, "message")) return clone(event.message);
   if (Object.prototype.hasOwnProperty.call(event, "payload")) return clone(event.payload);
   return undefined;
+}
+
+export function usageCheckpointFromEvent(event: Record<string, unknown>): ChildCastUsage | undefined {
+  return event.type === CHILD_USAGE_CHECKPOINT_EVENT_TYPE ? childUsage(event.usage) : undefined;
 }
 
 export function childUsage(value: unknown): ChildCastUsage | undefined {

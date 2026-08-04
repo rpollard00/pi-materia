@@ -53,6 +53,8 @@ export interface ChildCastUsage {
   cost: UsageCost;
 }
 
+export const CHILD_USAGE_CHECKPOINT_EVENT_TYPE = "pi_materia_child_usage" as const;
+
 export const EMPTY_CHILD_CAST_USAGE: ChildCastUsage = {
   tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },

@@ -15,6 +15,7 @@ import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./web
 import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { runChildCastLaunch } from "./runtime/childCastLaunch.js";
+import { emitChildUsageCheckpoint } from "./runtime/childUsageCheckpoints.js";
 import { cancelNativeCast, handleAgentSettled, saveCastState } from "./castRuntime.js";
 import { setActiveModelPolicyResolver } from "./runtime/modelPolicyResolver.js";
 import { setCentralTelemetrySinkResolver } from "./runtime/nativeEventing.js";
@@ -137,6 +138,9 @@ export default function piMateria(pi: ExtensionAPI) {
     const before = adapters.states.loadActive(ctx);
     await castExecutionUseCases.handleAgentEnd(pi, event, ctx);
     const after = adapters.states.loadActive(ctx);
+    // Child protocol usage must come from the same persisted aggregate as a
+    // root cast, after agent_end has performed its exact accounting.
+    if (after && (!before || after.castId === before.castId)) emitChildUsageCheckpoint(after.runState.usage);
     if (before?.active && after && after.castId === before.castId && !after.active) {
       const boards = createQuestBoardRepository(ctx.cwd);
       if (existsSync(boards.boardPath)) await settleQuestCastAndMaybeAutoAdvance({ pi, ctx, state: after, useCases: createQuestRunnerUseCases(ctx.cwd, boards), configuredPath: getConfiguredConfigPath(), guard: autoAdvanceCwds, settlementSource: "agent_end" });

@@ -4,6 +4,7 @@ import type { ChildCastLaunchSpec } from "../application/childCastRunner.js";
 import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import type { MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
 import type { MateriaPluginAdapters } from "./pluginAdapters.js";
+import { beginChildUsageCheckpointEmission } from "./childUsageCheckpoints.js";
 
 /**
  * Execute the fixed `/materia child <spec>` command used by the subprocess
@@ -22,36 +23,41 @@ export async function runChildCastLaunch(
     ? spec.compiledLoadout.loadout
     : adapters.pipeline.resolve(loaded.config);
 
-  await adapters.lifecycle.start(
-    pi,
-    ctx,
-    loaded,
-    pipeline,
-    spec.request,
-    {
-      initialData: { ...spec.compiledLoadout.initialData },
-      initialExecutionScope: spec.executionScope,
-      startEventDetails: {
-        childCast: {
-          childCastId: spec.identity.childCastId,
-          parentCastId: spec.identity.parentCastId,
-          loopId: spec.identity.loopId,
-          laneId: spec.identity.laneId,
-          attempt: spec.attempt,
+  const stopUsageCheckpoints = beginChildUsageCheckpointEmission();
+  try {
+    await adapters.lifecycle.start(
+      pi,
+      ctx,
+      loaded,
+      pipeline,
+      spec.request,
+      {
+        initialData: { ...spec.compiledLoadout.initialData },
+        initialExecutionScope: spec.executionScope,
+        startEventDetails: {
+          childCast: {
+            childCastId: spec.identity.childCastId,
+            parentCastId: spec.identity.parentCastId,
+            loopId: spec.identity.loopId,
+            laneId: spec.identity.laneId,
+            attempt: spec.attempt,
+          },
         },
       },
-    },
-  );
+    );
 
-  // startSocket and agent-end advancement can queue the next prompt on a
-  // zero-delay timer. A single waitForIdle() only waits for the turn that was
-  // active when the command started; it can return in the small gap before a
-  // deferred prompt is dispatched. Keep the child process alive until its
-  // persisted cast is actually terminal so the parent never mistakes an
-  // in-flight lane for a failed child.
-  const state = await waitForChildCastTerminal(ctx, () => adapters.states.loadActive(ctx));
-  const result = terminalResult(state);
-  emitChildTerminal(result);
+    // startSocket and agent-end advancement can queue the next prompt on a
+    // zero-delay timer. A single waitForIdle() only waits for the turn that was
+    // active when the command started; it can return in the small gap before a
+    // deferred prompt is dispatched. Keep the child process alive until its
+    // persisted cast is actually terminal so the parent never mistakes an
+    // in-flight lane for a failed child.
+    const state = await waitForChildCastTerminal(ctx, () => adapters.states.loadActive(ctx));
+    const result = terminalResult(state);
+    emitChildTerminal(result);
+  } finally {
+    stopUsageCheckpoints();
+  }
 }
 
 /**
