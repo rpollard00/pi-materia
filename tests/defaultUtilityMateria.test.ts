@@ -173,7 +173,7 @@ describe("bundled utility materia defaults", () => {
       utility: "vcs.spawnJjWorkspace",
       parallelSafe: true,
     });
-    expect(materia?.description).toContain("active execution scope");
+    expect(materia?.description).toContain("shared pinned cast baseline");
     expect(materia?.description).toContain("bookmarkless external jj lane workspace");
     expect(materia?.description).toContain("original cast bookmark");
     expect(materia?.description).not.toContain("branch-local Blackbelt");
@@ -193,9 +193,11 @@ describe("bundled utility materia defaults", () => {
       utility: "vcs.integrateJjWorkspaces",
     });
     expect(materia?.description).toContain("schedule-ordered intrinsic barrier exports");
-    expect(materia?.description).toContain("linearly rebases");
+    expect(materia?.description).toContain("parks each owned empty lane workspace tip");
+    expect(materia?.description).toContain("exact meaningful revisions");
+    expect(materia?.description).toContain("separate publishable chain");
     expect(materia?.description).toContain("without a synthetic merge commit");
-    expect(materia?.description).not.toContain("workspace heads");
+    expect(materia?.description).toContain("rather than automatic ours/theirs resolution");
     expect((materia as { command?: unknown }).command).toBeUndefined();
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });
@@ -212,10 +214,11 @@ describe("bundled utility materia defaults", () => {
       utility: "vcs.finalizeJjWorkspace",
     });
     expect(materia?.description).toContain("explicit agent acceptance");
-    expect(materia?.description).toContain("complete linear history");
+    expect(materia?.description).toContain("complete publishable linear history");
     expect(materia?.description).toContain("original cast bookmark");
     expect(materia?.description).toContain("integration-fix commit");
-    expect(materia?.description).toContain("ownership-checked source and review workspaces");
+    expect(materia?.description).toContain("ownership-checked parked lane heads and review workspaces");
+    expect(materia?.description).toContain("never abandons pre-existing bookmarked baselines");
     expect((materia as { command?: unknown }).command).toBeUndefined();
     expect((materia as { script?: unknown }).script).toBeUndefined();
   });

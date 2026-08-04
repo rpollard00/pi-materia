@@ -875,9 +875,14 @@ describe("config loadouts", () => {
     expect(reviewPrompt).toContain("original cast bookmark");
     expect(reviewPrompt).not.toContain("merge-parent");
     expect(rawDefault.materia?.["Spawn-JJ-Workspace"]?.description).toContain("bookmarkless external jj lane workspace");
+    expect(rawDefault.materia?.["Spawn-JJ-Workspace"]?.description).toContain("shared pinned cast baseline");
     expect(rawDefault.materia?.["Blackbelt-Maintain"]?.description).toContain("never create one");
-    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("linearly rebases");
+    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("parks each owned empty lane workspace tip");
+    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("separate publishable chain");
+    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("rather than automatic ours/theirs resolution");
     expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("original cast bookmark");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("removes ownership-checked parked lane heads");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("never abandons pre-existing bookmarked baselines");
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
     for (const id of ["Spawn-JJ-Workspace", "Build", "Auto-Eval", "Blackbelt-Maintain"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
