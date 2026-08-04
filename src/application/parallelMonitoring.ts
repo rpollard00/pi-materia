@@ -17,6 +17,7 @@ export interface ParallelLaneMonitorSummary {
   workItemIndexes: number[];
   status: MateriaParallelLaneState["status"];
   attempt: number;
+  progress: { position: number; total: number };
   childCastId?: string;
   childSession?: {
     sessionPath: string;
@@ -143,6 +144,7 @@ function summarizeParallelLane(lane: MateriaParallelLaneState): ParallelLaneMoni
     workItemIndexes: [...lane.workItemIndexes],
     status: lane.status,
     attempt: lane.attempt,
+    progress: boundedProgress(lane.progress),
     ...(lane.childCastId !== undefined ? { childCastId: lane.childCastId } : {}),
     ...(lane.childSession ? { childSession: { ...lane.childSession } } : {}),
     ...(lane.executionScope ? {
@@ -158,6 +160,12 @@ function summarizeParallelLane(lane: MateriaParallelLaneState): ParallelLaneMoni
     ...(lane.endedAt !== undefined ? { endedAt: lane.endedAt } : {}),
     updatedAt: lane.updatedAt,
   };
+}
+
+function boundedProgress(value: MateriaParallelLaneState["progress"] | undefined): { position: number; total: number } {
+  const total = value && Number.isSafeInteger(value.total) && value.total >= 0 ? value.total : 0;
+  const position = value && Number.isFinite(value.position) ? Math.floor(value.position) : 0;
+  return { position: Math.min(total, Math.max(0, position)), total };
 }
 
 function countStatus(lanes: readonly ParallelLaneMonitorSummary[], status: ParallelLaneMonitorSummary["status"]): number {

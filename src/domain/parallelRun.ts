@@ -14,6 +14,7 @@ import type {
   MateriaParallelUsageTotals,
 } from "./parallelRunTypes.js";
 import type { ExecutionScope } from "./executionScope.js";
+import type { ParallelLaneProgress } from "./parallelProgress.js";
 
 export const PARALLEL_RUN_STATE_VERSION = 1 as const;
 export const PARALLEL_RUN_DIAGNOSTIC_LIMIT = 64 as const;
@@ -30,7 +31,8 @@ export type ParallelTransitionIgnoreReason =
   | "run_terminal"
   | "phase_regression"
   | "fan_in_phase_regression"
-  | "event_regression";
+  | "event_regression"
+  | "progress_unchanged";
 
 export interface CreateParallelRunStateInput {
   parentCastId: string;
@@ -66,6 +68,8 @@ export interface ParallelLaneTransitionInput extends ParallelTransitionGuard {
   childSession?: MateriaParallelChildSession;
   usage?: MateriaParallelUsageTotals;
   lastEvent?: MateriaParallelLastEvent;
+  /** Progress checkpoints require a newer lastEvent sequence. */
+  progress?: ParallelLaneProgress;
   diagnostic?: MateriaParallelDiagnostic;
   failureReason?: string;
   phase?: MateriaParallelRunPhase;
@@ -130,6 +134,7 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
       name: entry.name,
       streamIndex: entry.streamIndex,
       workItemIndexes: [...entry.workItemIndexes],
+      ...(entry.progressTotal !== undefined ? { progressTotal: entry.progressTotal } : {}),
     };
   });
   const laneIds = new Set<string>();
@@ -160,6 +165,7 @@ export function createParallelRunState(input: CreateParallelRunStateInput): Mate
       workItemIndexes: [...entry.workItemIndexes],
       status: "queued",
       attempt: 1,
+      progress: { position: 0, total: normalizedProgressTotal(entry.progressTotal) },
       updatedAt: now,
       diagnostics: [],
     };
@@ -211,14 +217,17 @@ export function transitionParallelRun(
   if (guardFailure) return ignored(state, guardFailure);
 
   const lane = state.lanes[input.laneId]!;
+  const laneProgress = normalizeStoredProgress(lane.progress, input.progress?.total);
   if (input.lastEvent && lane.lastEvent && input.lastEvent.sequence <= lane.lastEvent.sequence) return ignored(state, "event_regression");
+  const progress = input.progress === undefined ? undefined : normalizeLaneProgress(input.progress, laneProgress.total);
+  if (progress && progress.position === laneProgress.position) return ignored(state, "progress_unchanged");
   if (isTerminalLaneStatus(lane.status) && input.status === undefined && hasTerminalLaneMutation(input)) {
     return ignored(state, "terminal_lane");
   }
   const timestamp = finiteTimestamp(input.timestamp, state.updatedAt);
-  let nextLane = clone(lane);
+  let nextLane = { ...clone(lane), progress: clone(laneProgress) };
   let nextState = clone(state);
-  let changed = false;
+  let changed = lane.progress === undefined;
 
   if (input.status !== undefined) {
     if (isTerminalLaneStatus(lane.status)) return ignored(state, "terminal_lane");
@@ -236,8 +245,14 @@ export function transitionParallelRun(
     }
     if (isTerminalLaneStatus(input.status)) {
       nextLane.endedAt = timestamp;
+      if (input.status === "accepted") nextLane.progress.position = nextLane.progress.total;
       changed = true;
     }
+  }
+
+  if (progress !== undefined) {
+    nextLane.progress = progress;
+    changed = true;
   }
 
   if (input.executionScope !== undefined) {
@@ -367,6 +382,7 @@ export function restartParallelLaneAttempt(
     endedAt: undefined,
     failureReason: undefined,
     lastEvent: undefined,
+    progress: input.preserveChildSession ? normalizeStoredProgress(lane.progress) : { position: 0, total: normalizeStoredProgress(lane.progress).total },
     updatedAt: timestamp,
     diagnostics,
   };
@@ -454,6 +470,7 @@ function hasTerminalLaneMutation(input: ParallelLaneTransitionInput): boolean {
     || input.terminalOutput !== undefined
     || input.childSession !== undefined
     || input.usage !== undefined
+    || input.progress !== undefined
     || input.failureReason !== undefined
     || input.phase !== undefined
     || input.fanInPhase !== undefined;
@@ -506,6 +523,22 @@ function assertNonEmpty(value: string, label: string): void {
 
 function finiteTimestamp(value: number | undefined, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizedProgressTotal(value: unknown): number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function normalizeLaneProgress(value: ParallelLaneProgress, compiledTotal: number): ParallelLaneProgress {
+  const position = typeof value.position === "number" && Number.isFinite(value.position)
+    ? Math.floor(value.position)
+    : 0;
+  return { position: Math.min(compiledTotal, Math.max(0, position)), total: compiledTotal };
+}
+
+function normalizeStoredProgress(value: ParallelLaneProgress | undefined, fallbackTotal?: number): ParallelLaneProgress {
+  const total = normalizedProgressTotal(value?.total ?? fallbackTotal);
+  return normalizeLaneProgress(value ?? { position: 0, total }, total);
 }
 
 function ignored(state: MateriaParallelRunState, reason: ParallelTransitionIgnoreReason): ParallelRunTransitionResult {

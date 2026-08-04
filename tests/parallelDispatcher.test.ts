@@ -78,6 +78,78 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots()).toHaveLength(2);
   });
 
+  test("coordinates sequence-guarded live progress without persistence or event amplification", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const observers = new Map<string, any>();
+    const children = {
+      start: childRunner.start.bind(childRunner),
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: (input: any, observer: any) => {
+        observers.set(input.childCastId, observer);
+        return childRunner.subscribe(input, observer);
+      },
+    };
+    let saves = 0;
+    let parentEvents = 0;
+    let laneEvents = 0;
+    const refreshes: Array<{ position: number; total: number }> = [];
+    const subject = new ParallelLoopDispatcher({
+      children,
+      state: { saveCastState: () => { saves += 1; } },
+      artifacts: {
+        appendEvent: async () => { parentEvents += 1; },
+        lane: {
+          initialize: async () => undefined,
+          appendEvent: async () => { laneEvents += 1; },
+          writeTerminalResult: async () => undefined,
+          writeDiagnostics: async () => undefined,
+          writeUsage: async () => undefined,
+        },
+      },
+      onProgressChange: (run: any) => { refreshes.push({ ...run.lanes["lane-a"].progress }); },
+    } as any);
+
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    expect(Object.values(state.parallelRuns!.build!.lanes).map((lane) => lane.progress)).toEqual([
+      { position: 0, total: 2 }, { position: 0, total: 2 }, { position: 0, total: 2 },
+    ]);
+    const laneA = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-a")!;
+    const baseline = { saves, parentEvents, laneEvents, refreshes: refreshes.length };
+
+    const forward = childRunner.emit(laneA.identity.childCastId, { type: "progress_checkpoint", position: 2, total: 2 });
+    const rewind = childRunner.emit(laneA.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2 });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.progress).toEqual({ position: 1, total: 2 });
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(rewind.sequence);
+    expect({ saves, parentEvents, laneEvents }).toEqual({ saves: baseline.saves, parentEvents: baseline.parentEvents, laneEvents: baseline.laneEvents });
+    expect(refreshes).toHaveLength(baseline.refreshes + 2);
+
+    // A newer duplicate does not advance either the progress watermark or the UI.
+    childRunner.emit(laneA.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2 });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(rewind.sequence);
+    expect(refreshes).toHaveLength(baseline.refreshes + 2);
+
+    // A delayed callback from an older event cannot restore the pre-rewind value.
+    await observers.get(laneA.identity.childCastId).onEvent(forward);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.progress.position).toBe(1);
+
+    childRunner.complete(laneA.identity.childCastId);
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.progress).toEqual({ position: 2, total: 2 });
+
+    const laneB = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-b")!;
+    childRunner.emit(laneB.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2 });
+    await flush(childRunner);
+    childRunner.fail(laneB.identity.childCastId, { error: "failed" });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.progress).toEqual({ position: 1, total: 2 });
+  });
+
   test("clones the base execution scope for each bounded branch and permits a shared cwd", async () => {
     const state = makeState();
     const { childRunner, dispatcher: subject } = dispatcher();

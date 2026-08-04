@@ -1,4 +1,5 @@
 import type { ExecutionScope } from "./executionScope.js";
+import type { ParallelLaneProgress } from "./parallelProgress.js";
 
 /** The normalized plan identity pinned for one parallel run. */
 export interface MateriaParallelPlanIdentity {
@@ -25,6 +26,8 @@ export interface MateriaParallelQueueEntry {
   name: string;
   streamIndex: number;
   workItemIndexes: number[];
+  /** Compiled nominal step count for this lane. */
+  progressTotal?: number;
 }
 
 /** Process-independent identity for a persistent child session. */
@@ -86,6 +89,8 @@ export interface MateriaParallelLaneState {
   workItemIndexes: number[];
   status: MateriaParallelLaneStatus;
   attempt: number;
+  /** Bounded nominal progress; graph rewinds may lower position. */
+  progress: ParallelLaneProgress;
   childCastId?: string;
   /** Detached branch scope used by this child. Core does not interpret exports. */
   executionScope?: ExecutionScope;

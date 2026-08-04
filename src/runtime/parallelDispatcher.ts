@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { collectAcceptedParallelBranches, type IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
+import { deriveNominalParallelLaneProgress } from "../domain/parallelProgress.js";
 import { parallelBranchRegionForEntry } from "../graph/parallelRegions.js";
 import type {
   ChildCastRunnerPort,
@@ -104,6 +105,8 @@ export interface ParallelLoopDispatcherDependencies {
   runtimeEvents?: { emit(state: MateriaCastState, type: string, payload: Record<string, unknown>): Promise<void> };
   budget?: { assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void> };
   onBudgetExceeded?(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId: string): Promise<void>;
+  /** Best-effort redraw request after an observable lane progress/status change. */
+  onProgressChange?(run: MateriaParallelRunState): void;
   now?: () => number;
 }
 
@@ -190,7 +193,16 @@ export class ParallelLoopDispatcher {
         planIdentity: { version: plan.version, planId: plan.planId, workItemCount: plan.workItemCount },
         graphIdentity: { graphHash: parallelGraphHash(prepared) },
         configIdentity: { configHash: input.state.configHash, loopId: input.loopId, maxConcurrency: input.config.maxConcurrency },
-        queue: plan.streams.map((stream) => ({ laneId: stream.laneId, name: stream.name, streamIndex: stream.streamIndex, workItemIndexes: [...stream.workItemIndexes] })),
+        queue: plan.streams.map((stream) => {
+          const compiled = prepared.find((candidate) => candidate.stream.laneId === stream.laneId)!;
+          return {
+            laneId: stream.laneId,
+            name: stream.name,
+            streamIndex: stream.streamIndex,
+            workItemIndexes: [...stream.workItemIndexes],
+            progressTotal: nominalProgressTotal(compiled.compiledLoadout),
+          };
+        }),
         now: this.#now(),
       });
       const baseScope = input.state.baseScope ?? createBaseExecutionScope(input.state.castId, input.state.cwd);
@@ -483,7 +495,10 @@ export class ParallelLoopDispatcher {
       // detailed evidence. Merge checkpoints only after entering this serialized
       // tail so a queued stale callback cannot regress the lane baseline.
       const usage = checkpoint ? cumulativeUsage([this.#latestUsage.get(active.childCastId), checkpoint]) : undefined;
-      const applied = this.#applyLaneTransition(input, state, { laneId: stream.laneId, attempt: active.attempt, childCastId: event.childCastId, lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt }, ...(usage ? { usage } : {}), timestamp: event.occurredAt }, false);
+      const progress = event.type === "progress_checkpoint" && event.position !== undefined && event.total !== undefined
+        ? { position: event.position, total: event.total }
+        : undefined;
+      const applied = this.#applyLaneTransition(input, state, { laneId: stream.laneId, attempt: active.attempt, childCastId: event.childCastId, lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt }, ...(usage ? { usage } : {}), ...(progress ? { progress } : {}), timestamp: event.occurredAt }, false);
       // A real cumulative usage delta is itself a durable boundary. The usage
       // checkpoint saves both accounting and the latest replay watermark.
       if (usage && applied) await this.#aggregateUsage(state, input, stream, active, usage);
@@ -819,7 +834,13 @@ export class ParallelLoopDispatcher {
     replaceParallelState(state, result.state);
     this.#run = state.parallelRuns?.[input.loopId];
     if (persist) this.#deps.state.saveCastState(input.pi, state);
+    if (transition.progress !== undefined || transition.status !== undefined) this.#requestProgressRefresh();
     return true;
+  }
+
+  #requestProgressRefresh(): void {
+    if (!this.#run) return;
+    try { this.#deps.onProgressChange?.(this.#run); } catch { /* presentation is best effort */ }
   }
 
   async #notifyRunFailure(input: ParallelLoopDispatchInput, state: MateriaCastState, runId: string, reason: string): Promise<void> {
@@ -930,6 +951,13 @@ function compileStreams(input: ParallelLoopDispatchInput, plan: NormalizedParall
     return { stream, compiledLoadout: compiled.value };
   });
 }
+function nominalProgressTotal(compiled: CompiledLoopChildLoadout): number {
+  return deriveNominalParallelLaneProgress({
+    definition: compiled.nominalProgress,
+    workItemCursor: Number.POSITIVE_INFINITY,
+  }).total;
+}
+
 function boundedParallelChildData(run: MateriaParallelRunState, stream: NormalizedParallelStream): Record<string, unknown> {
   return { parallelContext: boundedParallelContext(run, stream), parallelRun: { runId: run.runId, planId: run.planIdentity.planId, loopId: run.loopId, laneId: stream.laneId }, parallelLane: { laneId: stream.laneId, name: stream.name, streamIndex: stream.streamIndex, workItemIndexes: [...stream.workItemIndexes] } };
 }

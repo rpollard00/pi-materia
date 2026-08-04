@@ -45,7 +45,8 @@ describe("parallel monitor summaries", () => {
       terminalOutput: { satisfied: true },
       updatedAt: 20,
     };
-    state.lanes["lane-ui"] = { ...state.lanes["lane-ui"]!, status: "running", updatedAt: 21 };
+    state.lanes["lane-api"]!.progress = { position: 99, total: 8 };
+    state.lanes["lane-ui"] = { ...state.lanes["lane-ui"]!, status: "running", progress: { position: -3, total: 4 }, updatedAt: 21 };
     state.phase = "awaiting_lanes";
     state.updatedAt = 21;
 
@@ -59,7 +60,9 @@ describe("parallel monitor summaries", () => {
       childSession: { artifactRoot: "/tmp/child-api/artifacts" },
       scope: { id: "scope-api", cwd: "/tmp/branch-api", exportNames: ["integration"] },
       output: '{"satisfied":true}',
+      progress: { position: 8, total: 8 },
     });
+    expect(summary.lanes[1]!.progress).toEqual({ position: 0, total: 4 });
   });
 
   test("reports intrinsic barrier completion without exposing VCS conflict state", () => {
