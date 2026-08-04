@@ -150,7 +150,7 @@ export async function resolveRoleGenerationModelChoice(
   const activeLabel = activeModel ? `${activeModel.provider}/${activeModel.id}` : null;
   const fallback = (warnings: string[]): ResolvedRoleGenerationModelChoice => ({
     model: activeModel,
-    supportedThinkingLevels: catalogModelForValue(catalog, activeLabel)?.supportedThinkingLevels,
+    supportedThinkingLevels: catalogModelForValue(catalog, activeLabel)?.supportedThinkingLevels.filter(isMateriaThinkingLevel),
     resolution: { requestedModel, effectiveModel: activeLabel, fallback: requestedModel !== null, warnings },
   });
 
@@ -176,7 +176,7 @@ export async function resolveRoleGenerationModelChoice(
   const model = matches[0];
   return {
     model,
-    supportedThinkingLevels: catalogModel.supportedThinkingLevels,
+    supportedThinkingLevels: catalogModel.supportedThinkingLevels.filter(isMateriaThinkingLevel),
     resolution: { requestedModel, effectiveModel: catalogModel.value, fallback: false, warnings: [] },
   };
 }

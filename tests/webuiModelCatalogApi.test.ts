@@ -123,8 +123,8 @@ describe("GET /api/models", () => {
     expect(getAvailableCalls).toBe(1);
   });
 
-  test("derives default reasoning thinking levels from model metadata when no map is present", async () => {
-    const xhighModel = {
+  test("keeps ordinary defaults while requiring explicit metadata for extended thinking levels", async () => {
+    const reasoningModel = {
       provider: "anthropic",
       id: "claude-opus-4-6-test",
       name: "Claude Opus 4.6 Test",
@@ -132,14 +132,48 @@ describe("GET /api/models", () => {
       reasoning: true,
     };
     const baseUrl = await startTestServer({
-      modelRegistry: { getAvailable: () => [xhighModel] },
+      modelRegistry: { getAvailable: () => [reasoningModel] },
     });
 
     const response = await fetch(`${baseUrl}/api/models`);
     const body = await response.json() as { models: Array<{ supportedThinkingLevels: string[] }> };
 
     expect(response.status).toBe(200);
-    expect(body.models[0]?.supportedThinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh"]);
+    expect(body.models[0]?.supportedThinkingLevels).toEqual(["off", "minimal", "low", "medium", "high"]);
+  });
+
+  test("surfaces max independently for active and registry models", async () => {
+    const activeModel = {
+      provider: "openai-codex",
+      id: "gpt-active-max",
+      reasoning: true,
+      thinkingLevelMap: {
+        xhigh: null,
+        max: "max",
+      },
+    };
+    const registryModel = {
+      provider: "openai-codex",
+      id: "gpt-registry-max",
+      reasoning: true,
+      thinkingLevelMap: {
+        max: "max",
+      },
+    };
+    const baseUrl = await startTestServer({
+      getActiveModel: () => activeModel,
+      modelRegistry: { getAvailable: () => [registryModel] },
+    });
+
+    const response = await fetch(`${baseUrl}/api/models`);
+    const body = await response.json() as {
+      activeModel: { supportedThinkingLevels: string[] } | null;
+      models: Array<{ supportedThinkingLevels: string[] }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.activeModel?.supportedThinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "max"]);
+    expect(body.models[0]?.supportedThinkingLevels).toEqual(["off", "minimal", "low", "medium", "high", "max"]);
   });
 
   test("skips malformed registry entries without dropping valid models", async () => {

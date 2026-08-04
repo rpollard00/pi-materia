@@ -37,7 +37,6 @@ export interface MateriaModelCatalogResponse {
 
 const THINKING_LEVEL_ORDER: readonly MateriaThinkingLevel[] = MATERIA_THINKING_LEVELS;
 const STANDARD_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high'];
-const XHIGH_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = [...STANDARD_REASONING_THINKING_LEVELS, 'xhigh'];
 const NON_REASONING_THINKING_LEVELS: MateriaThinkingLevel[] = ['off'];
 
 export async function buildMateriaModelCatalog(source?: MateriaModelCatalogSource): Promise<MateriaModelCatalogResponse> {
@@ -162,24 +161,7 @@ function supportedThinkingLevelsFor(model: Record<string, unknown>, reasoning: b
     });
   }
 
-  return locallySupportsXhigh(model) ? [...XHIGH_REASONING_THINKING_LEVELS] : [...STANDARD_REASONING_THINKING_LEVELS];
-}
-
-function locallySupportsXhigh(model: Record<string, unknown>): boolean {
-  const id = stringField(model.id)?.toLowerCase();
-  if (!id) return false;
-
-  return (
-    id.includes('gpt-5.2') ||
-    id.includes('gpt-5.3') ||
-    id.includes('gpt-5.4') ||
-    id.includes('gpt-5.5') ||
-    id.includes('deepseek-v4-pro') ||
-    id.includes('opus-4-6') ||
-    id.includes('opus-4.6') ||
-    id.includes('opus-4-7') ||
-    id.includes('opus-4.7')
-  );
+  return [...STANDARD_REASONING_THINKING_LEVELS];
 }
 
 function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unknown> | undefined {
