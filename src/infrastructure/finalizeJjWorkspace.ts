@@ -151,12 +151,24 @@ export async function finalizeJjWorkspace(
   }
 
   const reviewWorking = await readRevision(runJj, "@", input.cwd, false);
-  if (reviewWorking.parents.length !== 1 || reviewWorking.parents[0] !== previous.commitId) {
+  // The review prompt asks the agent to return to the rewritten final tip
+  // after resolving stable changes. `jj edit <final-change>` therefore leaves
+  // the workspace at that tip, while an untouched review (or a correction)
+  // normally leaves its empty/meaningful working child there. Accept both
+  // valid shapes; rejecting the former strands a fully resolved integration
+  // before publication.
+  const reviewAtFinalTip = reviewWorking.changeId === meaningfulTip.changeId;
+  const reviewDirectlyAfterTip = reviewWorking.parents.length === 1 && reviewWorking.parents[0] === previous.commitId;
+  if (!reviewAtFinalTip && !reviewDirectlyAfterTip) {
     throw new Error("Finalize-JJ-Workspace review workspace is not positioned directly after the rewritten final tip.");
   }
   if (reviewWorking.conflict) {
     throw new Error("Finalize-JJ-Workspace cannot publish an integration with unresolved conflicts in its linear ancestry.");
   }
+  // Reading `@` with the working copy enabled may snapshot a last reviewer
+  // edit and rewrite the stable final change id's commit id. Publish that
+  // current revision rather than the pre-snapshot commit identity.
+  if (reviewAtFinalTip) meaningfulTip = { ...reviewWorking };
 
   const baseStatus = await runJj(["status"], input.baseScope.cwd, false);
   if (!isCleanStatus(baseStatus)) throw new Error("Finalize-JJ-Workspace base working copy is dirty; all workspaces were preserved.");
@@ -166,7 +178,7 @@ export async function finalizeJjWorkspace(
 
   let published: JjRevisionIdentity = revisionIdentity(meaningfulTip);
   let description: string | undefined;
-  const reviewCorrection = !reviewWorking.empty;
+  const reviewCorrection = !reviewAtFinalTip && !reviewWorking.empty;
   if (reviewCorrection) {
     if (reviewWorking.parents[0] !== meaningfulTip.commitId) {
       await runJj(["rebase", "-r", reviewWorking.changeId, "-d", meaningfulTip.commitId], integration.repositoryRoot);

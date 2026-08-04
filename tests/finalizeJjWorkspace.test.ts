@@ -136,6 +136,30 @@ describe("Finalize-JJ-Workspace", () => {
     expect(mutations).toEqual([]);
   });
 
+  test("accepts a review workspace returned directly to the rewritten final tip", async () => {
+    let moved = false;
+    let createdBase = false;
+    const result = await finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, {
+      createBackend: () => ({ inspect: async (reference: any) => record(reference.workspaceName, reference.owner), cleanup: async () => ({} as any) }),
+      runJj: async (args, cwd) => {
+        if (args[0] === "status") return "The working copy has no changes.\n";
+        if (args[0] === "bookmark") { moved = true; return ""; }
+        if (args[0] === "new") { createdBase = true; return ""; }
+        const revision = args[args.indexOf("-r") + 1];
+        if (String(revision).includes("conflicts()")) return "";
+        if (revision === "@" && cwd === integrationPath) return details("final-rewritten", "changefinal", "base", false, false);
+        if (revision === "changebase") return details("base", "changebase", "root", false, false);
+        if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+        if (revision === "blackbelt/test") return details(moved ? "final-rewritten" : "old", moved ? "changefinal" : "changeold", "base", false, false);
+        if (revision === "@" && cwd === repositoryRoot && createdBase) return details("working", "changeworking", "final-rewritten", false, true);
+        throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
+      },
+    });
+
+    expect(result.integrationRevision).toEqual({ commitId: "final-rewritten", changeId: "changefinal" });
+    expect(result.reviewCorrection).toBe(false);
+  });
+
   test("publishes the meaningful parent when review working commit is empty", async () => {
     const mutations: string[] = [];
     let moved = false;
