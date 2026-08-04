@@ -631,32 +631,18 @@ export class ParallelLoopDispatcher {
       // revival and delayed observer callbacks.
       for (const childCastId of childIds) {
         const lane = Object.values(run.lanes).find((candidate) => candidate.childCastId === childCastId);
-        if (!lane) continue;
-        const observation = await this.#deps.children.observe({ childCastId }).catch(() => undefined);
-        if (!observation || !isParallelUsage(observation.snapshot.usage)) continue;
-        const observedUsage = cumulativeUsage([
-          observation.snapshot.usage,
-          this.#latestUsage.get(childCastId),
-          lane.usage && isParallelUsage(lane.usage) ? lane.usage : undefined,
-        ])!;
-        if (!this.#latestUsage.has(childCastId) && lane.usage) this.#latestUsage.set(childCastId, compactParallelUsage(lane.usage));
-        const latestEvent = [...observation.snapshot.events, ...observation.events]
-          .reduce<ChildCastStreamEvent | undefined>((latest, event) => !latest || event.sequence > latest.sequence ? event : latest, undefined);
-        // Cancellation is a durable boundary. Persist the observed cumulative
-        // usage together with a safe replay watermark before aborting, even
-        // when this dispatcher never received the child's live callbacks.
-        this.#applyLaneTransition(dispatchInput, state, {
-          laneId: lane.laneId,
-          attempt: lane.attempt,
-          childCastId,
-          usage: observedUsage,
-          ...(latestEvent ? { lastEvent: { sequence: latestEvent.sequence, type: latestEvent.type, occurredAt: latestEvent.occurredAt } } : {}),
-          timestamp: observation.snapshot.updatedAt,
-        }, false);
-        await this.#aggregateUsage(state, dispatchInput, streamForPersistedLane(lane), activeForPersistedLane(state, run, lane), observedUsage, false);
+        if (lane) await this.#reconcileCancellationUsage(state, dispatchInput, run, lane);
       }
 
       await Promise.all([...childIds].map((childCastId) => this.#abortChild(childCastId, reason)));
+      // Process shutdown can flush a final canonical checkpoint. Live callbacks
+      // deliberately cannot aggregate while cancellation owns the run, so drain
+      // them and reconcile the runner snapshot once more before terminalizing.
+      await Promise.all([...this.#eventTails.values()].map((tail) => tail.catch(() => undefined)));
+      for (const childCastId of childIds) {
+        const lane = Object.values(this.#run?.lanes ?? run.lanes).find((candidate) => candidate.childCastId === childCastId);
+        if (lane) await this.#reconcileCancellationUsage(state, dispatchInput, this.#run ?? run, lane);
+      }
       const timestamp = this.#now();
       for (const laneId of run.queueOrder) {
         const lane = this.#run?.lanes[laneId];
@@ -679,6 +665,32 @@ export class ParallelLoopDispatcher {
     }
     this.#active.clear();
     this.#releaseTerminalCoordinatorState();
+  }
+
+  async #reconcileCancellationUsage(state: MateriaCastState, input: ParallelLoopDispatchInput, run: MateriaParallelRunState, lane: MateriaParallelLaneState): Promise<void> {
+    const childCastId = lane.childCastId;
+    if (!childCastId) return;
+    const observation = await this.#deps.children.observe({ childCastId }).catch(() => undefined);
+    if (!observation || !isParallelUsage(observation.snapshot.usage)) return;
+    const observedUsage = cumulativeUsage([
+      observation.snapshot.usage,
+      this.#latestUsage.get(childCastId),
+      lane.usage && isParallelUsage(lane.usage) ? lane.usage : undefined,
+    ])!;
+    if (!this.#latestUsage.has(childCastId) && lane.usage) this.#latestUsage.set(childCastId, compactParallelUsage(lane.usage));
+    const latestEvent = [...observation.snapshot.events, ...observation.events]
+      .reduce<ChildCastStreamEvent | undefined>((latest, event) => !latest || event.sequence > latest.sequence ? event : latest, undefined);
+    // Persist baseline and replay watermark together. Repeating this settlement
+    // after abort is monotonic and #aggregateUsage deltas it exactly once.
+    this.#applyLaneTransition(input, state, {
+      laneId: lane.laneId,
+      attempt: lane.attempt,
+      childCastId,
+      usage: observedUsage,
+      ...(latestEvent ? { lastEvent: { sequence: latestEvent.sequence, type: latestEvent.type, occurredAt: latestEvent.occurredAt } } : {}),
+      timestamp: observation.snapshot.updatedAt,
+    }, false);
+    await this.#aggregateUsage(state, input, streamForPersistedLane(lane), activeForPersistedLane(state, run, lane), observedUsage, false);
   }
 
   async #abortChild(childCastId: string, reason: string): Promise<void> { await this.#deps.children.abort({ childCastId, reason }).catch(() => undefined); }

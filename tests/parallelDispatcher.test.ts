@@ -873,10 +873,18 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const state = makeState();
     const childRunner = createFakeChildCastRunner({ now: () => 10 });
     let coordinatorAlive = false;
+    const usage = { tokens: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, total: 7 }, cost: { input: 0.3, output: 0.4, cacheRead: 0, cacheWrite: 0, total: 0.7 } };
+    const shutdownUsage = { tokens: { input: 5, output: 6, cacheRead: 0, cacheWrite: 0, total: 11 }, cost: { input: 0.5, output: 0.6, cacheRead: 0, cacheWrite: 0, total: 1.1 } };
+    let shutdownCheckpoint: { sequence: number } | undefined;
     const children = {
       start: childRunner.start.bind(childRunner),
       resume: childRunner.resume.bind(childRunner),
-      abort: childRunner.abort.bind(childRunner),
+      abort: async (input: any) => {
+        // Simulate parser output flushed while process termination is pending.
+        childRunner.emit(input.childCastId, { type: "message_end", usage: { tokens: { ...shutdownUsage.tokens, total: 999 }, cost: { ...shutdownUsage.cost, total: 99 } } });
+        shutdownCheckpoint = childRunner.emit(input.childCastId, { type: "usage_checkpoint", usage: shutdownUsage });
+        return childRunner.abort(input);
+      },
       observe: childRunner.observe.bind(childRunner),
       // Simulate a coordinator that crashes before receiving child events.
       subscribe: (input: any, observer: any) => coordinatorAlive
@@ -888,7 +896,6 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const initial = new ParallelLoopDispatcher({ children, state: statePort } as any);
     await initial.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
     const child = childRunner.listSnapshots()[0]!;
-    const usage = { tokens: { input: 3, output: 4, cacheRead: 0, cacheWrite: 0, total: 7 }, cost: { input: 0.3, output: 0.4, cacheRead: 0, cacheWrite: 0, total: 0.7 } };
     const checkpoint = childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
     expect(state.runState.usage.tokens.total).toBe(0);
 
@@ -896,17 +903,21 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     await cancelling.cancel({ pi: {} as any, state, loopId: "build" });
 
     const cancelledLane = state.parallelRuns!.build!.lanes["lane-a"]!;
-    expect(cancelledLane.usage).toEqual(usage);
-    expect(cancelledLane.lastEvent?.sequence).toBeGreaterThanOrEqual(checkpoint.sequence);
-    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.usage).toEqual(usage);
-    expect(state.runState.usage.tokens.total).toBe(7);
+    expect(cancelledLane.usage).toEqual(shutdownUsage);
+    expect(cancelledLane.lastEvent?.sequence).toBeGreaterThanOrEqual(shutdownCheckpoint?.sequence ?? checkpoint.sequence);
+    expect(saved.at(-1)!.parallelRuns!.build!.lanes["lane-a"]!.usage).toEqual(shutdownUsage);
+    expect(state.runState.usage.tokens.total).toBe(11);
 
     coordinatorAlive = true;
     const revived = new ParallelLoopDispatcher({ children, state: statePort } as any);
     await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 1 } });
     await flush(childRunner);
+    const advancedUsage = { tokens: { input: 7, output: 8, cacheRead: 0, cacheWrite: 0, total: 15 }, cost: { input: 0.7, output: 0.8, cacheRead: 0, cacheWrite: 0, total: 1.5 } };
+    childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
+    childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage: advancedUsage });
+    await flush(childRunner);
 
-    expect(state.runState.usage.tokens.total).toBe(7);
-    expect(state.runState.usage.cost.total).toBeCloseTo(0.7);
+    expect(state.runState.usage.tokens.total).toBe(15);
+    expect(state.runState.usage.cost.total).toBeCloseTo(1.5);
   });
 });
