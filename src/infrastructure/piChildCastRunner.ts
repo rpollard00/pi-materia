@@ -4,6 +4,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { cloneExecutionScope } from "../domain/executionScope.js";
 import {
+  CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE,
   CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
   DEFAULT_CHILD_CAST_RETAINED_DIAGNOSTICS,
   DEFAULT_CHILD_CAST_RETAINED_EVENTS,
@@ -40,6 +41,7 @@ import {
   parsePiJsonEventLine,
   positiveLimit,
   processPlatformSupportsProcessGroups,
+  progressCheckpointFromEvent,
   terminateProcessTree,
   terminalFromEvent,
   usageCheckpointFromEvent,
@@ -48,7 +50,7 @@ import {
   type BoundedCapture,
 } from "./piChildCastSupport.js";
 
-export { buildPiChildArgs, parsePiJsonEventLine, usageCheckpointFromEvent } from "./piChildCastSupport.js";
+export { buildPiChildArgs, parsePiJsonEventLine, progressCheckpointFromEvent, usageCheckpointFromEvent } from "./piChildCastSupport.js";
 
 /** Current on-disk protocol understood by the child-launch extension. */
 export const PI_CHILD_LAUNCH_SPEC_VERSION = 1 as const;
@@ -532,6 +534,11 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       this.#emit(record, { type: "usage_checkpoint", usage });
       return;
     }
+    const progress = progressCheckpointFromEvent(parsed);
+    if (progress) {
+      this.#emit(record, { type: "progress_checkpoint", ...progress });
+      return;
+    }
     record.stderrHadNonTerminalOutput = true;
   }
 
@@ -576,13 +583,17 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     }
 
     const usage = usageCheckpointFromEvent(event);
-    if (!usage) return;
-    record.snapshot.usage = mergeChildCastUsage(record.snapshot.usage, usage);
-    this.#emit(record, {
-      type: "usage_checkpoint",
-      usage,
-      ...(typeof event.occurredAt === "number" ? { occurredAt: event.occurredAt } : {}),
-    });
+    if (usage) {
+      record.snapshot.usage = mergeChildCastUsage(record.snapshot.usage, usage);
+      this.#emit(record, {
+        type: "usage_checkpoint",
+        usage,
+        ...(typeof event.occurredAt === "number" ? { occurredAt: event.occurredAt } : {}),
+      });
+      return;
+    }
+    const progress = progressCheckpointFromEvent(event);
+    if (progress) this.#emit(record, { type: "progress_checkpoint", ...progress });
   }
 
   async #handleClose(record: MutableChildRecord, code: number | null, signal: NodeJS.Signals | null): Promise<void> {
@@ -667,6 +678,8 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       ...(input.socketId !== undefined ? { socketId: input.socketId } : {}),
       ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}),
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
+      ...(input.position !== undefined ? { position: input.position } : {}),
+      ...(input.total !== undefined ? { total: input.total } : {}),
     };
     record.snapshot.events = retainTail(record.snapshot.events, event, this.#maxRetainedEvents);
     record.snapshot.updatedAt = occurredAt;
@@ -728,6 +741,7 @@ const CHILD_PROTOCOL_EVENT_TYPES = new Set([
   "child_terminal",
   "terminal",
   CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
+  CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE,
 ]);
 
 function retainTail<T>(values: readonly T[], value: T, limit: number): T[] {

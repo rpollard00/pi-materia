@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { describe, expect, test } from "bun:test";
-import { createPiChildCastRunner, usageCheckpointFromEvent, type PiChildProcessSpawner } from "../src/infrastructure/index.js";
+import { createPiChildCastRunner, progressCheckpointFromEvent, usageCheckpointFromEvent, type PiChildProcessSpawner } from "../src/infrastructure/index.js";
 import type { StartChildCastInput } from "../src/application/index.js";
 
 class FakeChild extends EventEmitter {
@@ -322,6 +322,56 @@ describe("Pi child cast runner", () => {
     expect(observation?.events.filter((event) => event.type === "usage_checkpoint")).toEqual([
       expect.objectContaining({ usage }),
     ]);
+    expect(observation?.snapshot.diagnostics).toEqual([]);
+  });
+
+  test("strictly projects bounded progress checkpoints from stdout and redirected stderr", async () => {
+    expect(progressCheckpointFromEvent({ type: "pi_materia_child_progress", position: 3, total: 5 })).toEqual({ position: 3, total: 5 });
+    expect(progressCheckpointFromEvent({ type: "pi_materia_child_progress", position: 3, total: 5, socketId: "Socket-2", workItemId: "item-1", payload: { ignored: true } })).toEqual({
+      position: 3,
+      total: 5,
+      socketId: "Socket-2",
+      workItemId: "item-1",
+    });
+    for (const malformed of [
+      { type: "message_update", position: 1, total: 2 },
+      { type: "pi_materia_child_progress", position: -1, total: 2 },
+      { type: "pi_materia_child_progress", position: 3, total: 2 },
+      { type: "pi_materia_child_progress", position: 1.5, total: 2 },
+      { type: "pi_materia_child_progress", position: 1, total: Number.MAX_SAFE_INTEGER + 1 },
+      { type: "pi_materia_child_progress", position: "1", total: 2 },
+      { type: "pi_materia_child_progress", position: 1, total: 2, socketId: "x".repeat(513) },
+      { type: "pi_materia_child_progress", position: 1, total: 2, workItemId: "" },
+    ]) expect(progressCheckpointFromEvent(malformed)).toBeUndefined();
+
+    let child!: FakeChild;
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        child = new FakeChild();
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      maxRetainedEvents: 3,
+      now: () => 148,
+    });
+    await runner.start(input());
+    const secret = "UNSUPPORTED_PROGRESS_FIELD".repeat(100);
+    child.stdout.write(`${JSON.stringify({ type: "pi_materia_child_progress", position: 0, total: 4, payload: { secret }, socketId: secret })}\n`);
+    child.stdout.write(`${JSON.stringify({ type: "pi_materia_child_progress", position: -1, total: 4 })}\n`);
+    for (let position = 1; position <= 4; position++) {
+      const target = position % 2 === 0 ? child.stderr : child.stdout;
+      target.write(`${JSON.stringify({ type: "pi_materia_child_progress", position, total: 4 })}\n`);
+    }
+
+    const observation = await runner.observe({ childCastId: "child-1" });
+    expect(observation?.events).toHaveLength(3);
+    expect(observation?.events.map((event) => ({ type: event.type, position: event.position, total: event.total }))).toEqual([
+      { type: "progress_checkpoint", position: 2, total: 4 },
+      { type: "progress_checkpoint", position: 3, total: 4 },
+      { type: "progress_checkpoint", position: 4, total: 4 },
+    ]);
+    expect(JSON.stringify(observation?.events)).not.toContain(secret);
+    expect(observation?.events.every((event) => event.payload === undefined && event.socketId === undefined)).toBe(true);
     expect(observation?.snapshot.diagnostics).toEqual([]);
   });
 

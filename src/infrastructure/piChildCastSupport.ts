@@ -3,6 +3,7 @@ import { StringDecoder } from "node:string_decoder";
 import { rename, writeFile } from "node:fs/promises";
 import { createExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import {
+  CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE,
   CHILD_USAGE_CHECKPOINT_EVENT_TYPE,
   type ChildCastCompiledLoadout,
   type ChildCastTerminalResult,
@@ -186,6 +187,41 @@ export function extractEventOutput(event: Record<string, unknown>): unknown {
 
 export function usageCheckpointFromEvent(event: Record<string, unknown>): ChildCastUsage | undefined {
   return event.type === CHILD_USAGE_CHECKPOINT_EVENT_TYPE ? childUsage(event.usage) : undefined;
+}
+
+const MAX_CHILD_CHECKPOINT_IDENTIFIER_LENGTH = 512;
+
+/**
+ * Project only supported scalar fields from a child progress record.
+ *
+ * Safe integers prevent precision loss at the subprocess boundary, and the
+ * relational check rejects impossible positions rather than normalizing
+ * untrusted records. Optional node identifiers are bounded before forwarding;
+ * all content-bearing and provider-added fields are intentionally omitted.
+ */
+export function progressCheckpointFromEvent(
+  event: Record<string, unknown>,
+): { position: number; total: number; socketId?: string; workItemId?: string } | undefined {
+  if (event.type !== CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE) return undefined;
+  const position = event.position;
+  const total = event.total;
+  if (!Number.isSafeInteger(position) || !Number.isSafeInteger(total)) return undefined;
+  if ((position as number) < 0 || (total as number) < 0 || (position as number) > (total as number)) return undefined;
+  const socketId = checkpointIdentifier(event, "socketId");
+  const workItemId = checkpointIdentifier(event, "workItemId");
+  if (socketId === null || workItemId === null) return undefined;
+  return {
+    position: position as number,
+    total: total as number,
+    ...(socketId ? { socketId } : {}),
+    ...(workItemId ? { workItemId } : {}),
+  };
+}
+
+function checkpointIdentifier(event: Record<string, unknown>, field: "socketId" | "workItemId"): string | null | undefined {
+  if (!Object.hasOwn(event, field)) return undefined;
+  const value = event[field];
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_CHILD_CHECKPOINT_IDENTIFIER_LENGTH ? value : null;
 }
 
 export function childUsage(value: unknown): ChildCastUsage | undefined {

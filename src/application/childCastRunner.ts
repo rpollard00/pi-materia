@@ -133,6 +133,10 @@ export interface ChildCastStreamEvent {
   workItemId?: string;
   /** Cumulative child-cast usage snapshot; repeated events must be idempotent. */
   usage?: ChildCastUsage;
+  /** Bounded nominal position, present only on dedicated progress checkpoints. */
+  position?: number;
+  /** Bounded nominal total, present only on dedicated progress checkpoints. */
+  total?: number;
 }
 
 /** Durable state returned by start, observe, and resume. */

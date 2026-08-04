@@ -37,6 +37,8 @@ export interface FakeChildCastEventInput {
   socketId?: string;
   workItemId?: string;
   usage?: ChildCastUsage;
+  position?: number;
+  total?: number;
   occurredAt?: number;
 }
 
@@ -234,6 +236,8 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       ...(input.socketId !== undefined ? { socketId: input.socketId } : {}),
       ...(input.workItemId !== undefined ? { workItemId: input.workItemId } : {}),
       ...(input.usage !== undefined ? { usage: clone(input.usage) } : {}),
+      ...(input.position !== undefined ? { position: input.position } : {}),
+      ...(input.total !== undefined ? { total: input.total } : {}),
     };
     this.nextSequences.set(childCastId, event.sequence + 1);
     const nextUsage = input.type === "usage_checkpoint" && input.usage
