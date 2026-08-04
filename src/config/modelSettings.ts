@@ -10,7 +10,7 @@ import {
   type ModelPolicyDocument,
   type ModelPolicyPreferredSuggestion,
 } from "../domain/modelPolicy.js";
-import { isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
+import { MATERIA_THINKING_LEVELS, isMateriaThinkingLevel, type MateriaThinkingLevel } from "../domain/thinking.js";
 
 export interface ActiveModelInfo {
   model?: Model<Api>;
@@ -67,7 +67,7 @@ export class MateriaModelSettingsError extends Error {
   }
 }
 
-const THINKING_LEVEL_ORDER: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const THINKING_LEVEL_ORDER: ThinkingLevel[] = [...MATERIA_THINKING_LEVELS];
 const THINKING_LEVELS = new Set<string>(THINKING_LEVEL_ORDER);
 const STANDARD_REASONING_THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 const NON_REASONING_THINKING_LEVELS: ThinkingLevel[] = ["off"];
@@ -419,12 +419,16 @@ function supportedThinkingLevelsFor(model: Model<Api> | undefined): ThinkingLeve
     return THINKING_LEVEL_ORDER.filter((level) => {
       const mapped = map[level];
       if (mapped === null) return false;
-      if (level === "xhigh") return mapped !== undefined;
+      if (level === "xhigh" || level === "max") return mapped !== undefined;
       return true;
     });
   }
 
-  return safelySupportsXhigh(model) ? [...THINKING_LEVEL_ORDER] : [...STANDARD_REASONING_THINKING_LEVELS];
+  const extendedLevels = safelySupportedExtendedThinkingLevels(model);
+  return [
+    ...STANDARD_REASONING_THINKING_LEVELS,
+    ...THINKING_LEVEL_ORDER.filter((level) => (level === "xhigh" || level === "max") && extendedLevels.includes(level)),
+  ];
 }
 
 function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -437,11 +441,11 @@ function thinkingLevelMapFor(model: Record<string, unknown>): Record<string, unk
   return undefined;
 }
 
-function safelySupportsXhigh(model: Model<Api>): boolean {
+function safelySupportedExtendedThinkingLevels(model: Model<Api>): ThinkingLevel[] {
   try {
-    return getSupportedThinkingLevels(model).includes("xhigh");
+    return getSupportedThinkingLevels(model).filter((level): level is ThinkingLevel => level === "xhigh" || level === "max");
   } catch {
-    return false;
+    return [];
   }
 }
 

@@ -123,6 +123,41 @@ describe("native per-materia model settings", () => {
     expect(usage.modelSelections[0].fallbackReason).toBeUndefined();
   });
 
+  test("applies and records max when the effective model supports it", async () => {
+    const harness = await makeHarness(agentConfig({ model: "openai/gpt-max", thinking: "max" }));
+    harness.models = [{
+      provider: "openai",
+      id: "gpt-max",
+      name: "GPT Max",
+      api: "openai",
+      reasoning: true,
+      thinkingLevelMap: { max: "max" },
+    }];
+
+    await harness.runCommand("materia", "cast max thinking");
+
+    expect(harness.setThinkingLevelCalls).toEqual(["max"]);
+    harness.appendAssistantMessage("done", {
+      usage: { input: 2, output: 3, totalTokens: 5 },
+      model: { provider: "openai", id: "gpt-max", api: "openai" },
+      thinkingLevel: "max",
+    });
+    await harness.emit("agent_end", { messages: [] });
+
+    const context = await readCastFile(harness, "contexts/Socket-1-1.md");
+    expect(context).toContain("thinking: max");
+    const manifest = JSON.parse(await readCastFile(harness, "manifest.json"));
+    expect(manifest.entries.some((entry: any) => entry.materiaModel?.requestedThinking === "max" && entry.materiaModel?.effectiveThinking === "max")).toBe(true);
+    const events = (await readCastFile(harness, "events.jsonl")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(events.some((event) => event.type === "materia_model_settings"
+      && event.data.materiaModel.requestedThinking === "max"
+      && event.data.materiaModel.effectiveThinking === "max")).toBe(true);
+    const usage = await readUsage(harness);
+    expect(usage.thinkingLevel).toBe("max");
+    expect(usage.modelSelections[0]).toMatchObject({ requestedThinking: "max", effectiveThinking: "max", thinking: "max" });
+    expect(usage.turns[0]).toMatchObject({ requestedThinking: "max", effectiveThinking: "max", thinking: "max" });
+  });
+
   test("different materia apply different model settings across one cast", async () => {
     const harness = await makeHarness(twoAgentConfig());
 
@@ -267,6 +302,33 @@ describe("native per-materia model settings", () => {
     expect(usage.modelSelections[0]).toMatchObject({ requestedThinking: "high", thinking: "off", thinkingFallbackReason: "unsupported_thinking", fallbackReason: "unsupported_thinking" });
     const context = await readCastFile(harness, "contexts/Socket-1-1.md");
     expect(context).toContain('thinking source: safe thinking fallback (configured thinking "high" unsupported: unsupported_thinking)');
+  });
+
+  test("unsupported max preserves a safe level and warns", async () => {
+    const harness = await makeHarness(agentConfig({ model: "openai/gpt-xhigh", thinking: "max" }));
+    harness.models = [{
+      provider: "openai",
+      id: "gpt-xhigh",
+      name: "GPT XHigh",
+      api: "openai",
+      reasoning: true,
+      thinkingLevelMap: { xhigh: "xhigh" },
+    }];
+    harness.thinkingLevel = "medium";
+
+    await harness.runCommand("materia", "cast unsupported max");
+
+    expect(harness.setThinkingLevelCalls).toHaveLength(0);
+    expect(harness.notifications.some((notification) => notification.type === "warning"
+      && notification.message.includes('configured thinking "max"')
+      && notification.message.includes("using medium instead"))).toBe(true);
+    const usage = await readUsage(harness);
+    expect(usage.modelSelections[0]).toMatchObject({
+      requestedThinking: "max",
+      effectiveThinking: "medium",
+      thinking: "medium",
+      thinkingFallbackReason: "unsupported_thinking",
+    });
   });
 
   test("utility sockets do not apply materia model settings", async () => {

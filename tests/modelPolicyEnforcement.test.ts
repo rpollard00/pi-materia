@@ -16,6 +16,14 @@ import { FakePiHarness } from "./fakePi.js";
 
 const GPT = { provider: "openai", id: "gpt-test", name: "GPT Test", api: "openai" };
 const CLAUDE = { provider: "anthropic", id: "claude-test", name: "Claude Test", api: "anthropic" };
+const GPT_MAX = {
+  provider: "openai",
+  id: "gpt-max",
+  name: "GPT Max",
+  api: "openai",
+  reasoning: true,
+  thinkingLevelMap: { xhigh: "xhigh", max: "max" },
+};
 
 function policy(overrides: Partial<ModelPolicyDocument> & Pick<ModelPolicyDocument, "id"> = {}): ModelPolicyDocument {
   return { id: "policy-1", ...overrides };
@@ -182,6 +190,23 @@ describe("applyMateriaModelSettings — model policy enforcement", () => {
     expect(result.thinkingPolicyClamped).toBe(true);
     expect(result.thinking).toBe("medium");
     expect(harness.notifications.some((n) => n.type === "warning" && n.message.includes("suggested clamp"))).toBe(true);
+  });
+
+  test("policy enforcement recognizes max and applies a lower ceiling", async () => {
+    const harness = await makeHarness(GPT_MAX, "medium");
+    harness.models = [GPT_MAX];
+    const result = await applyMateriaModelSettings(harness.pi, harness.ctx, {
+      materiaName: "Build",
+      model: "openai/gpt-max",
+      thinking: "max",
+      policy: policy({ thinking: { max: "xhigh" } }),
+    });
+
+    expect(harness.setThinkingLevelCalls).toEqual(["xhigh"]);
+    expect(result.requestedThinking).toBe("max");
+    expect(result.thinking).toBe("xhigh");
+    expect(result.thinkingPolicyClamped).toBe(true);
+    expect(result.thinkingFallbackReason).toBeUndefined();
   });
 
   test("thinking clamp applies even with no explicit thinking when the active level violates", async () => {
