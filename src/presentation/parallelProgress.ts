@@ -1,8 +1,11 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { ParallelLaneMonitorSummary } from "../application/parallelMonitoring.js";
+import type {
+  ParallelLaneMonitorSummary,
+  ParallelRunMonitorSummary,
+} from "../application/parallelMonitoring.js";
 
-export type ParallelProgressPart = "bar" | "name" | "detail" | "status";
+export type ParallelProgressPart = "aggregate" | "bar" | "name" | "stage" | "detail" | "status";
 
 export interface ParallelProgressFormatOptions {
   /** Optional late-bound theming. The formatter remains ANSI-width aware. */
@@ -12,35 +15,47 @@ export interface ParallelProgressFormatOptions {
     part: ParallelProgressPart,
   ) => string;
   maxBarWidth?: number;
+  /** Render the coordinator's running-slot aggregate when supplied. */
+  maxConcurrency?: number;
 }
 
 type ProgressLane = Pick<
   ParallelLaneMonitorSummary,
-  "laneId" | "name" | "streamIndex" | "queueIndex" | "status" | "progress"
+  "laneId" | "name" | "streamIndex" | "queueIndex" | "status" | "progress" | "activeStage"
 >;
+type ParallelProgressInput =
+  | readonly ProgressLane[]
+  | Pick<ParallelRunMonitorSummary, "lanes" | "maxConcurrency">;
 
 const DEFAULT_MAX_BAR_WIDTH = 20;
 /** Width used when rows are handed to Pi without a component render callback. */
 export const DEFAULT_PARALLEL_PROGRESS_WIDTH = 80;
 
 /**
- * Render one bounded, non-empty row per normalized stream without mutating the
- * monitor DTO. Schedule order is streamIndex first, with stable persisted fields
- * as tie-breakers.
+ * Render bounded, non-empty rows without mutating the monitor DTO. When a
+ * concurrency bound is supplied, the first row is the coordinator slot summary;
+ * lane rows follow in streamIndex order with stable persisted fields as
+ * tie-breakers.
  *
  * Pi's string-row widget API does not provide a render width. Callers can use
  * the default width (or {@link formatParallelProgressRows}) and let Pi's Text
  * wrapper handle the final terminal-width wrapping.
  */
 export function formatParallelProgress(
-  lanes: readonly ProgressLane[],
+  input: ParallelProgressInput,
   width: number = DEFAULT_PARALLEL_PROGRESS_WIDTH,
   options: ParallelProgressFormatOptions = {},
 ): string[] {
   const boundedWidth = normalizeWidth(width);
-  return [...lanes]
+  const { lanes, maxConcurrency } = normalizeProgressInput(input, options);
+  const rows = [...lanes]
     .sort(compareScheduleOrder)
     .map((lane) => formatLane(lane, boundedWidth, options) || compactFallback(lane));
+
+  if (maxConcurrency !== undefined) {
+    rows.unshift(formatAggregateRow(lanes, boundedWidth, maxConcurrency, options));
+  }
+  return rows;
 }
 
 /**
@@ -49,11 +64,11 @@ export function formatParallelProgress(
  * rewinds, without retaining a custom TUI component.
  */
 export function formatParallelProgressRows(
-  lanes: readonly ProgressLane[],
+  input: ParallelProgressInput,
   width: number = DEFAULT_PARALLEL_PROGRESS_WIDTH,
   options: ParallelProgressFormatOptions = {},
 ): string[] {
-  return formatParallelProgress(lanes, width, options);
+  return formatParallelProgress(input, width, options);
 }
 
 /**
@@ -62,16 +77,16 @@ export function formatParallelProgressRows(
  * invalidation or rewind support.
  */
 export class ParallelProgressComponent implements Component {
-  private lanes: readonly ProgressLane[];
+  private lanes: ParallelProgressInput;
 
   constructor(
-    lanes: readonly ProgressLane[],
+    lanes: ParallelProgressInput,
     private readonly options: ParallelProgressFormatOptions = {},
   ) {
     this.lanes = lanes;
   }
 
-  setLanes(lanes: readonly ProgressLane[]): void {
+  setLanes(lanes: ParallelProgressInput): void {
     this.lanes = lanes;
   }
 
@@ -96,6 +111,7 @@ function formatLane(
   const status = statusLabel(lane.status);
   const detail = `${percentage}% (${position}/${total})`;
   const name = safeName(lane.name, lane.laneId);
+  const stage = stageLabel(lane);
   const maxBarWidth = Number.isFinite(options.maxBarWidth)
     ? Math.max(1, Math.floor(options.maxBarWidth ?? DEFAULT_MAX_BAR_WIDTH))
     : DEFAULT_MAX_BAR_WIDTH;
@@ -106,18 +122,67 @@ function formatLane(
   const desiredBarWidth = Math.min(maxBarWidth, Math.max(1, Math.floor(width / 4)));
   const barWidth = Math.max(1, Math.min(desiredBarWidth, width - nonBarWidth - 1));
   const bar = progressBar(position, total, barWidth);
-  const fixedWidth = visibleWidth(bar) + 1 + 1 + visibleWidth(detail) + 1 + visibleWidth(status);
-  const nameWidth = Math.max(1, width - fixedWidth);
+  const fixedWidth = visibleWidth(bar) + visibleWidth(detail) + visibleWidth(status)
+    + (stage ? 4 : 3);
+  const flexibleWidth = Math.max(0, width - fixedWidth);
+  const stageWidth = stage
+    ? Math.max(1, Math.min(visibleWidth(stage), Math.floor(flexibleWidth / 2)))
+    : 0;
+  const nameWidth = Math.max(1, flexibleWidth - stageWidth);
   const boundedName = truncateToWidth(name, nameWidth, "…");
+  const boundedStage = stage ? truncateToWidth(stage, stageWidth, "…") : undefined;
   const style = options.style ?? ((text: string) => text);
 
   const line = [
     style(bar, lane.status, "bar"),
     style(boundedName, lane.status, "name"),
+    ...(boundedStage ? [style(boundedStage, lane.status, "stage")] : []),
     style(detail, lane.status, "detail"),
     style(status, lane.status, "status"),
   ].join(" ");
   return truncateToWidth(line, width, "");
+}
+
+function normalizeProgressInput(
+  input: ParallelProgressInput,
+  options: ParallelProgressFormatOptions,
+): { lanes: readonly ProgressLane[]; maxConcurrency?: number } {
+  if (isLaneArray(input)) {
+    return { lanes: input, maxConcurrency: validMaxConcurrency(options.maxConcurrency) };
+  }
+  return {
+    lanes: input.lanes,
+    maxConcurrency: validMaxConcurrency(options.maxConcurrency) ?? validMaxConcurrency(input.maxConcurrency),
+  };
+}
+
+function isLaneArray(input: ParallelProgressInput): input is readonly ProgressLane[] {
+  return Array.isArray(input);
+}
+
+function formatAggregateRow(
+  lanes: readonly ProgressLane[],
+  width: number,
+  maxConcurrency: number,
+  options: ParallelProgressFormatOptions,
+): string {
+  const running = lanes.filter((lane) => lane.status === "running").length;
+  const full = `Parallel slots: ${running}/${maxConcurrency} running`;
+  // Preserve the useful occupancy ratio on narrow terminals instead of letting
+  // a long heading truncate away both counts.
+  const compact = `Slots ${running}/${maxConcurrency}`;
+  const ratio = `${running}/${maxConcurrency}`;
+  const text = visibleWidth(full) <= width
+    ? full
+    : visibleWidth(compact) <= width
+      ? compact
+      : ratio;
+  const style = options.style ?? ((value: string) => value);
+  return truncateToWidth(style(text, "running", "aggregate"), width, "");
+}
+
+function validMaxConcurrency(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && (value as number) >= 1 ? value as number : undefined;
 }
 
 function normalizeWidth(width: number): number {
@@ -147,6 +212,19 @@ function boundedProgress(progress: ProgressLane["progress"]): { position: number
 function progressBar(position: number, total: number, width: number): string {
   const filled = total === 0 ? 0 : Math.min(width, Math.max(0, Math.floor((position / total) * width)));
   return `[${"|".repeat(filled)}${" ".repeat(width - filled)}]`;
+}
+
+function stageLabel(lane: ProgressLane): string | undefined {
+  // An accepted lane may retain its terminal checkpoint for diagnostics, but
+  // showing that old stage beside `Completed` would imply it is still active.
+  if (lane.status !== "running" && lane.status !== "failed" && lane.status !== "interrupted") return undefined;
+  const value = lane.activeStage?.label;
+  if (typeof value !== "string") return undefined;
+  const cleaned = value
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || undefined;
 }
 
 function statusLabel(status: ProgressLane["status"]): string {

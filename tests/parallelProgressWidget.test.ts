@@ -49,8 +49,9 @@ describe("parallel progress widget lifecycle", () => {
 
     expect(ui.calls[0]?.key).toBe(PARALLEL_PROGRESS_WIDGET_KEY);
     expect(ui.calls[0]?.options).toEqual({ placement: "belowEditor" });
-    expect(ui.rows()).toHaveLength(2);
-    expect(ui.rows()?.[0]).toContain("0% (0/5) Queued");
+    expect(ui.rows()).toHaveLength(3);
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 0/2 running");
+    expect(ui.rows()?.[1]).toContain("0% (0/5) Queued");
     clearParallelProgressWidget(ui.ctx);
   });
 
@@ -62,12 +63,39 @@ describe("parallel progress widget lifecycle", () => {
     active.lanes["lane-1"]!.status = "running";
     active.lanes["lane-1"]!.progress.position = 3;
     expect(refreshParallelProgressWidget(active)).toBe(true);
-    expect(ui.rows()?.[0]).toContain("60% (3/5) Running");
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 1/2 running");
+    expect(ui.rows()?.[1]).toContain("60% (3/5) Running");
 
     active.lanes["lane-1"]!.progress.position = 1;
     expect(refreshParallelProgressWidget(active)).toBe(true);
-    expect(ui.rows()?.[0]).toContain("20% (1/5) Running");
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 1/2 running");
+    expect(ui.rows()?.[1]).toContain("20% (1/5) Running");
     expect(ui.calls).toHaveLength(3);
+    clearParallelProgressWidget(ui.ctx);
+  });
+
+  test("refreshes concurrent lane stages while retaining the last failed stage", () => {
+    const ui = harness();
+    const active = run("run-stages");
+    mountParallelProgressWidget(ui.ctx, active);
+
+    active.lanes["lane-1"]!.status = "running";
+    active.lanes["lane-1"]!.activeStage = { socketId: "Socket-1", label: "Spawn-JJ-Workspace", transitionedAt: 2 };
+    active.lanes["lane-2"]!.status = "running";
+    active.lanes["lane-2"]!.activeStage = { socketId: "Socket-2", label: "Build", transitionedAt: 3 };
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 2/2 running");
+    expect(ui.rows()?.[1]).toContain("Spawn-JJ-Workspace");
+    expect(ui.rows()?.[2]).toContain("Build");
+
+    active.lanes["lane-1"]!.status = "failed";
+    active.lanes["lane-1"]!.failureReason = "fixture failure";
+    active.lanes["lane-2"]!.activeStage = { socketId: "Socket-3", label: "Auto-Eval", transitionedAt: 4 };
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 1/2 running");
+    expect(ui.rows()?.[1]).toContain("Spawn-JJ-Workspace");
+    expect(ui.rows()?.[1]).toContain("Failed");
+    expect(ui.rows()?.[2]).toContain("Auto-Eval");
     clearParallelProgressWidget(ui.ctx);
   });
 
@@ -80,13 +108,15 @@ describe("parallel progress widget lifecycle", () => {
     active.lanes["lane-2"]!.status = "running";
     active.lanes["lane-2"]!.progress.position = 2;
     expect(refreshParallelProgressWidget(active)).toBe(true);
-    expect(ui.rows()?.[0]).toContain("Completed");
-    expect(ui.rows()?.[1]).toContain("20% (2/10) Running");
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 1/2 running");
+    expect(ui.rows()?.[1]).toContain("Completed");
+    expect(ui.rows()?.[2]).toContain("20% (2/10) Running");
 
     active.phase = "awaiting_lanes";
     expect(refreshParallelProgressWidget(active)).toBe(true);
-    expect(ui.rows()?.[0]).toContain("Completed");
-    expect(ui.rows()?.[1]).toContain("Running");
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 1/2 running");
+    expect(ui.rows()?.[1]).toContain("Completed");
+    expect(ui.rows()?.[2]).toContain("Running");
     clearParallelProgressWidget(ui.ctx);
   });
 
@@ -99,8 +129,9 @@ describe("parallel progress widget lifecycle", () => {
       parallelRuns: { parallelWork: active },
     } as any);
 
-    expect(ui.rows()).toHaveLength(2);
-    expect(ui.rows()?.[0]).toContain("Stream 1");
+    expect(ui.rows()).toHaveLength(3);
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 0/2 running");
+    expect(ui.rows()?.[1]).toContain("Stream 1");
 
     syncParallelProgressWidgetFromCast(ui.ctx, {
       active: false,
@@ -120,7 +151,8 @@ describe("parallel progress widget lifecycle", () => {
 
     oldRun.lanes["lane-1"]!.progress.position = 4;
     expect(refreshParallelProgressWidget(oldRun)).toBe(false);
-    expect(ui.rows()?.[0]).toContain("0% (0/5)");
+    expect(ui.rows()?.[0]).toContain("Parallel slots: 0/2 running");
+    expect(ui.rows()?.[1]).toContain("0% (0/5)");
     expect(clearParallelProgressWidget(ui.ctx, oldRun.runId)).toBe(false);
 
     newRun.phase = "completed";

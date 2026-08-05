@@ -6,7 +6,7 @@ import {
   formatParallelProgressRows,
 } from "../src/presentation/parallelProgress.js";
 
-type Lane = Pick<ParallelLaneMonitorSummary, "laneId" | "name" | "streamIndex" | "queueIndex" | "status" | "progress">;
+type Lane = Pick<ParallelLaneMonitorSummary, "laneId" | "name" | "streamIndex" | "queueIndex" | "status" | "progress" | "activeStage">;
 
 function lane(overrides: Partial<Lane> = {}): Lane {
   return {
@@ -89,5 +89,53 @@ describe("parallel progress presentation", () => {
     expect(formatParallelProgressRows([forward], 80)[0]).toContain("80% (4/5)");
     const rewind = lane({ progress: { position: 1, total: 5 } });
     expect(formatParallelProgressRows([rewind], 80)[0]).toContain("20% (1/5)");
+  });
+
+  test("shows running slots and validated stages without labeling completion as active", () => {
+    const prelude = lane({
+      status: "running",
+      activeStage: { socketId: "Socket-1", label: "Spawn-JJ-Workspace", transitionedAt: 1 },
+    });
+    const build = lane({
+      laneId: "lane-2",
+      name: "Stream 2",
+      streamIndex: 1,
+      status: "running",
+      activeStage: { socketId: "Socket-2", label: "Build", transitionedAt: 2 },
+    });
+    const failed = lane({
+      laneId: "lane-3",
+      name: "Stream 3",
+      streamIndex: 2,
+      status: "failed",
+      activeStage: { socketId: "Socket-3", label: "Auto-Eval", transitionedAt: 3 },
+    });
+    const completed = lane({
+      laneId: "lane-4",
+      name: "Stream 4",
+      streamIndex: 3,
+      status: "accepted",
+      activeStage: { socketId: "Socket-4", label: "Blackbelt-Maintain", transitionedAt: 4 },
+    });
+
+    const rows = formatParallelProgressRows({ lanes: [build, prelude, failed, completed], maxConcurrency: 2 }, 100);
+    expect(rows[0]).toContain("Parallel slots: 2/2 running");
+    expect(rows[1]).toContain("Spawn-JJ-Workspace");
+    expect(rows[2]).toContain("Build");
+    expect(rows[3]).toContain("Auto-Eval");
+    expect(rows[4]).toContain("Completed");
+    expect(rows[4]).not.toContain("Blackbelt-Maintain");
+  });
+
+  test("keeps aggregate and stage rows within narrow ANSI-safe widths", () => {
+    const stage = lane({
+      activeStage: { socketId: "Socket-2", label: "Build\n\u001b[31m with a long label", transitionedAt: 1 },
+    });
+    const style = (text: string) => `\u001b[35m${text}\u001b[0m`;
+    for (const width of [1, 8, 18, 32]) {
+      const rows = formatParallelProgressRows([stage], width, { maxConcurrency: 1, style });
+      expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
+      expect(rows.every((row) => row.length > 0)).toBe(true);
+    }
   });
 });

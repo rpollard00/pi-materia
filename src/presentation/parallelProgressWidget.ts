@@ -117,7 +117,7 @@ function publishSummary(controller: ProgressController): void {
   // component with stale state behind.
   controller.ctx.ui.setWidget(
     PARALLEL_PROGRESS_WIDGET_KEY,
-    formatParallelProgressRows(controller.summary.lanes, DEFAULT_PARALLEL_PROGRESS_WIDTH),
+    formatParallelProgressRows(controller.summary, DEFAULT_PARALLEL_PROGRESS_WIDTH),
     { placement: "belowEditor" },
   );
 }
