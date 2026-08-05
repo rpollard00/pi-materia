@@ -403,6 +403,39 @@ describe("persistent Materia widget formatting", () => {
     expect(renderMateriaCastStatusWidget(state, 2_000)).toHaveLength(3);
   });
 
+  test("shared widget updates remove parallel rows at fan-in and terminal states", () => {
+    const { state, run } = parallelCastState(2);
+    run.phase = "dispatching";
+    run.lanes["lane-0"]!.status = "running";
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    try {
+      const materiaWidget = () => widgets.filter(({ key }) => key === "materia").at(-1)?.value;
+      updateWidget(ctx, state, { replaceOwner: true });
+      expect(materiaWidget()).toHaveLength(6);
+      expect(materiaWidget()?.join("\n")).toContain("Parallel slots:");
+
+      run.phase = "awaiting_lanes";
+      run.fanInPhase = "accepted";
+      updateWidget(ctx, state);
+      expect(materiaWidget()).toHaveLength(3);
+      expect(materiaWidget()?.join("\n")).not.toContain("Parallel slots:");
+      expect(materiaWidget()?.[2]).toContain("parallel");
+
+      state.active = false;
+      state.phase = "complete";
+      state.socketState = "complete";
+      state.runState.endedAt = 3_000;
+      updateWidget(ctx, state);
+      expect(materiaWidget()).toHaveLength(3);
+      expect(materiaWidget()?.[2]).toContain("Auto-Eval");
+      expect(materiaWidget()?.join("\n")).not.toContain("Parallel slots:");
+    } finally {
+      clearWidgetTicker(ctx);
+    }
+  });
+
   test("caps the shared panel at ten lines with a deterministic overflow row", () => {
     const { state, run } = parallelCastState(8);
     run.queueOrder.reverse();

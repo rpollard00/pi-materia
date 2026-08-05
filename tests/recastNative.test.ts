@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { cloneExecutionScope, createBaseExecutionScope } from "../src/domain/executionScope.js";
+import { createParallelRunState } from "../src/domain/parallelRun.js";
 import piMateria from "../src/index.js";
 import type { MateriaCastState } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -183,6 +184,33 @@ describe("/materia recast", () => {
     expect(harness.statuses.get("materia")).toBe("failed");
 
     await harness.runCommand("materia", "recast");
+    expect(harness.statuses.get("materia")).toBe("Build");
+  });
+
+  test("restores persisted parallel rows through the shared materia widget", async () => {
+    const harness = await makeHarness({ socketId: "Socket-1", materia: "Build" });
+    await harness.runCommand("materia", "cast restore parallel rows");
+    const state = latestState(harness);
+    const parallel = createParallelRunState({
+      runId: "parallel-restore",
+      parentCastId: state.castId,
+      loopId: "parallelWork",
+      planIdentity: { version: 1, planId: "plan-restore", workItemCount: 1 },
+      graphIdentity: { graphHash: "graph-restore" },
+      configIdentity: { configHash: "config-restore", loopId: "parallelWork", maxConcurrency: 1 },
+      queue: [{ laneId: "lane-0", name: "Restore lane", streamIndex: 0, workItemIndexes: [0], progressTotal: 2 }],
+      now: 1,
+    });
+    parallel.lanes["lane-0"]!.status = "running";
+    parallel.lanes["lane-0"]!.activeStage = { socketId: "Socket-1", label: "Restore checkpoint", transitionedAt: 1 };
+    harness.pi.appendEntry("pi-materia-cast-state", { ...state, parallelRuns: { parallelWork: parallel }, updatedAt: Date.now() });
+    harness.widgets.delete("materia");
+
+    await harness.emit("session_start");
+
+    const content = harness.widgets.get("materia")?.content?.join("\n") ?? "";
+    expect(content).toContain("Parallel slots:");
+    expect(content).toContain("Restore lane");
     expect(harness.statuses.get("materia")).toBe("Build");
   });
 
