@@ -12,9 +12,8 @@ describe('loadout graph connector styling', () => {
     const connectorSelectors = [
       '.loadout-loop-cycle-edge path',
       '.loadout-loop-cycle-edge .loadout-loop-cycle-edge-echo',
-      '.loadout-parallel-fork path:first-child',
-      '.loadout-parallel-fork path:nth-child(2)',
-      '.loadout-parallel-barrier path',
+      '.loadout-parallel-fork path',
+      '.loadout-parallel-fork .loadout-parallel-fork-center',
       '.loadout-parallel-fan-in path',
       '.loadout-edge path',
       '.loadout-edge-unsatisfied path',
