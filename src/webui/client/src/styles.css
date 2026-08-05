@@ -479,6 +479,7 @@
 
 .loadout-parallel-fork .loadout-parallel-fork-center {
   stroke-width: 3;
+  stroke-dasharray: none;
 }
 
 .loadout-parallel-fan-in path {
