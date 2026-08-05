@@ -15,7 +15,6 @@ import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../applica
 import {
   formatParallelProgressRows,
 } from "./parallelProgress.js";
-import { syncParallelProgressWidgetFromCast } from "./parallelProgressWidget.js";
 import type {
   MateriaCastState,
   MateriaRunState,
@@ -132,9 +131,6 @@ function acceptMateriaWidgetState(
 function renderMateriaWidgetController(controller: MateriaWidgetController): void {
   controller.lines = renderMateriaWidgetState(controller.state);
   setMateriaWidgetLines(controller.ctx, controller.lines);
-  if (isMateriaCastWidgetState(controller.state)) {
-    syncParallelProgressWidgetFromCast(controller.ctx, controller.state);
-  }
 }
 
 function setMateriaWidgetLines(

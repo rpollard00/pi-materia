@@ -411,9 +411,12 @@ describe("persistent Materia widget formatting", () => {
     const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
 
     try {
-      const materiaWidget = () => widgets.filter(({ key }) => key === "materia").at(-1)?.value;
+      const materiaWidgets = () => widgets.filter(({ key }) => key === "materia");
+      const materiaWidget = () => materiaWidgets().at(-1)?.value;
       updateWidget(ctx, state, { replaceOwner: true });
+      expect(materiaWidgets()).toHaveLength(1);
       expect(materiaWidget()).toHaveLength(6);
+      expect(materiaWidget()?.[0]).toContain("⌘ Hojo-Consult ◉ Auto-Eval");
       expect(materiaWidget()?.join("\n")).toContain("Parallel slots:");
 
       run.phase = "awaiting_lanes";
@@ -431,6 +434,55 @@ describe("persistent Materia widget formatting", () => {
       expect(materiaWidget()).toHaveLength(3);
       expect(materiaWidget()?.[2]).toContain("Auto-Eval");
       expect(materiaWidget()?.join("\n")).not.toContain("Parallel slots:");
+    } finally {
+      clearWidgetTicker(ctx);
+    }
+  });
+
+  test("rejects stale parallel cast updates through the shared widget owner", () => {
+    const current = parallelCastState(2);
+    current.state.castId = "current-cast";
+    current.state.runState = {
+      ...current.state.runState,
+      runId: "current-run",
+      currentMateria: "Build",
+      lastMessage: "current cast",
+    };
+    current.state.currentMateria = "Build";
+    current.state.currentItemLabel = "current parallel work";
+    current.run.phase = "dispatching";
+    current.run.lanes["lane-0"]!.status = "running";
+
+    const stale = parallelCastState(2);
+    stale.state.castId = "stale-cast";
+    stale.state.runState = {
+      ...stale.state.runState,
+      runId: "stale-run",
+      currentMateria: "Interactive-Plan",
+      lastMessage: "stale cast",
+    };
+    stale.state.currentMateria = "Interactive-Plan";
+    stale.state.currentItemLabel = "stale parallel work";
+    stale.run.phase = "dispatching";
+    stale.run.lanes["lane-0"]!.status = "running";
+    stale.run.lanes["lane-0"]!.progress.position = 5;
+
+    const widgets: Array<{ key: string; value: string[] | undefined }> = [];
+    const ctx = { ui: { setWidget: (key: string, value: string[] | undefined) => widgets.push({ key, value }) } } as any;
+
+    try {
+      updateWidget(ctx, current.state, { replaceOwner: true });
+      const accepted = widgets.filter(({ key }) => key === "materia").at(-1)?.value;
+      expect(accepted?.join("\n")).toContain("⌘ Hojo-Consult ◉ Build");
+      expect(accepted?.join("\n")).toContain("current parallel work");
+      expect(accepted?.join("\n")).toContain("Parallel slots:");
+
+      updateWidget(ctx, stale.state);
+
+      expect(widgets.filter(({ key }) => key === "materia")).toHaveLength(1);
+      expect(widgets.filter(({ key }) => key === "materia").at(-1)?.value).toBe(accepted);
+      expect(widgets.at(-1)?.value?.join("\n")).toContain("current parallel work");
+      expect(widgets.at(-1)?.value?.join("\n")).not.toContain("stale parallel work");
     } finally {
       clearWidgetTicker(ctx);
     }
