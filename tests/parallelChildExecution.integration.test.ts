@@ -270,10 +270,11 @@ describe("production parallel coordinator and child socket execution", () => {
     const dispatcher = new ParallelLoopDispatcher({
       children: childRunner,
       state: { saveCastState: () => undefined },
-      onProgressChange: (run) => {
-        if (run.phase === "completed") runCompleted.resolve();
-        const first = run.lanes["lane-a"];
-        const second = run.lanes["lane-b"];
+      onProgressChange: (_ctx, nextState) => {
+        const run = nextState.parallelRuns?.build;
+        if (run?.phase === "completed") runCompleted.resolve();
+        const first = run?.lanes["lane-a"];
+        const second = run?.lanes["lane-b"];
         if (!pairStageResolved && first?.status === "running" && second?.status === "running"
           && first.progress.position >= 1 && second.progress.position >= 1
           && first.activeStage && second.activeStage) {

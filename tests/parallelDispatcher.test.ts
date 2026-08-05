@@ -78,6 +78,64 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots()).toHaveLength(2);
   });
 
+  test("publishes the authoritative context and cast state through initial, checkpoint, rewind, and terminal refreshes", async () => {
+    const state = makeState();
+    const context = { ui: { notify: () => undefined } } as any;
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const starts: Array<{ ctx: unknown; state: MateriaCastState }> = [];
+    const changes: Array<{ ctx: unknown; state: MateriaCastState }> = [];
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => undefined },
+      onProgressStart: (ctx, nextState) => starts.push({ ctx, state: nextState }),
+      onProgressChange: (ctx, nextState) => changes.push({ ctx, state: nextState }),
+    });
+
+    await subject.dispatch({ pi: {} as any, ctx: context, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    expect(starts).toHaveLength(1);
+    expect(starts[0]).toEqual({ ctx: context, state });
+    expect(starts[0]!.state.parallelRuns!.build!.phase).toBe("dispatching");
+
+    const child = childRunner.listSnapshots()[0]!;
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 2, total: 2 });
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2 });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.progress.position).toBe(1);
+    expect(changes.some(({ state: nextState }) => nextState === state && nextState.parallelRuns!.build!.lanes["lane-a"]!.progress.position === 1)).toBe(true);
+
+    for (const activeChild of childRunner.listSnapshots()) {
+      if (activeChild.identity.childCastId !== child.identity.childCastId) childRunner.complete(activeChild.identity.childCastId);
+    }
+    childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+    expect(changes.some(({ ctx, state: nextState }) => ctx === context && nextState === state && nextState.parallelRuns!.build!.phase === "completed")).toBe(true);
+    expect(changes.every(({ ctx, state: nextState }) => ctx === context && nextState === state)).toBe(true);
+  });
+
+  test("records bounded parent diagnostics and events when presentation callbacks fail", async () => {
+    const state = makeState();
+    const events: Array<{ type: string; data: any }> = [];
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => undefined },
+      artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => events.push({ type, data }) },
+      onProgressStart: () => { throw new Error("start-failure-" + "x".repeat(2_000)); },
+      onProgressChange: () => { throw new Error("change-failure"); },
+    });
+
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    for (const child of childRunner.listSnapshots()) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+
+    expect(state.parallelRuns!.build!.phase).toBe("completed");
+    expect(state.parallelRuns!.build!.diagnostics.length).toBeGreaterThan(0);
+    expect(state.parallelRuns!.build!.diagnostics.every((diagnostic) => diagnostic.message.length <= 1_000)).toBe(true);
+    expect(state.parallelRuns!.build!.diagnostics.every((diagnostic) => diagnostic.details?.phase && diagnostic.details?.error)).toBe(true);
+    expect(events.some((event) => event.type === "parallel_progress_ui_failure" && event.data.phase === "initial_dispatch")).toBe(true);
+    expect(events.some((event) => event.type === "parallel_progress_ui_failure" && event.data.phase === "terminal_transition")).toBe(true);
+  });
+
   test("enters every available child start before a sibling start is released", async () => {
     const state = makeState();
     const childRunner = createFakeChildCastRunner({ now: () => 10 });
@@ -201,7 +259,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
           writeUsage: async () => undefined,
         },
       },
-      onProgressChange: (run: any) => { refreshes.push({ ...run.lanes["lane-a"].progress }); },
+      onProgressChange: (_ctx: any, nextState: MateriaCastState) => { refreshes.push({ ...nextState.parallelRuns!.build!.lanes["lane-a"].progress }); },
     } as any);
 
     await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
@@ -251,7 +309,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       children: childRunner,
       state: { saveCastState: () => { saves += 1; } },
       artifacts: { appendEvent: async () => { parentEvents += 1; } },
-      onProgressChange: (run: any) => refreshes.push(run.lanes["lane-a"].activeStage),
+      onProgressChange: (_ctx: any, nextState: MateriaCastState) => refreshes.push(nextState.parallelRuns!.build!.lanes["lane-a"].activeStage),
     } as any);
     await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
     const child = childRunner.listSnapshots()[0]!;
@@ -604,10 +662,13 @@ describe("workspace-neutral parallel loop dispatcher", () => {
 
     const acceptedBefore = structuredClone(state.parallelRuns!.build!.lanes["lane-a"]);
     const fanIns: any[] = [];
-    const revived = dispatcher(initial.childRunner, { artifacts }).dispatcher;
+    const revivalStates: MateriaCastState[] = [];
+    const revived = dispatcher(initial.childRunner, { artifacts, onProgressStart: (_ctx: any, nextState: MateriaCastState) => revivalStates.push(nextState) }).dispatcher;
     expect(await revived.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
     await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
 
+    expect(revivalStates).toHaveLength(1);
+    expect(revivalStates[0]).toBe(state);
     expect(state.parallelRuns!.build!.lanes["lane-a"]).toEqual(acceptedBefore);
     const attempt2 = initial.childRunner.listSnapshots().find((child) => child.attempt === 2)!;
     expect(attempt2.identity.laneId).toBe("lane-b");

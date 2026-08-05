@@ -27,6 +27,7 @@ import {
   applyParallelTransitionToCastState,
   attachParallelRunToCastState,
   createParallelRunState,
+  PARALLEL_RUN_DIAGNOSTIC_LIMIT,
   restartParallelLaneAttempt,
 } from "./parallelCoordinatorState.js";
 import type {
@@ -68,6 +69,13 @@ export interface ParallelFanInCompletionInput {
 export interface ParallelRunFailureInput { loopId: string; runId: string; reason: string }
 export interface EffectiveParallelConcurrencyConfig { maxConcurrency: number }
 
+type ParallelProgressPhase =
+  | "initial_dispatch"
+  | "revival"
+  | "lane_checkpoint"
+  | "run_phase"
+  | "terminal_transition";
+
 export interface ParallelLoopDispatchInput {
   pi: ExtensionAPI;
   ctx: ExtensionContext;
@@ -107,10 +115,10 @@ export interface ParallelLoopDispatcherDependencies {
   runtimeEvents?: { emit(state: MateriaCastState, type: string, payload: Record<string, unknown>): Promise<void> };
   budget?: { assertBudget?(state: MateriaCastState, ctx: ExtensionContext): Promise<void> };
   onBudgetExceeded?(pi: ExtensionAPI, ctx: ExtensionContext, state: MateriaCastState, error: unknown, entryId: string): Promise<void>;
-  /** Mount presentation for a newly owned coordinator run. */
-  onProgressStart?(ctx: ExtensionContext, run: MateriaParallelRunState): void;
-  /** Best-effort redraw request after an observable lane progress/status change. */
-  onProgressChange?(run: MateriaParallelRunState): void;
+  /** Publish the authoritative parent state when a coordinator run is created or revived. */
+  onProgressStart?(ctx: ExtensionContext, state: MateriaCastState): void;
+  /** Best-effort redraw request after an observable lane or run-state change. */
+  onProgressChange?(ctx: ExtensionContext, state: MateriaCastState): void;
   now?: () => number;
 }
 
@@ -236,7 +244,7 @@ export class ParallelLoopDispatcher {
       this.#terminalPromise = undefined;
       replaceParallelState(input.state, attachParallelRunToCastState(input.state, run));
       this.#deps.state.saveCastState(input.pi, input.state);
-      try { this.#deps.onProgressStart?.(input.ctx, run); } catch { /* presentation is best effort */ }
+      this.#notifyProgress(input, input.state, "initial_dispatch", true);
       await this.#appendEvent(input.state, "parallel_dispatch_started", {
         parentCastId: input.state.castId,
         loopId: input.loopId,
@@ -368,7 +376,7 @@ export class ParallelLoopDispatcher {
     this.#terminalPromise = undefined;
     replaceParallelState(input.state, { ...input.state, active: true, awaitingResponse: false, socketState: "running_parallel", failedReason: undefined, parallelRuns: { ...(input.state.parallelRuns ?? {}), [input.loopId]: next } });
     this.#deps.state.saveCastState(input.pi, input.state);
-    try { this.#deps.onProgressStart?.(input.ctx, next); } catch { /* presentation is best effort */ }
+    this.#notifyProgress(this.#input, input.state, "revival", true);
     await input.onPrepared?.();
     await this.#pump();
     await this.#maybeAllTerminal(this.#input, input.state);
@@ -977,7 +985,7 @@ export class ParallelLoopDispatcher {
     if (!changed.applied) return;
     replaceParallelState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: changed.state } });
     this.#run = changed.state; this.#deps.state.saveCastState(input.pi, state);
-    this.#requestProgressRefresh();
+    this.#requestProgressRefresh(input, state, phase === "completed" || phase === "failed" ? "terminal_transition" : "run_phase");
   }
 
   #applyLaneTransition(input: ParallelLoopDispatchInput, state: MateriaCastState, transition: Omit<Parameters<typeof applyParallelTransitionToCastState>[1], "parentCastId" | "castId" | "loopId" | "runId">, persist = true): boolean {
@@ -987,13 +995,63 @@ export class ParallelLoopDispatcher {
     replaceParallelState(state, result.state);
     this.#run = state.parallelRuns?.[input.loopId];
     if (persist) this.#deps.state.saveCastState(input.pi, state);
-    if (transition.progress !== undefined || transition.activeStage !== undefined || transition.status !== undefined) this.#requestProgressRefresh();
+    if (transition.progress !== undefined || transition.activeStage !== undefined || transition.status !== undefined) {
+      const phase = transition.status !== undefined && isTerminalLaneStatus(transition.status)
+        ? "terminal_transition"
+        : "lane_checkpoint";
+      this.#requestProgressRefresh(input, state, phase);
+    }
     return true;
   }
 
-  #requestProgressRefresh(): void {
+  #requestProgressRefresh(input: ParallelLoopDispatchInput, state: MateriaCastState, phase: ParallelProgressPhase): void {
     if (!this.#run) return;
-    try { this.#deps.onProgressChange?.(this.#run); } catch { /* presentation is best effort */ }
+    this.#notifyProgress(input, state, phase, false);
+  }
+
+  #notifyProgress(input: ParallelLoopDispatchInput, state: MateriaCastState, phase: ParallelProgressPhase, initial: boolean): void {
+    try {
+      if (initial) this.#deps.onProgressStart?.(input.ctx, state);
+      else this.#deps.onProgressChange?.(input.ctx, state);
+    } catch (error) {
+      this.#recordProgressFailure(input, state, phase, error);
+    }
+  }
+
+  #recordProgressFailure(input: ParallelLoopDispatchInput, state: MateriaCastState, phase: ParallelProgressPhase, error: unknown): void {
+    const reason = boundedFailureReason(parallelErrorMessage(error));
+    const occurredAt = this.#now();
+    const diagnostic = {
+      code: "parallel_progress_ui_failure",
+      message: boundedFailureReason(`Parallel progress UI failed during ${phase}: ${reason}`),
+      severity: "warning" as const,
+      occurredAt,
+      details: { phase, error: reason },
+    };
+    const run = state.parallelRuns?.[input.loopId];
+    let persistenceError: string | undefined;
+    try {
+      if (run && run.runId === this.#run?.runId) {
+        const nextRun = {
+          ...run,
+          diagnostics: [...(run.diagnostics ?? []), diagnostic].slice(-PARALLEL_RUN_DIAGNOSTIC_LIMIT),
+          updatedAt: Math.max(run.updatedAt, occurredAt),
+        };
+        replaceParallelState(state, { ...state, parallelRuns: { ...(state.parallelRuns ?? {}), [input.loopId]: nextRun }, updatedAt: Math.max(state.updatedAt, occurredAt) });
+        this.#run = nextRun;
+        this.#deps.state.saveCastState(input.pi, state);
+      }
+    } catch (diagnosticError) {
+      persistenceError = boundedFailureReason(parallelErrorMessage(diagnosticError));
+    }
+    void this.#appendEvent(state, "parallel_progress_ui_failure", {
+      parentCastId: state.castId,
+      loopId: input.loopId,
+      runId: run?.runId ?? this.#run?.runId,
+      phase,
+      error: reason,
+      ...(persistenceError ? { diagnosticPersistenceError: persistenceError } : {}),
+    });
   }
 
   async #notifyRunFailure(input: ParallelLoopDispatchInput, state: MateriaCastState, runId: string, reason: string): Promise<void> {
