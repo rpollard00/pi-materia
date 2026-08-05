@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { Component } from "@earendil-works/pi-tui";
 import { createParallelRunState } from "../src/domain/parallelRun.js";
 import type { MateriaParallelRunState } from "../src/types.js";
 import {
@@ -7,6 +6,7 @@ import {
   mountParallelProgressWidget,
   PARALLEL_PROGRESS_WIDGET_KEY,
   refreshParallelProgressWidget,
+  syncParallelProgressWidgetFromCast,
 } from "../src/presentation/parallelProgressWidget.js";
 
 function run(runId: string): MateriaParallelRunState {
@@ -25,44 +25,53 @@ function run(runId: string): MateriaParallelRunState {
   });
 }
 
+let nextSessionFile = 1;
+
 function harness() {
-  let component: Component | undefined;
-  let renders = 0;
-  const calls: Array<{ key: string; content: unknown; options: unknown }> = [];
+  const calls: Array<{ key: string; content: string[] | undefined; options: unknown }> = [];
+  const sessionFile = `/tmp/parallel-progress-${nextSessionFile++}.jsonl`;
   const ctx = {
+    sessionManager: { getSessionFile: () => sessionFile },
     ui: {
-      setWidget: (key: string, content: unknown, options: unknown) => {
+      setWidget: (key: string, content: string[] | undefined, options: unknown) => {
         calls.push({ key, content, options });
-        if (typeof content === "function") {
-          component = content(
-            { requestRender: () => { renders += 1; } },
-            { fg: (_color: string, text: string) => text },
-          );
-        } else if (content === undefined) component = undefined;
       },
     },
   } as any;
-  return { ctx, calls, component: () => component, renders: () => renders };
+  return { ctx, calls, rows: () => calls.at(-1)?.content };
 }
 
 describe("parallel progress widget lifecycle", () => {
-  test("mounts below the editor and redraws immediately without capturing focus", () => {
+  test("publishes initial visible rows below the editor and owns redraw through setWidget", () => {
     const ui = harness();
     const active = run("run-a");
     mountParallelProgressWidget(ui.ctx, active);
 
     expect(ui.calls[0]?.key).toBe(PARALLEL_PROGRESS_WIDGET_KEY);
     expect(ui.calls[0]?.options).toEqual({ placement: "belowEditor" });
-    expect(ui.component()?.handleInput).toBeUndefined();
-
-    active.lanes["lane-1"]!.progress.position = 3;
-    expect(refreshParallelProgressWidget(active)).toBe(true);
-    expect(ui.renders()).toBe(1);
-    expect(ui.component()?.render(80)[0]).toContain("60% (3/5)");
+    expect(ui.rows()).toHaveLength(2);
+    expect(ui.rows()?.[0]).toContain("0% (0/5) Queued");
     clearParallelProgressWidget(ui.ctx);
   });
 
-  test("keeps a completed sibling visible while another lane runs", () => {
+  test("publishes live updates and rewinds as fresh rows", () => {
+    const ui = harness();
+    const active = run("run-rewind");
+    mountParallelProgressWidget(ui.ctx, active);
+
+    active.lanes["lane-1"]!.status = "running";
+    active.lanes["lane-1"]!.progress.position = 3;
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("60% (3/5) Running");
+
+    active.lanes["lane-1"]!.progress.position = 1;
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("20% (1/5) Running");
+    expect(ui.calls).toHaveLength(3);
+    clearParallelProgressWidget(ui.ctx);
+  });
+
+  test("retains completed siblings while another lane runs and remains visible in awaiting_lanes", () => {
     const ui = harness();
     const active = run("run-siblings");
     mountParallelProgressWidget(ui.ctx, active);
@@ -70,15 +79,39 @@ describe("parallel progress widget lifecycle", () => {
     active.lanes["lane-1"]!.progress.position = 5;
     active.lanes["lane-2"]!.status = "running";
     active.lanes["lane-2"]!.progress.position = 2;
-    refreshParallelProgressWidget(active);
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("Completed");
+    expect(ui.rows()?.[1]).toContain("20% (2/10) Running");
 
-    const lines = ui.component()?.render(100) ?? [];
-    expect(lines[0]).toContain("Completed");
-    expect(lines[1]).toContain("20% (2/10) Running");
+    active.phase = "awaiting_lanes";
+    expect(refreshParallelProgressWidget(active)).toBe(true);
+    expect(ui.rows()?.[0]).toContain("Completed");
+    expect(ui.rows()?.[1]).toContain("Running");
     clearParallelProgressWidget(ui.ctx);
   });
 
-  test("clears on settlement and rejects stale ownership callbacks", () => {
+  test("restores a live run from cast state on session start", () => {
+    const ui = harness();
+    const active = run("run-restored");
+    syncParallelProgressWidgetFromCast(ui.ctx, {
+      active: true,
+      socketState: "running_parallel",
+      parallelRuns: { parallelWork: active },
+    } as any);
+
+    expect(ui.rows()).toHaveLength(2);
+    expect(ui.rows()?.[0]).toContain("Stream 1");
+
+    syncParallelProgressWidgetFromCast(ui.ctx, {
+      active: false,
+      phase: "failed",
+      socketState: "failed",
+      parallelRuns: { parallelWork: active },
+    } as any);
+    expect(ui.rows()).toBeUndefined();
+  });
+
+  test("replaces ownership and rejects stale callbacks from superseded runs", () => {
     const ui = harness();
     const oldRun = run("run-old");
     const newRun = run("run-new");
@@ -87,13 +120,13 @@ describe("parallel progress widget lifecycle", () => {
 
     oldRun.lanes["lane-1"]!.progress.position = 4;
     expect(refreshParallelProgressWidget(oldRun)).toBe(false);
-    expect(ui.component()?.render(80)[0]).toContain("0% (0/5)");
+    expect(ui.rows()?.[0]).toContain("0% (0/5)");
     expect(clearParallelProgressWidget(ui.ctx, oldRun.runId)).toBe(false);
 
     newRun.phase = "completed";
     newRun.fanInPhase = "accepted";
     expect(refreshParallelProgressWidget(newRun)).toBe(true);
-    expect(ui.component()).toBeUndefined();
+    expect(ui.rows()).toBeUndefined();
     expect(ui.calls.at(-1)).toEqual({
       key: PARALLEL_PROGRESS_WIDGET_KEY,
       content: undefined,
