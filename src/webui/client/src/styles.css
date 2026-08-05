@@ -449,7 +449,7 @@
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-dasharray: 18 10 4 10;
+  stroke-dasharray: none;
   filter: drop-shadow(0 0 10px rgb(129 140 248 / 0.18));
 }
 
@@ -472,31 +472,18 @@
   filter: drop-shadow(0 0 8px rgb(34 211 238 / 0.24));
 }
 
-.loadout-parallel-fork path:first-child {
+.loadout-parallel-fork path {
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+
+.loadout-parallel-fork .loadout-parallel-fork-center {
   stroke-width: 3;
-  stroke-dasharray: 9 6;
-}
-
-.loadout-parallel-fork path:nth-child(2) {
-  stroke-width: 2;
-  stroke-dasharray: 4 5;
-}
-
-.loadout-parallel-fork circle {
-  fill: var(--loop-accent, rgb(103 232 249));
-  stroke: rgb(224 242 254 / 0.9);
-  stroke-width: 1.5;
-}
-
-.loadout-parallel-barrier path {
-  stroke-width: 5;
-  stroke: var(--loop-accent, rgb(103 232 249));
-  stroke-dasharray: 3 5;
 }
 
 .loadout-parallel-fan-in path {
   stroke-width: 2.5;
-  stroke-dasharray: 8 6;
+  stroke-dasharray: none;
 }
 
 .loadout-parallel-fan-in-satisfied path {
@@ -646,6 +633,7 @@
   fill: none;
   stroke: rgb(125 211 252 / 0.72);
   stroke-width: 3;
+  stroke-dasharray: none;
   filter: drop-shadow(0 0 8px rgb(34 211 238 / 0.3));
 }
 
@@ -667,16 +655,16 @@
 
 .loadout-edge-unsatisfied path {
   stroke: rgb(251 191 36 / 0.82);
-  stroke-dasharray: 9 7;
+  stroke-dasharray: none;
 }
 
 .loadout-edge-route-backward path {
   stroke-width: 3.5;
-  stroke-dasharray: 14 6 4 6;
+  stroke-dasharray: none;
 }
 
 .loadout-edge-route-loop path {
-  stroke-dasharray: 4 5;
+  stroke-dasharray: none;
 }
 
 .loadout-edge-route-backward text,
@@ -699,7 +687,7 @@
 .loadout-edge-generator-input path {
   stroke: rgb(168 85 247 / 0.96);
   stroke-width: 4;
-  stroke-dasharray: 2 7;
+  stroke-dasharray: none;
   filter: drop-shadow(0 0 10px rgb(168 85 247 / 0.46)) drop-shadow(0 0 18px rgb(34 211 238 / 0.18));
 }
 
@@ -714,7 +702,7 @@
 .loadout-edge-loop-exit path {
   stroke: rgb(37 99 235 / 0.98);
   stroke-width: 4;
-  stroke-dasharray: 12 5 3 5;
+  stroke-dasharray: none;
   filter: drop-shadow(0 0 10px rgb(37 99 235 / 0.42)) drop-shadow(0 0 18px rgb(96 165 250 / 0.18));
 }
 

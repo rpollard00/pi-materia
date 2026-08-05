@@ -49,7 +49,7 @@ import type {
   SocketAnchorSide,
 } from '../types.js';
 
-export { parallelBarrierVisualId, parallelFanInVisualId, parallelForkVisualId } from './parallelLoopVisuals.js';
+export { parallelFanInVisualId, parallelForkVisualId } from './parallelLoopVisuals.js';
 
 export function buildLoadouts(config: MateriaConfig): Record<string, PipelineConfig> {
   if (config.loadouts && Object.keys(config.loadouts).length > 0) return config.loadouts;

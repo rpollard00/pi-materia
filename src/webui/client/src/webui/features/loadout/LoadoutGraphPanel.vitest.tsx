@@ -204,10 +204,9 @@ describe('LoadoutGraphPanel readonly defaults', () => {
           id: 'parallelWork', label: 'Build', x: 300, y: 12, width: 150, height: 160,
           summary: 'Parallel: app default', cyclePath: 'M 320 24 C 360 4 400 4 430 24', accent: '#22d3ee', accentSoft: 'rgba(34, 211, 238, 0.12)', parallel: true,
           parallelVisuals: {
-            fork: { id: 'parallel-fork:parallelWork', x: 80, y: 80, path: 'M 10 10 L 80 80', branchesPath: 'M 80 80 L 110 60 M 80 80 L 110 80 M 80 80 L 110 100', label: 'Parallel fork' },
-            barrier: { id: 'parallel-barrier:parallelWork', x: 450, y: 80, path: 'M 450 40 L 450 120', label: 'Parallel barrier' },
+            fork: { id: 'parallel-fork:parallelWork', sourceSocketId: 'Socket-1', targetSocketId: 'Socket-2', paths: ['M 10 10 L 80 60', 'M 10 20 L 80 70', 'M 10 30 L 80 80'], arrowPathIndex: 1, labelX: 45, labelY: 5, label: 'Fan-Out' },
             fanIn: [
-              { id: 'parallel-continuation:parallelWork', targetSocketId: 'Socket-4', path: 'M 450 70 L 500 70', labelX: 470, labelY: 60, label: 'Continue after barrier' },
+              { id: 'parallel-continuation:parallelWork', sourceSocketId: 'Socket-3', targetSocketId: 'Socket-4', path: 'M 450 70 L 500 70', labelX: 470, labelY: 60, label: 'Fan-In' },
             ],
             preludeSocketIds: ['Socket-2'],
             loopSocketIds: ['Socket-3'],
@@ -218,8 +217,16 @@ describe('LoadoutGraphPanel readonly defaults', () => {
 
     expect(getByTestId('parallel-badge-parallelWork').textContent).toBe('Parallel');
     expect(getByTestId('parallel-fork-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-fork:parallelWork');
-    expect(getByTestId('parallel-barrier-parallelWork').getAttribute('data-parallel-visual-id')).toBe('parallel-barrier:parallelWork');
-    expect(getByTestId('parallel-continuation-parallelWork')).toBeTruthy();
+    const fork = getByTestId('parallel-fork-parallelWork');
+    expect(fork.querySelectorAll('path')).toHaveLength(3);
+    expect([...fork.querySelectorAll('path')].filter((path) => path.getAttribute('marker-end')).length).toBe(1);
+    expect(fork.textContent).toContain('Fan-Out');
+    expect(queryByTestId('parallel-barrier-parallelWork')).toBeNull();
+    const fanIn = getByTestId('parallel-continuation-parallelWork');
+    expect(fanIn).toBeTruthy();
+    expect(fanIn.querySelectorAll('path')).toHaveLength(1);
+    expect(fanIn.querySelector('path')?.getAttribute('marker-end')).toContain('materia-parallel-fan-in-arrow');
+    expect(fanIn.textContent).toContain('Fan-In');
     const prelude = getByTestId('socket-Socket-2');
     expect(prelude.className).toContain('materia-socket-parallel-prelude');
     expect(prelude.getAttribute('data-parallel-prelude-ids')).toBe('parallelWork');

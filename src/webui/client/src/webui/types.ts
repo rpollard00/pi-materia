@@ -665,26 +665,21 @@ export interface RoutedLoadoutEdge {
 
 export interface ParallelLoopForkVisual {
   id: string;
-  x: number;
-  y: number;
-  path: string;
-  branchesPath: string;
-  label: string;
-}
-
-export interface ParallelLoopBarrierVisual {
-  id: string;
-  x: number;
-  y: number;
-  path: string;
+  sourceSocketId: string;
+  targetSocketId: string;
+  /** Three complete paths from the generator boundary to the branch entry. */
+  paths: string[];
+  /** Only this path receives the directional arrow marker. */
+  arrowPathIndex: number;
+  labelX: number;
+  labelY: number;
   label: string;
 }
 
 export interface ParallelLoopFanInVisual {
   id: string;
-  /** Legacy authored-route decoration; intrinsic barriers omit this. */
-  condition?: MateriaEdgeCondition;
-  targetSocketId?: string;
+  sourceSocketId: string;
+  targetSocketId: string;
   path: string;
   labelX: number;
   labelY: number;
@@ -693,7 +688,6 @@ export interface ParallelLoopFanInVisual {
 
 export interface ParallelLoopVisuals {
   fork: ParallelLoopForkVisual;
-  barrier: ParallelLoopBarrierVisual;
   fanIn: ParallelLoopFanInVisual[];
   preludeSocketIds?: string[];
   loopSocketIds?: string[];
@@ -712,7 +706,7 @@ export interface LoopRegion {
   accentSoft: string;
   /** True when this loop consumes a parallel-capable generator. */
   parallel?: boolean;
-  /** Derived-only fork/barrier/fan-in visuals; never persisted as sockets or edges. */
+  /** Derived-only fork/fan-in visuals; never persisted as sockets or edges. */
   parallelVisuals?: ParallelLoopVisuals;
   /** Live durable coordinator summary, when this region belongs to the active cast. */
   parallelStatus?: ParallelRunMonitorSummary;

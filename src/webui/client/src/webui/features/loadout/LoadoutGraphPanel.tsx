@@ -538,19 +538,17 @@ function EdgeLayer({ activeLoadout, height, loopRegions, materia, routedEdges, t
         if (!visuals) return [];
         return [
           <g key={visuals.fork.id} id={visuals.fork.id} data-testid={`parallel-fork-${loop.id}`} data-parallel-visual-id={visuals.fork.id} className="loadout-parallel-symbol loadout-parallel-fork" role="img" aria-label={`${visuals.fork.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
-            <path d={visuals.fork.path} markerEnd="url(#materia-parallel-fork-arrow)" />
-            <path d={visuals.fork.branchesPath} />
-            <circle cx={visuals.fork.x} cy={visuals.fork.y} r="5" />
-          </g>,
-          <g key={visuals.barrier.id} id={visuals.barrier.id} data-testid={`parallel-barrier-${loop.id}`} data-parallel-visual-id={visuals.barrier.id} className="loadout-parallel-symbol loadout-parallel-barrier" role="img" aria-label={`${visuals.barrier.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
-            <path d={visuals.barrier.path} />
+            {visuals.fork.paths.map((path, index) => (
+              <path key={`${visuals.fork.id}-path-${index}`} d={path} className={index === visuals.fork.arrowPathIndex ? 'loadout-parallel-fork-center' : undefined} markerEnd={index === visuals.fork.arrowPathIndex ? 'url(#materia-parallel-fork-arrow)' : undefined} />
+            ))}
+            <text x={visuals.fork.labelX} y={visuals.fork.labelY}>{visuals.fork.label}</text>
           </g>,
           ...visuals.fanIn.map((route) => (
             <g key={route.id} id={route.id} data-testid={`parallel-continuation-${loop.id}`} data-parallel-visual-id={route.id} className="loadout-parallel-symbol loadout-parallel-fan-in" role="img" aria-label={`${route.label} for ${loop.label}`} style={{ '--loop-accent': loop.accent, '--loop-accent-soft': loop.accentSoft } as CSSProperties}>
               <path d={route.path} markerEnd="url(#materia-parallel-fan-in-arrow)" />
               <text x={route.labelX} y={route.labelY}>{route.label}</text>
             </g>
-          )),
+          )), 
         ];
       })}
       {visibleRoutedEdges.map(({ edge, path, labelX, labelY, labelRotate, routeClass }) => {

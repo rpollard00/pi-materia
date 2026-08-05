@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { makeEmptySocket, type PipelineConfig } from '../../loadoutModel.js';
 import type { LoadoutEdge, PositionedSocket, RoutedLoadoutEdge } from '../types.js';
-import { formatLoopDisplayLabel, getLoopRegions, parallelBarrierVisualId, parallelFanInVisualId, parallelForkVisualId, routeLoadoutEdges } from './graphLayout.js';
+import { formatLoopDisplayLabel, getLoopRegions, parallelFanInVisualId, parallelForkVisualId, routeLoadoutEdges } from './graphLayout.js';
+import { buildParallelLoopVisuals } from './parallelLoopVisuals.js';
 
 function qControlXs(cyclePath: string): number[] {
   return Array.from(cyclePath.matchAll(/Q\s+(-?\d+(?:\.\d+)?)\s+-?\d+(?:\.\d+)?/g)).map((match) => Number(match[1]));
@@ -23,6 +24,14 @@ function cubicRoute(route: RoutedLoadoutEdge) {
     sourceControl: { x: numbers[2]!, y: numbers[3]! },
     targetControl: { x: numbers[4]!, y: numbers[5]! },
     end: { x: numbers[6]!, y: numbers[7]! },
+  };
+}
+
+function pathEndpoints(path: string) {
+  const numbers = path.match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+  return {
+    start: { x: numbers[0]!, y: numbers[1]! },
+    end: { x: numbers[numbers.length - 2]!, y: numbers[numbers.length - 1]! },
   };
 }
 
@@ -71,7 +80,7 @@ describe('loadout edge routing', () => {
 });
 
 describe('parallel loop symbolic visuals', () => {
-  it('derives stable fork, barrier, and fan-in visuals without adding lane sockets', () => {
+  it('derives stable three-line fork and direct fan-in visuals without adding lane sockets', () => {
     const loadout = {
       entry: 'Socket-1',
       sockets: {
@@ -96,14 +105,88 @@ describe('parallel loop symbolic visuals', () => {
 
     expect(region.parallel).toBe(true);
     expect(region.parallelVisuals?.fork.id).toBe(parallelForkVisualId('parallelWork'));
-    expect(region.parallelVisuals?.barrier.id).toBe(parallelBarrierVisualId('parallelWork'));
+    expect(region.parallelVisuals?.fork.paths).toHaveLength(3);
+    expect(region.parallelVisuals?.fork.arrowPathIndex).toBe(1);
+    expect(region.parallelVisuals?.fork.sourceSocketId).toBe('Socket-1');
+    expect(region.parallelVisuals?.fork.targetSocketId).toBe('Socket-2');
+    expect(region.parallelVisuals?.fork.label).toBe('Fan-Out');
     expect(region.parallelVisuals?.fanIn.map((visual) => visual.id)).toEqual([
       parallelFanInVisualId('parallelWork'),
     ]);
+    expect(region.parallelVisuals?.fanIn.map((visual) => visual.sourceSocketId)).toEqual(['Socket-4']);
     expect(region.parallelVisuals?.fanIn.map((visual) => visual.targetSocketId)).toEqual(['Socket-5']);
+    expect(region.parallelVisuals?.fanIn.map((visual) => visual.label)).toEqual(['Fan-In']);
     expect(region.parallelVisuals?.preludeSocketIds).toEqual(['Socket-2']);
     expect(region.parallelVisuals?.loopSocketIds).toEqual(['Socket-3', 'Socket-4']);
     expect(Object.keys(loadout.sockets)).toHaveLength(5);
+  });
+});
+
+describe('parallel loop boundary routing', () => {
+  const region = {
+    generatorSocketId: 'Socket-1',
+    entrySocketId: 'Socket-2',
+    preludeSocketIds: ['Socket-2'],
+    loopId: 'parallelWork',
+    loopSocketIds: ['Socket-3'],
+    continuationSocketId: 'Socket-5',
+  };
+  const loop = { sockets: ['Socket-3'], exit: { from: 'Socket-3', when: 'satisfied' as const, to: 'Socket-5' } };
+
+  function visualFor(coords: Record<string, { x: number; y: number }>) {
+    const positions = new Map(Object.entries(coords).map(([id, point], index) => [id, {
+      id,
+      socket: makeEmptySocket(),
+      index,
+      ...point,
+    }])) as Map<string, PositionedSocket>;
+    return buildParallelLoopVisuals(undefined, 'parallelWork', loop, region, positions, 0, 0, 0, 0);
+  }
+
+  it('uses boundary endpoints, perpendicular lanes, and one center arrow for every orientation', () => {
+    const horizontal = visualFor({
+      'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 240, y: 0 }, 'Socket-3': { x: 480, y: 0 }, 'Socket-5': { x: 720, y: 0 },
+    });
+    expect(horizontal.fork.paths).toHaveLength(3);
+    expect(horizontal.fork.paths.map(pathEndpoints).map(({ start, end }) => ({ start, end }))).toEqual([
+      { start: { x: 112, y: 37 }, end: { x: 260, y: 37 } },
+      { start: { x: 112, y: 46 }, end: { x: 260, y: 46 } },
+      { start: { x: 112, y: 55 }, end: { x: 260, y: 55 } },
+    ]);
+    expect(horizontal.fork.arrowPathIndex).toBe(1);
+
+    const vertical = visualFor({
+      'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 0, y: 240 }, 'Socket-3': { x: 0, y: 480 }, 'Socket-5': { x: 0, y: 720 },
+    });
+    expect(pathEndpoints(vertical.fork.paths[1]!).start).toEqual({ x: 66, y: 92 });
+    expect(pathEndpoints(vertical.fork.paths[1]!).end).toEqual({ x: 66, y: 240 });
+
+    const diagonal = visualFor({
+      'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 240, y: 120 }, 'Socket-3': { x: 480, y: 240 }, 'Socket-5': { x: 720, y: 360 },
+    });
+    const diagonalCenter = pathEndpoints(diagonal.fork.paths[1]!);
+    expect(diagonalCenter.start.x).toBeGreaterThan(100);
+    expect(diagonalCenter.end.x).toBeGreaterThan(diagonalCenter.start.x);
+    expect(diagonalCenter.end.y).toBeGreaterThan(diagonalCenter.start.y);
+
+    const reversed = visualFor({
+      'Socket-1': { x: 480, y: 0 }, 'Socket-2': { x: 240, y: 0 }, 'Socket-3': { x: 0, y: 0 }, 'Socket-5': { x: -240, y: 0 },
+    });
+    const reversedCenter = pathEndpoints(reversed.fork.paths[1]!);
+    expect(reversedCenter.start.x).toBeGreaterThan(reversedCenter.end.x);
+  });
+
+  it('moves both derived boundaries and labels with moved sockets', () => {
+    const first = visualFor({
+      'Socket-1': { x: 0, y: 0 }, 'Socket-2': { x: 240, y: 0 }, 'Socket-3': { x: 480, y: 0 }, 'Socket-5': { x: 720, y: 0 },
+    });
+    const moved = visualFor({
+      'Socket-1': { x: 0, y: 168 }, 'Socket-2': { x: 240, y: 336 }, 'Socket-3': { x: 480, y: 504 }, 'Socket-5': { x: 720, y: 672 },
+    });
+    expect(moved.fork.paths).not.toEqual(first.fork.paths);
+    expect(moved.fanIn[0]?.path).not.toBe(first.fanIn[0]?.path);
+    expect(moved.fork.labelY).not.toBe(first.fork.labelY);
+    expect(moved.fanIn[0]?.labelY).not.toBe(first.fanIn[0]?.labelY);
   });
 });
 
