@@ -12,6 +12,9 @@ import {
 } from "../loadout/loadoutAccessors.js";
 import { deriveRetryBudget, type MateriaRetryBudget } from "./retryBudget.js";
 import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../application/parallelMonitoring.js";
+import {
+  formatParallelProgressRows,
+} from "./parallelProgress.js";
 import { syncParallelProgressWidgetFromCast } from "./parallelProgressWidget.js";
 import type {
   MateriaCastState,
@@ -22,6 +25,8 @@ import type {
 } from "../types.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
+const MATERIA_WIDGET_MAX_LINES = 10;
+const MATERIA_BASE_WIDGET_LINES = 3;
 type MateriaWidgetState = MateriaRunState | MateriaCastState;
 type MateriaWidgetController = {
   scope: string;
@@ -269,7 +274,8 @@ export function renderMateriaCastStatusWidget(
   state: MateriaCastState,
   now = Date.now(),
 ): string[] {
-  return renderMateriaStatusWidget(createMateriaCastStatusModel(state, now));
+  const baseLines = renderMateriaStatusWidget(createMateriaCastStatusModel(state, now));
+  return appendParallelProgressRows(baseLines, state);
 }
 
 export type MateriaStatusSegmentKind =
@@ -412,6 +418,34 @@ function activeParallelRun(state: MateriaCastState): ParallelRunMonitorSummary |
   const selected = currentLoop ? runs.find((run) => run.loopId === currentLoop) : undefined;
   const fallback = runs.slice().sort((left, right) => left.loopId.localeCompare(right.loopId))[0];
   return summarizeParallelRun(selected ?? fallback!);
+}
+
+function appendParallelProgressRows(
+  baseLines: string[],
+  state: MateriaCastState,
+): string[] {
+  const summary = activeParallelRun(state);
+  if (!summary || !isLiveParallelSummary(state, summary)) return baseLines;
+
+  const progressRows = formatParallelProgressRows(summary, WIDGET_MAX_LINE_LENGTH);
+  const availableRows = MATERIA_WIDGET_MAX_LINES - MATERIA_BASE_WIDGET_LINES;
+  if (progressRows.length <= availableRows) return [...baseLines, ...progressRows];
+
+  const visibleRows = progressRows.slice(0, Math.max(0, availableRows - 1));
+  const omittedRows = progressRows.length - visibleRows.length;
+  const overflowLabel = omittedRows === 1
+    ? "… 1 more parallel lane"
+    : `… ${omittedRows} more parallel lanes`;
+  return [...baseLines, ...visibleRows, truncateLine(overflowLabel)];
+}
+
+function isLiveParallelSummary(
+  state: MateriaCastState,
+  summary: ParallelRunMonitorSummary,
+): boolean {
+  return state.active
+    && (summary.phase === "dispatching" || summary.phase === "awaiting_lanes")
+    && summary.fanInPhase === "not_started";
 }
 
 /** Compact, bounded aggregate status for the persistent Pi/TUI widget. */

@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { visibleWidth } from "@earendil-works/pi-tui";
+import { createParallelRunState } from "../src/domain/parallelRun.js";
 import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
 import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
 import type { ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
@@ -61,6 +63,29 @@ function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
 }
 
 describe("persistent Materia widget formatting", () => {
+  function parallelCastState(laneCount: number): { state: MateriaCastState; run: ReturnType<typeof createParallelRunState> } {
+    const run = createParallelRunState({
+      runId: `parallel-${laneCount}`,
+      parentCastId: "cast-parallel",
+      loopId: "parallelWork",
+      planIdentity: { version: 1, planId: `plan-${laneCount}`, workItemCount: laneCount },
+      graphIdentity: { graphHash: "graph" },
+      configIdentity: { configHash: "config", loopId: "parallelWork", maxConcurrency: 3 },
+      queue: Array.from({ length: laneCount }, (_, streamIndex) => ({
+        laneId: `lane-${streamIndex}`,
+        name: `Stream ${streamIndex}`,
+        streamIndex,
+        workItemIndexes: [streamIndex],
+        progressTotal: 5,
+      })),
+      now: 1,
+    });
+    return {
+      state: loopCastState({ active: true, parallelRuns: { parallelWork: run } }),
+      run,
+    };
+  }
+
   test("renders compact active cast details in at most four lines", () => {
     const state: MateriaRunState = {
       runId: "2026-05-07T14-53-49-729Z",
@@ -348,6 +373,46 @@ describe("persistent Materia widget formatting", () => {
     expect(lines[1]).toContain("⟲ -");
     expect(lines[2]).toBe("› Socket-9 active");
     expect(lines.join("\n")).not.toContain("undefined");
+  });
+
+  test("appends live parallel rows to the shared Materia panel in schedule order", () => {
+    const { state, run } = parallelCastState(3);
+    run.queueOrder.reverse();
+    run.lanes["lane-0"]!.status = "running";
+    run.lanes["lane-0"]!.progress.position = 2;
+    run.lanes["lane-0"]!.activeStage = { socketId: "Socket-1", label: "Spawn-JJ-Workspace", transitionedAt: 2 };
+    run.lanes["lane-1"]!.status = "accepted";
+    run.lanes["lane-1"]!.progress.position = 5;
+
+    const lines = renderMateriaCastStatusWidget(state, 2_000);
+    expect(lines).toHaveLength(7);
+    expect(lines[3]).toContain("Parallel slots: 1/3 running");
+    expect(lines[4]).toContain("Stream 0");
+    expect(lines[4]).toContain("Spawn-JJ-Workspace");
+    expect(lines[5]).toContain("Stream 1");
+    expect(lines[5]).toContain("Completed");
+    expect(lines[6]).toContain("Stream 2");
+    expect(lines.every((line) => visibleWidth(line) <= 78)).toBe(true);
+  });
+
+  test("hides parallel detail rows once fan-in starts", () => {
+    const { state, run } = parallelCastState(2);
+    run.phase = "awaiting_lanes";
+    run.fanInPhase = "accepted";
+
+    expect(renderMateriaCastStatusWidget(state, 2_000)).toHaveLength(3);
+  });
+
+  test("caps the shared panel at ten lines with a deterministic overflow row", () => {
+    const { state, run } = parallelCastState(8);
+    run.queueOrder.reverse();
+
+    const first = renderMateriaCastStatusWidget(state, 2_000);
+    const second = renderMateriaCastStatusWidget(state, 2_000);
+    expect(first).toEqual(second);
+    expect(first).toHaveLength(10);
+    expect(first.at(-1)).toBe("… 3 more parallel lanes");
+    expect(first.every((line) => visibleWidth(line) <= 78)).toBe(true);
   });
 
   test("renders all aggregate parallel lane counters in compact status", () => {
