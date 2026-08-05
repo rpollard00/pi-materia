@@ -78,6 +78,97 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(childRunner.listSnapshots()).toHaveLength(2);
   });
 
+  test("enters every available child start before a sibling start is released", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const entered: string[] = [];
+    let maxInFlight = 0;
+    let inFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let resolveFirstBatch!: () => void;
+    const firstBatch = new Promise<void>((resolve) => { resolveFirstBatch = resolve; });
+    const children = {
+      start: async (input: any) => {
+        entered.push(input.identity.laneId);
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (entered.length === 2) resolveFirstBatch();
+        try {
+          await gate;
+          return childRunner.start(input);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: childRunner.subscribe.bind(childRunner),
+    };
+    const subject = new ParallelLoopDispatcher({ children, state: { saveCastState: () => undefined } } as any);
+    const dispatch = subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 2 } });
+
+    await firstBatch;
+    expect(entered).toEqual(["lane-a", "lane-b"]);
+    expect(maxInFlight).toBe(2);
+    expect(state.parallelRuns!.build!.lanes["lane-c"]!.status).toBe("queued");
+    expect(childRunner.listSnapshots()).toHaveLength(0);
+
+    release();
+    await dispatch;
+    expect(childRunner.listSnapshots().map((child) => child.identity.laneId)).toEqual(["lane-a", "lane-b"]);
+    expect(state.parallelRuns!.build!.lanes["lane-c"]!.status).toBe("queued");
+  });
+
+  test("refills a failed start without blocking sibling starts or exceeding the bound", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const entered: string[] = [];
+    let maxInFlight = 0;
+    let inFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let resolveAllStarts!: () => void;
+    const allStarts = new Promise<void>((resolve) => { resolveAllStarts = resolve; });
+    const children = {
+      start: async (input: any) => {
+        entered.push(input.identity.laneId);
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        if (entered.length === 3) resolveAllStarts();
+        try {
+          if (input.identity.laneId === "lane-a") throw new Error("lane-a start failed");
+          await gate;
+          return childRunner.start(input);
+        } finally {
+          inFlight -= 1;
+        }
+      },
+      observe: childRunner.observe.bind(childRunner),
+      resume: childRunner.resume.bind(childRunner),
+      abort: childRunner.abort.bind(childRunner),
+      retire: childRunner.retire.bind(childRunner),
+      subscribe: childRunner.subscribe.bind(childRunner),
+    };
+    const subject = new ParallelLoopDispatcher({ children, state: { saveCastState: () => undefined } } as any);
+    const dispatch = subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 2 } });
+
+    await allStarts;
+    expect(entered).toEqual(["lane-a", "lane-b", "lane-c"]);
+    expect(maxInFlight).toBe(2);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.status).toBe("failed");
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.status).toBe("running");
+    expect(state.parallelRuns!.build!.lanes["lane-c"]!.status).toBe("running");
+
+    release();
+    await dispatch;
+    for (const child of childRunner.listSnapshots()) childRunner.complete(child.identity.childCastId);
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.phase).toBe("failed");
+  });
+
   test("coordinates sequence-guarded live progress without persistence or event amplification", async () => {
     const state = makeState();
     const childRunner = createFakeChildCastRunner({ now: () => 10 });

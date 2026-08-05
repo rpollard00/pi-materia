@@ -148,6 +148,13 @@ export class ParallelLoopDispatcher {
   #prepared: PreparedLane[] = [];
   #nextQueueIndex = 0;
   #active = new Map<string, ActiveLane>();
+  /** Queue entries reserved for launch setup but not yet counted as active lanes. */
+  #reserved = new Set<string>();
+  /** Children whose durable running transition is installed but whose start has not returned. */
+  #starting = new Map<string, { childCastId: string; generation: number }>();
+  /** Launch tasks remain tracked through lane-local lifecycle I/O without occupying a slot. */
+  #launching = new Map<string, Promise<void>>();
+  #slotWaiters = new Set<() => void>();
   #pumpTail: Promise<void> = Promise.resolve();
   #eventTails = new Map<string, Promise<void>>();
   #latestUsage = new Map<string, MateriaParallelUsageTotals>();
@@ -218,6 +225,9 @@ export class ParallelLoopDispatcher {
       this.#prepared = prepared;
       this.#nextQueueIndex = 0;
       this.#active.clear();
+      this.#reserved.clear();
+      this.#starting.clear();
+      this.#launching.clear();
       this.#eventTails.clear();
       this.#latestUsage.clear();
       this.#budgetFailure = undefined;
@@ -348,6 +358,9 @@ export class ParallelLoopDispatcher {
     this.#prepared = allCompiled;
     this.#nextQueueIndex = 0;
     this.#active.clear();
+    this.#reserved.clear();
+    this.#starting.clear();
+    this.#launching.clear();
     this.#cancelRequested = false;
     this.#cancelPromise = undefined;
     this.#terminalPromise = undefined;
@@ -378,9 +391,11 @@ export class ParallelLoopDispatcher {
 
   #resetForDifferentCast(castId: string): void {
     const previous = this.#input?.state.castId ?? this.#run?.parentCastId;
-    if (previous === undefined || previous === castId || this.#initialization || this.#active.size > 0) return;
+    if (previous === undefined || previous === castId || this.#initialization || this.#active.size > 0 || this.#reserved.size > 0 || this.#launching.size > 0) return;
     this.#generation += 1;
-    this.#run = undefined; this.#prepared = []; this.#nextQueueIndex = 0; this.#eventTails.clear(); this.#latestUsage.clear();
+    this.#run = undefined; this.#prepared = []; this.#nextQueueIndex = 0;
+    this.#reserved.clear(); this.#starting.clear(); this.#launching.clear();
+    this.#eventTails.clear(); this.#latestUsage.clear();
     this.#budgetFailure = undefined; this.#cancelRequested = false; this.#cancelPromise = undefined; this.#cancelCastId = undefined; this.#terminalPromise = undefined;
   }
 
@@ -399,83 +414,177 @@ export class ParallelLoopDispatcher {
     this.#pumpTail = this.#pumpTail.catch(() => undefined).then(async () => {
       const input = this.#input; const state = this.#state;
       if (!input || !state || !this.#run) return;
-      while (!this.#cancelRequested && !this.#budgetFailure && this.#active.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
-        const prepared = this.#prepared[this.#nextQueueIndex++];
-        if (prepared) await this.#launchLane(input, state, prepared);
+
+      // Reserve the deterministic queue prefix before doing any asynchronous
+      // lane setup. A reservation counts against the bound until the child
+      // start has returned, so concurrent pump calls cannot oversubscribe the
+      // coordinator while a child runner is still starting.
+      while (!this.#cancelRequested && !this.#budgetFailure) {
+        while (this.#active.size + this.#reserved.size < input.config.maxConcurrency && this.#nextQueueIndex < this.#prepared.length) {
+          const prepared = this.#prepared[this.#nextQueueIndex++];
+          if (!prepared) continue;
+          const laneId = prepared.stream.laneId;
+          this.#reserved.add(laneId);
+          const launch = this.#launchLane(input, state, prepared);
+          this.#launching.set(laneId, launch);
+          void launch.catch(() => undefined).finally(() => {
+            if (this.#launching.get(laneId) === launch) this.#launching.delete(laneId);
+          });
+        }
+
+        // Launches release their reservations as soon as their child start
+        // returns or fails. Do not wait for lane artifact/runtime-event I/O; a
+        // failed slot must be refillable while sibling lifecycle writes remain
+        // pending.
+        if (this.#reserved.size > 0) {
+          await this.#waitForSlotAvailability();
+          continue;
+        }
+        break;
       }
+
+      // All available starts have now been entered (or failed), so preserve
+      // dispatch's established completion boundary for their lifecycle records
+      // without holding up the sibling slot-filling loop above.
+      await Promise.all([...this.#launching.values()].map((launch) => launch.catch(() => undefined)));
     });
     await this.#pumpTail;
   }
 
   async #launchLane(input: ParallelLoopDispatchInput, state: MateriaCastState, prepared: PreparedLane): Promise<void> {
     const lane = this.#run?.lanes[prepared.stream.laneId];
-    if (!lane || lane.status !== "queued") return;
+    if (!lane || lane.status !== "queued") {
+      this.#releaseLaneReservation(prepared.stream.laneId);
+      return;
+    }
+    const launchGeneration = this.#generation;
+    const launchRunId = this.#run?.runId;
+    const ownsLaunch = () => this.#ownsLaunch(input, state, prepared.stream.laneId, launchGeneration, launchRunId);
     const attempt = lane.attempt;
     const childCastId = prepared.recoveryChildCastId ?? childCastIdentity(state.castId, input.loopId, lane.laneId, attempt);
     const coordinatorArtifactRoot = path.dirname(lanePaths(state, input.loopId, lane.laneId, attempt).runDirectory);
     let paths = lanePaths(state, input.loopId, lane.laneId, attempt);
     const baseScope = state.baseScope ?? createBaseExecutionScope(state.castId, state.cwd);
     const scope = cloneExecutionScope(prepared.recoveryScope ?? lane.executionScope ?? cloneParallelBranchExecutionScope(baseScope, input.loopId, lane.laneId));
-    state.branchScopes = { ...(state.branchScopes ?? {}), [scope.id]: scope };
-    if (prepared.resumeChild) {
-      try {
+    let identity: ParallelLaneArtifactIdentity | undefined;
+    let active: ActiveLane | undefined;
+
+    try {
+      if (!ownsLaunch()) return;
+      state.branchScopes = { ...(state.branchScopes ?? {}), [scope.id]: scope };
+      identity = {
+        parentCastId: state.castId,
+        runId: launchRunId ?? this.#run!.runId,
+        loopId: input.loopId,
+        laneId: lane.laneId,
+        childCastId,
+        planId: this.#run!.planIdentity.planId,
+        graphHash: this.#run!.graphIdentity.graphHash,
+        branchId: lane.branchId,
+        executionScopeId: scope.id,
+        attempt,
+        streamIndex: lane.streamIndex,
+        workItemIndexes: [...lane.workItemIndexes],
+        coordinatorArtifactRoot,
+        paths,
+      };
+      if (prepared.resumeChild) {
         const resumed = await this.#deps.children.resume({ childCastId, mode: "resume" });
+        if (!ownsLaunch()) {
+          await this.#abortChild(childCastId, "parallel launch superseded");
+          return;
+        }
         assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, resumed.snapshot);
         // Resume is owned by the child runner and may intentionally retain its
         // original session. Persist those actual paths instead of speculative
         // paths for the parent's new lane attempt.
         paths = { ...resumed.snapshot.paths };
-      } catch (error) {
-        await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${parallelErrorMessage(error)}` }).catch(() => undefined);
-        if (!this.#cancelRequested) {
-          const failedIdentity: ParallelLaneArtifactIdentity = { parentCastId: state.castId, runId: this.#run!.runId, loopId: input.loopId, laneId: lane.laneId, childCastId, planId: this.#run!.planIdentity.planId, graphHash: this.#run!.graphIdentity.graphHash, branchId: lane.branchId, executionScopeId: scope.id, attempt, streamIndex: lane.streamIndex, workItemIndexes: [...lane.workItemIndexes], coordinatorArtifactRoot, paths };
-          await this.#failLane(input, state, prepared.stream, failedIdentity, `child launch failed: ${parallelErrorMessage(error)}`);
-        }
+        identity = { ...identity, paths };
+      }
+      if (!ownsLaunch()) {
+        await this.#abortChild(childCastId, "parallel launch superseded");
         return;
       }
-    }
-    const identity: ParallelLaneArtifactIdentity = { parentCastId: state.castId, runId: this.#run!.runId, loopId: input.loopId, laneId: lane.laneId, childCastId, planId: this.#run!.planIdentity.planId, graphHash: this.#run!.graphIdentity.graphHash, branchId: lane.branchId, executionScopeId: scope.id, attempt, streamIndex: lane.streamIndex, workItemIndexes: [...lane.workItemIndexes], coordinatorArtifactRoot, paths };
-    const artifactPaths = await this.#initializeLaneArtifacts(identity, state);
-    const childSession = { childCastId, sessionPath: paths.sessionPath, artifactRoot: paths.artifactRoot, runDirectory: paths.runDirectory };
-    if (!this.#applyLaneTransition(input, state, { laneId: lane.laneId, attempt, childCastId, status: "running", executionScope: scope, childSession, timestamp: this.#now() })) return;
-    const active: ActiveLane = { childCastId, attempt, generation: this.#generation, artifactIdentity: identity, artifactPaths };
-    this.#active.set(lane.laneId, active);
-    const startInput: StartChildCastInput = {
-      identity: { childCastId, parentCastId: state.castId, loopId: input.loopId, laneId: lane.laneId },
-      request: state.request,
-      cwd: scope.cwd,
-      executionScope: scope,
-      compiledLoadout: {
-        childLoadoutId: prepared.compiledLoadout.childLoadoutId,
-        loadout: prepared.compiledLoadout.loadout,
-        initialData: { ...prepared.compiledLoadout.initialData, ...boundedParallelChildData(this.#run!, prepared.stream) },
-        nominalProgress: prepared.compiledLoadout.nominalProgress,
-        loopId: input.loopId,
-        laneId: lane.laneId,
-      },
-      paths,
-      attempt,
-    };
-    try {
+      const artifactPaths = await this.#initializeLaneArtifacts(identity, state);
+      if (!ownsLaunch()) {
+        await this.#abortChild(childCastId, "parallel launch superseded");
+        return;
+      }
+      const childSession = { childCastId, sessionPath: paths.sessionPath, artifactRoot: paths.artifactRoot, runDirectory: paths.runDirectory };
+      if (!this.#applyLaneTransition(input, state, { laneId: lane.laneId, attempt, childCastId, status: "running", executionScope: scope, childSession, timestamp: this.#now() })) {
+        await this.#abortChild(childCastId, "parallel launch superseded");
+        return;
+      }
+      // Keep the reservation until start returns. The durable lane transition
+      // is already running, while the reservation represents the still-pending
+      // child start and prevents a third lane from oversubscribing the bound.
+      this.#starting.set(lane.laneId, { childCastId, generation: launchGeneration });
+
+      const startInput: StartChildCastInput = {
+        identity: { childCastId, parentCastId: state.castId, loopId: input.loopId, laneId: lane.laneId },
+        request: state.request,
+        cwd: scope.cwd,
+        executionScope: scope,
+        compiledLoadout: {
+          childLoadoutId: prepared.compiledLoadout.childLoadoutId,
+          loadout: prepared.compiledLoadout.loadout,
+          initialData: { ...prepared.compiledLoadout.initialData, ...boundedParallelChildData(this.#run!, prepared.stream) },
+          nominalProgress: prepared.compiledLoadout.nominalProgress,
+          loopId: input.loopId,
+          laneId: lane.laneId,
+        },
+        paths,
+        attempt,
+      };
       if (!prepared.resumeChild) await this.#deps.children.start(startInput);
-      if (this.#cancelRequested) { await this.#abortChild(childCastId, "parallel execution cancelled"); return; }
+      if (!ownsLaunch()) {
+        const reason = this.#budgetFailure
+          ? "parallel parent budget exhausted"
+          : this.#cancelRequested
+            ? "parallel execution cancelled"
+            : "parallel launch superseded";
+        await this.#abortChild(childCastId, reason);
+        this.#starting.delete(lane.laneId);
+        return;
+      }
+      active = { childCastId, attempt, generation: launchGeneration, artifactIdentity: identity, artifactPaths };
+      this.#active.set(lane.laneId, active);
+      this.#starting.delete(lane.laneId);
+      this.#releaseLaneReservation(lane.laneId);
       active.subscription = this.#deps.children.subscribe({ childCastId, afterSequence: prepared.recoveryAfterSequence }, {
-        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active, event),
+        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active!, event),
         onTerminal: (result) => {
-          const work = this.#terminalTail.catch(() => undefined).then(() => this.#handleChildTerminal(input, state, prepared.stream, active, result));
+          const work = this.#terminalTail.catch(() => undefined).then(() => this.#handleChildTerminal(input, state, prepared.stream, active!, result));
           this.#terminalTail = work;
           return work;
         },
       });
       const lifecycleType = prepared.resumeChild ? "parallel_lane_resumed" : "parallel_lane_started";
+      // Lifecycle writes are intentionally outside slot acquisition. They are
+      // guarded between awaits so a retired generation cannot write into a
+      // replacement run.
+      if (!this.#ownsActiveLane(input, state, prepared.stream, active)) return;
       await this.#appendLaneLifecycle(active, state, input.loopId, prepared.stream, lifecycleType, this.#now(), { status: "running" });
+      if (!this.#ownsActiveLane(input, state, prepared.stream, active)) return;
       await this.#appendEvent(state, lifecycleType, { ...this.#eventProvenance(state, input.loopId, prepared.stream, active), status: "running" });
-      notifyParallelUser(input.ctx, `pi-materia spawned parallel lane "${prepared.stream.name}" for loop "${input.loopId}".`, "info");
+      if (this.#ownsActiveLane(input, state, prepared.stream, active)) notifyParallelUser(input.ctx, `pi-materia spawned parallel lane "${prepared.stream.name}" for loop "${input.loopId}".`, "info");
     } catch (error) {
-      this.#active.delete(lane.laneId);
+      if (active && this.#active.get(lane.laneId) === active) {
+        this.#active.delete(lane.laneId);
+        active.subscription?.unsubscribe();
+      }
+      this.#starting.delete(lane.laneId);
+      // Release before failure artifacts so the queue can refill immediately.
+      this.#releaseLaneReservation(lane.laneId);
+      if (!identity) return;
       await this.#deps.children.abort({ childCastId, reason: `child launch failed: ${parallelErrorMessage(error)}` }).catch(() => undefined);
-      if (this.#cancelRequested) return;
+      if (!ownsLaunch()) return;
       await this.#failLane(input, state, prepared.stream, identity, `child launch failed: ${parallelErrorMessage(error)}`);
+      // The failure transition may make the final barrier terminal after the
+      // current pump has already moved on to a replacement queue entry.
+      void this.#pump().then(() => this.#maybeAllTerminal(input, state)).catch(() => undefined);
+    } finally {
+      this.#releaseLaneReservation(lane.laneId);
     }
   }
 
@@ -731,6 +840,12 @@ export class ParallelLoopDispatcher {
     this.#generation += 1;
     for (const lane of this.#active.values()) lane.subscription?.unsubscribe();
     this.#active.clear();
+    this.#reserved.clear();
+    this.#starting.clear();
+    this.#launching.clear();
+    const slotWaiters = [...this.#slotWaiters];
+    this.#slotWaiters.clear();
+    for (const resolve of slotWaiters) resolve();
     this.#eventTails.clear();
     this.#latestUsage.clear();
     this.#prepared = [];
@@ -746,6 +861,26 @@ export class ParallelLoopDispatcher {
     this.#usageWriteTail = Promise.resolve();
     this.#pumpTail = Promise.resolve();
     this.#terminalTail = Promise.resolve();
+  }
+
+  #waitForSlotAvailability(): Promise<void> {
+    return new Promise((resolve) => this.#slotWaiters.add(resolve));
+  }
+
+  #releaseLaneReservation(laneId: string): void {
+    if (!this.#reserved.delete(laneId)) return;
+    const waiters = [...this.#slotWaiters];
+    this.#slotWaiters.clear();
+    for (const resolve of waiters) resolve();
+  }
+
+  #ownsLaunch(input: ParallelLoopDispatchInput, state: MateriaCastState, laneId: string, generation: number, runId: string | undefined): boolean {
+    return !this.#cancelRequested
+      && generation === this.#generation
+      && this.#input === input
+      && this.#state === state
+      && this.#run?.runId === runId
+      && (this.#run?.lanes[laneId]?.status === "queued" || this.#run?.lanes[laneId]?.status === "running");
   }
 
   #ownsActiveLane(input: ParallelLoopDispatchInput, state: MateriaCastState, stream: NormalizedParallelStream, active: ActiveLane): boolean {
@@ -791,7 +926,10 @@ export class ParallelLoopDispatcher {
     const run = this.#run!;
     this.#budgetFailure = error instanceof Error ? error : new Error(String(error));
     const reason = boundedFailureReason(`Parallel parent budget exhausted: ${parallelErrorMessage(error)}`);
-    const active = [...this.#active.values()]; this.#active.clear(); this.#nextQueueIndex = this.#prepared.length;
+    const active = [...this.#active.values()];
+    const starting = [...this.#starting.values()];
+    this.#active.clear();
+    this.#nextQueueIndex = this.#prepared.length;
     for (const lane of Object.values(run.lanes)) {
       if (!this.#ownsClaimedLane(input, state, owner)) return;
       if (isTerminalLaneStatus(lane.status)) continue;
@@ -806,7 +944,10 @@ export class ParallelLoopDispatcher {
     await this.#appendEvent(state, "parallel_budget_exceeded", { parentCastId: state.castId, loopId: input.loopId, runId: run.runId, reason });
     if (!this.#ownsClaimedLane(input, state, owner)) return;
     for (const lane of active) lane.subscription?.unsubscribe();
-    await Promise.all(active.map((lane) => this.#abortChild(lane.childCastId, reason)));
+    await Promise.all([
+      ...active.map((lane) => this.#abortChild(lane.childCastId, reason)),
+      ...starting.map((lane) => this.#abortChild(lane.childCastId, reason)),
+    ]);
     if (!this.#ownsClaimedLane(input, state, owner)) return;
     await this.#deps.onBudgetExceeded?.(input.pi, input.ctx, state, this.#budgetFailure, `parallel:${input.loopId}`).catch(() => undefined);
     if (!this.#ownsClaimedLane(input, state, owner)) return;
