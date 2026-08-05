@@ -3,7 +3,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ParallelLaneMonitorSummary } from "../src/application/parallelMonitoring.js";
 import {
   formatParallelProgress,
-  ParallelProgressComponent,
+  formatParallelProgressRows,
 } from "../src/presentation/parallelProgress.js";
 
 type Lane = Pick<ParallelLaneMonitorSummary, "laneId" | "name" | "streamIndex" | "queueIndex" | "status" | "progress">;
@@ -42,12 +42,26 @@ describe("parallel progress presentation", () => {
 
     for (const width of widths) {
       const [line] = formatParallelProgress(input, width, { style });
+      expect(line).not.toBe("");
       expect(visibleWidth(line ?? "")).toBeLessThanOrEqual(width);
     }
 
     const [moderate] = formatParallelProgress(input, 42);
     expect(moderate).toContain("…");
     expect(moderate).toContain("60% (3/5) Failed");
+  });
+
+  test("publishes visible, sanitized string rows for the host widget path", () => {
+    const rows = formatParallelProgressRows([
+      lane({ name: "Unsafe\n\u001b[31m stream", status: "interrupted" }),
+    ], 64);
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toBe("");
+    expect(visibleWidth(rows[0] ?? "")).toBeGreaterThan(0);
+    expect(visibleWidth(rows[0] ?? "")).toBeLessThanOrEqual(64);
+    expect(rows[0]).not.toContain("\u001b[31m");
+    expect(rows[0]).toContain("Interrupted");
   });
 
   test("shows queued, running, and terminal labels while retaining completed siblings", () => {
@@ -68,14 +82,12 @@ describe("parallel progress presentation", () => {
   });
 
   test("renders zero totals and reflects rewinds without monotonic presentation state", () => {
-    const component = new ParallelProgressComponent([
-      lane({ progress: { position: 0, total: 0 }, status: "queued" }),
-    ]);
-    expect(component.render(80)[0]).toContain("0% (0/0) Queued");
+    const zero = lane({ progress: { position: 0, total: 0 }, status: "queued" });
+    expect(formatParallelProgressRows([zero], 80)[0]).toContain("0% (0/0) Queued");
 
-    component.setLanes([lane({ progress: { position: 4, total: 5 } })]);
-    expect(component.render(80)[0]).toContain("80% (4/5)");
-    component.setLanes([lane({ progress: { position: 1, total: 5 } })]);
-    expect(component.render(80)[0]).toContain("20% (1/5)");
+    const forward = lane({ progress: { position: 4, total: 5 } });
+    expect(formatParallelProgressRows([forward], 80)[0]).toContain("80% (4/5)");
+    const rewind = lane({ progress: { position: 1, total: 5 } });
+    expect(formatParallelProgressRows([rewind], 80)[0]).toContain("20% (1/5)");
   });
 });

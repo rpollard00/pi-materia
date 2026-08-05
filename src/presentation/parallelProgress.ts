@@ -20,23 +20,47 @@ type ProgressLane = Pick<
 >;
 
 const DEFAULT_MAX_BAR_WIDTH = 20;
+/** Width used when rows are handed to Pi without a component render callback. */
+export const DEFAULT_PARALLEL_PROGRESS_WIDTH = 80;
 
 /**
- * Render one bounded line per normalized stream without mutating the monitor DTO.
- * Schedule order is streamIndex first, with stable persisted fields as tie-breakers.
+ * Render one bounded, non-empty row per normalized stream without mutating the
+ * monitor DTO. Schedule order is streamIndex first, with stable persisted fields
+ * as tie-breakers.
+ *
+ * Pi's string-row widget API does not provide a render width. Callers can use
+ * the default width (or {@link formatParallelProgressRows}) and let Pi's Text
+ * wrapper handle the final terminal-width wrapping.
  */
 export function formatParallelProgress(
   lanes: readonly ProgressLane[],
-  width: number,
+  width: number = DEFAULT_PARALLEL_PROGRESS_WIDTH,
   options: ParallelProgressFormatOptions = {},
 ): string[] {
-  const boundedWidth = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+  const boundedWidth = normalizeWidth(width);
   return [...lanes]
     .sort(compareScheduleOrder)
-    .map((lane) => formatLane(lane, boundedWidth, options));
+    .map((lane) => formatLane(lane, boundedWidth, options) || compactFallback(lane));
 }
 
-/** Mutable, non-focusable widget component; updates naturally support graph rewinds. */
+/**
+ * Format rows for `ctx.ui.setWidget`'s string-array form. Keeping this as a
+ * pure helper means every checkpoint can publish a fresh snapshot, including
+ * rewinds, without retaining a custom TUI component.
+ */
+export function formatParallelProgressRows(
+  lanes: readonly ProgressLane[],
+  width: number = DEFAULT_PARALLEL_PROGRESS_WIDTH,
+  options: ParallelProgressFormatOptions = {},
+): string[] {
+  return formatParallelProgress(lanes, width, options);
+}
+
+/**
+ * @deprecated Prefer `formatParallelProgressRows` with Pi-managed widget rows.
+ * This adapter remains for older callers but is no longer required for live
+ * invalidation or rewind support.
+ */
 export class ParallelProgressComponent implements Component {
   private lanes: readonly ProgressLane[];
 
@@ -96,10 +120,22 @@ function formatLane(
   return truncateToWidth(line, width, "");
 }
 
+function normalizeWidth(width: number): number {
+  if (!Number.isFinite(width)) return DEFAULT_PARALLEL_PROGRESS_WIDTH;
+  // A zero-column render can happen while a host widget is being mounted. A
+  // one-column degradation keeps the row non-empty instead of creating the
+  // blank spacer that motivated the string-row path.
+  return Math.max(1, Math.floor(width));
+}
+
 function compareScheduleOrder(left: ProgressLane, right: ProgressLane): number {
-  return left.streamIndex - right.streamIndex
-    || left.queueIndex - right.queueIndex
-    || left.laneId.localeCompare(right.laneId);
+  return normalizedOrderValue(left.streamIndex) - normalizedOrderValue(right.streamIndex)
+    || normalizedOrderValue(left.queueIndex) - normalizedOrderValue(right.queueIndex)
+    || safeText(left.laneId, "stream").localeCompare(safeText(right.laneId, "stream"));
+}
+
+function normalizedOrderValue(value: number): number {
+  return Number.isFinite(value) ? Math.floor(value) : Number.MAX_SAFE_INTEGER;
 }
 
 function boundedProgress(progress: ProgressLane["progress"]): { position: number; total: number } {
@@ -109,7 +145,7 @@ function boundedProgress(progress: ProgressLane["progress"]): { position: number
 }
 
 function progressBar(position: number, total: number, width: number): string {
-  const filled = total === 0 ? 0 : Math.floor((position / total) * width);
+  const filled = total === 0 ? 0 : Math.min(width, Math.max(0, Math.floor((position / total) * width)));
   return `[${"|".repeat(filled)}${" ".repeat(width - filled)}]`;
 }
 
@@ -120,15 +156,27 @@ function statusLabel(status: ProgressLane["status"]): string {
     case "accepted": return "Completed";
     case "failed": return "Failed";
     case "interrupted": return "Interrupted";
+    default: return "Queued";
   }
 }
 
 function safeName(name: string, laneId: string): string {
   // Names are data, not terminal markup. Remove control bytes (including ESC)
   // and collapse whitespace so one lane can never inject extra widget lines.
-  const cleaned = (name.trim() || laneId)
+  const cleaned = safeText(name, laneId)
     .replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return cleaned || "stream";
+}
+
+function safeText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function compactFallback(lane: ProgressLane): string {
+  // This is only reachable for a malformed/zero-width host render. It is
+  // intentionally plain text so Text and string-row hosts always receive a
+  // meaningful row rather than an empty line.
+  return statusLabel(lane.status).slice(0, 1);
 }
