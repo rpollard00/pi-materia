@@ -241,6 +241,41 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(state.parallelRuns!.build!.lanes["lane-b"]!.progress).toEqual({ position: 1, total: 2 });
   });
 
+  test("maps validated child stages, rejects stale or unknown stage telemetry, and keeps it observational", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    let saves = 0;
+    let parentEvents = 0;
+    const refreshes: unknown[] = [];
+    const subject = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => { saves += 1; } },
+      artifacts: { appendEvent: async () => { parentEvents += 1; } },
+      onProgressChange: (run: any) => refreshes.push(run.lanes["lane-a"].activeStage),
+    } as any);
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 1 } });
+    const child = childRunner.listSnapshots()[0]!;
+    const baseline = { saves, parentEvents, refreshes: refreshes.length };
+
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 0, total: 2, socketId: "Socket-1", occurredAt: 20 });
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2, socketId: "Socket-2", occurredAt: 21 });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.activeStage).toEqual({ socketId: "Socket-2", label: "Eval", transitionedAt: 21 });
+    expect(refreshes).toHaveLength(baseline.refreshes + 2);
+    expect({ saves, parentEvents }).toEqual({ saves: baseline.saves, parentEvents: baseline.parentEvents });
+
+    // Same stage/position retries are quiet, while a malformed, unknown, or
+    // wrong-total stage cannot advance the replay watermark or monitor state.
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2, socketId: "Socket-2", occurredAt: 22 });
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2, socketId: "Socket-999", occurredAt: 23 });
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 2, socketId: "x".repeat(513), occurredAt: 24 });
+    childRunner.emit(child.identity.childCastId, { type: "progress_checkpoint", position: 1, total: 999, socketId: "Socket-3", occurredAt: 25 });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.activeStage).toEqual({ socketId: "Socket-2", label: "Eval", transitionedAt: 21 });
+    expect(refreshes).toHaveLength(baseline.refreshes + 2);
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBe(3);
+  });
+
   test("clones the base execution scope for each bounded branch and permits a shared cwd", async () => {
     const state = makeState();
     const { childRunner, dispatcher: subject } = dispatcher();

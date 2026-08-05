@@ -1,4 +1,5 @@
 import type {
+  MateriaParallelLaneStage,
   MateriaParallelLaneState,
   MateriaParallelRunState,
 } from "../domain/parallelRunTypes.js";
@@ -18,6 +19,7 @@ export interface ParallelLaneMonitorSummary {
   status: MateriaParallelLaneState["status"];
   attempt: number;
   progress: { position: number; total: number };
+  activeStage?: MateriaParallelLaneStage;
   childCastId?: string;
   childSession?: {
     sessionPath: string;
@@ -136,6 +138,7 @@ export function summarizeParallelRuns(
 }
 
 function summarizeParallelLane(lane: MateriaParallelLaneState): ParallelLaneMonitorSummary {
+  const activeStage = boundedStage(lane.activeStage);
   return {
     laneId: lane.laneId,
     name: lane.name,
@@ -145,6 +148,7 @@ function summarizeParallelLane(lane: MateriaParallelLaneState): ParallelLaneMoni
     status: lane.status,
     attempt: lane.attempt,
     progress: boundedProgress(lane.progress),
+    ...(activeStage ? { activeStage } : {}),
     ...(lane.childCastId !== undefined ? { childCastId: lane.childCastId } : {}),
     ...(lane.childSession ? { childSession: { ...lane.childSession } } : {}),
     ...(lane.executionScope ? {
@@ -166,6 +170,13 @@ function boundedProgress(value: MateriaParallelLaneState["progress"] | undefined
   const total = value && Number.isSafeInteger(value.total) && value.total >= 0 ? value.total : 0;
   const position = value && Number.isFinite(value.position) ? Math.floor(value.position) : 0;
   return { position: Math.min(total, Math.max(0, position)), total };
+}
+
+function boundedStage(value: MateriaParallelLaneStage | undefined): MateriaParallelLaneStage | undefined {
+  if (!value || typeof value.socketId !== "string" || value.socketId.length === 0 || value.socketId.length > 512) return undefined;
+  if (typeof value.label !== "string" || value.label.length === 0 || value.label.length > 80) return undefined;
+  if (typeof value.transitionedAt !== "number" || !Number.isFinite(value.transitionedAt)) return undefined;
+  return { socketId: value.socketId, label: value.label, transitionedAt: value.transitionedAt };
 }
 
 function countStatus(lanes: readonly ParallelLaneMonitorSummary[], status: ParallelLaneMonitorSummary["status"]): number {

@@ -4,6 +4,7 @@ import type {
   MateriaParallelDiagnostic,
   MateriaParallelFanInPhase,
   MateriaParallelGraphIdentity,
+  MateriaParallelLaneStage,
   MateriaParallelLaneState,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
@@ -32,7 +33,9 @@ export type ParallelTransitionIgnoreReason =
   | "phase_regression"
   | "fan_in_phase_regression"
   | "event_regression"
-  | "progress_unchanged";
+  | "progress_unchanged"
+  | "stage_invalid"
+  | "stage_regression";
 
 export interface CreateParallelRunStateInput {
   parentCastId: string;
@@ -70,6 +73,8 @@ export interface ParallelLaneTransitionInput extends ParallelTransitionGuard {
   lastEvent?: MateriaParallelLastEvent;
   /** Progress checkpoints require a newer lastEvent sequence. */
   progress?: ParallelLaneProgress;
+  /** Validated stage identity resolved from the immutable child loadout. */
+  activeStage?: MateriaParallelLaneStage;
   diagnostic?: MateriaParallelDiagnostic;
   failureReason?: string;
   phase?: MateriaParallelRunPhase;
@@ -220,7 +225,14 @@ export function transitionParallelRun(
   const laneProgress = normalizeStoredProgress(lane.progress, input.progress?.total);
   if (input.lastEvent && lane.lastEvent && input.lastEvent.sequence <= lane.lastEvent.sequence) return ignored(state, "event_regression");
   const progress = input.progress === undefined ? undefined : normalizeLaneProgress(input.progress, laneProgress.total);
-  if (progress && progress.position === laneProgress.position) return ignored(state, "progress_unchanged");
+  const activeStage = input.activeStage === undefined ? undefined : normalizeLaneStage(input.activeStage);
+  if (input.activeStage !== undefined && !activeStage) return ignored(state, "stage_invalid");
+  if (activeStage && lane.activeStage && activeStage.transitionedAt < lane.activeStage.transitionedAt) return ignored(state, "stage_regression");
+  const stageUnchanged = activeStage === undefined
+    ? true
+    : lane.activeStage !== undefined
+      && activeStage.socketId === lane.activeStage.socketId;
+  if (progress && progress.position === laneProgress.position && stageUnchanged) return ignored(state, "progress_unchanged");
   if (isTerminalLaneStatus(lane.status) && input.status === undefined && hasTerminalLaneMutation(input)) {
     return ignored(state, "terminal_lane");
   }
@@ -252,6 +264,10 @@ export function transitionParallelRun(
 
   if (progress !== undefined) {
     nextLane.progress = progress;
+    changed = true;
+  }
+  if (activeStage !== undefined && !stageUnchanged) {
+    nextLane.activeStage = clone(activeStage);
     changed = true;
   }
 
@@ -383,6 +399,7 @@ export function restartParallelLaneAttempt(
     failureReason: undefined,
     lastEvent: undefined,
     progress: input.preserveChildSession ? normalizeStoredProgress(lane.progress) : { position: 0, total: normalizeStoredProgress(lane.progress).total },
+    activeStage: undefined,
     updatedAt: timestamp,
     diagnostics,
   };
@@ -471,6 +488,7 @@ function hasTerminalLaneMutation(input: ParallelLaneTransitionInput): boolean {
     || input.childSession !== undefined
     || input.usage !== undefined
     || input.progress !== undefined
+    || input.activeStage !== undefined
     || input.failureReason !== undefined
     || input.phase !== undefined
     || input.fanInPhase !== undefined;
@@ -536,6 +554,17 @@ function normalizeLaneProgress(value: ParallelLaneProgress, compiledTotal: numbe
   return { position: Math.min(compiledTotal, Math.max(0, position)), total: compiledTotal };
 }
 
+function normalizeLaneStage(value: MateriaParallelLaneStage): MateriaParallelLaneStage | undefined {
+  if (!isRecord(value)) return undefined;
+  const socketId = value.socketId;
+  const label = value.label;
+  const transitionedAt = value.transitionedAt;
+  if (typeof socketId !== "string" || socketId.length === 0 || socketId.length > 512 || /[\u0000-\u001f\u007f-\u009f]/.test(socketId)) return undefined;
+  if (typeof label !== "string" || label.length === 0 || label.length > 80 || !label.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(label)) return undefined;
+  if (typeof transitionedAt !== "number" || !Number.isFinite(transitionedAt)) return undefined;
+  return { socketId, label, transitionedAt };
+}
+
 function normalizeStoredProgress(value: ParallelLaneProgress | undefined, fallbackTotal?: number): ParallelLaneProgress {
   const total = normalizedProgressTotal(value?.total ?? fallbackTotal);
   return normalizeLaneProgress(value ?? { position: 0, total }, total);
@@ -543,6 +572,10 @@ function normalizeStoredProgress(value: ParallelLaneProgress | undefined, fallba
 
 function ignored(state: MateriaParallelRunState, reason: ParallelTransitionIgnoreReason): ParallelRunTransitionResult {
   return { state, applied: false, reason };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function clone<T>(value: T): T {

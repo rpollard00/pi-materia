@@ -11,7 +11,8 @@ type CheckpointWriter = (line: string) => void;
 interface ActiveEmitter {
   definition: NominalParallelLaneProgressDefinition;
   cursorName: string;
-  lastPosition?: number;
+  /** Deduplicate by both nominal position and the active child stage. */
+  lastCheckpoint?: { position: number; socketId: string };
   write: CheckpointWriter;
 }
 
@@ -36,26 +37,36 @@ export function beginChildProgressCheckpointEmission(
 
 /**
  * Emit at a socket-start boundary, but only when the graph-derived position
- * changes. The protocol projection contains no cast, item, message, or tool
- * data; the parent process already owns the child identity and event sequence.
+ * or active child stage changes. The protocol projection contains no cast, item,
+ * message, or tool data; the parent process already owns the child identity and
+ * event sequence.
  */
 export function emitChildNodeProgressCheckpoint(
   state: { cursors: Readonly<Record<string, number>> },
   activeSocketId: string,
 ): boolean {
   const emitter = activeEmitter;
-  if (!emitter) return false;
+  if (!emitter || !boundedCheckpointSocketId(activeSocketId)) return false;
   const progress = deriveNominalParallelLaneProgress({
     definition: emitter.definition,
     workItemCursor: state.cursors[emitter.cursorName],
     activeSocketId,
   });
-  if (emitter.lastPosition === progress.position) return false;
-  emitter.lastPosition = progress.position;
+  const checkpoint = { position: progress.position, socketId: activeSocketId };
+  if (emitter.lastCheckpoint?.position === checkpoint.position && emitter.lastCheckpoint.socketId === checkpoint.socketId) return false;
+  emitter.lastCheckpoint = checkpoint;
   emitter.write(`${JSON.stringify({
     type: CHILD_PROGRESS_CHECKPOINT_EVENT_TYPE,
     position: progress.position,
     total: progress.total,
+    socketId: activeSocketId,
   })}\n`);
   return true;
+}
+
+function boundedCheckpointSocketId(value: unknown): value is string {
+  return typeof value === "string"
+    && value.length > 0
+    && value.length <= 512
+    && !/[\u0000-\u001f\u007f-\u009f]/.test(value);
 }

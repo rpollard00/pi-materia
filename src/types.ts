@@ -12,6 +12,7 @@ export type {
   MateriaParallelDiagnosticSeverity,
   MateriaParallelFanInPhase,
   MateriaParallelLaneState,
+  MateriaParallelLaneStage,
   MateriaParallelLaneStatus,
   MateriaParallelLastEvent,
   MateriaParallelPlanIdentity,

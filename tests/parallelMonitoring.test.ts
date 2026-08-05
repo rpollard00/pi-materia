@@ -46,6 +46,7 @@ describe("parallel monitor summaries", () => {
       updatedAt: 20,
     };
     state.lanes["lane-api"]!.progress = { position: 99, total: 8 };
+    state.lanes["lane-api"]!.activeStage = { socketId: "Socket-3", label: "Auto-Eval", transitionedAt: 19 };
     state.lanes["lane-ui"] = { ...state.lanes["lane-ui"]!, status: "running", progress: { position: -3, total: 4 }, updatedAt: 21 };
     state.phase = "awaiting_lanes";
     state.updatedAt = 21;
@@ -61,6 +62,7 @@ describe("parallel monitor summaries", () => {
       scope: { id: "scope-api", cwd: "/tmp/branch-api", exportNames: ["integration"] },
       output: '{"satisfied":true}',
       progress: { position: 8, total: 8 },
+      activeStage: { socketId: "Socket-3", label: "Auto-Eval", transitionedAt: 19 },
     });
     expect(summary.lanes[1]!.progress).toEqual({ position: 0, total: 4 });
   });

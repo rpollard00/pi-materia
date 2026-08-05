@@ -78,6 +78,16 @@ export interface MateriaParallelLastEvent {
   occurredAt: number;
 }
 
+/** Validated child materia stage retained for compact lane monitoring. */
+export interface MateriaParallelLaneStage {
+  /** Socket identity from the immutable compiled child loadout. */
+  socketId: string;
+  /** Bounded display label resolved from the compiled socket materia. */
+  label: string;
+  /** Child event time at which this stage became active. */
+  transitionedAt: number;
+}
+
 /** Durable state for one normalized stream/lane. */
 export interface MateriaParallelLaneState {
   /** Stable identity of this branch across attempts and process restarts. */
@@ -91,6 +101,8 @@ export interface MateriaParallelLaneState {
   attempt: number;
   /** Bounded nominal progress; graph rewinds may lower position. */
   progress: ParallelLaneProgress;
+  /** Last validated child stage; retained for failed/interrupted lane diagnosis. */
+  activeStage?: MateriaParallelLaneStage;
   childCastId?: string;
   /** Detached branch scope used by this child. Core does not interpret exports. */
   executionScope?: ExecutionScope;

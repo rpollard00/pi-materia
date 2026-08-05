@@ -101,6 +101,69 @@ describe("parallel coordinator durable state", () => {
     expect(attached.parallelRuns?.build?.runId).toBe("run-1");
   });
 
+  test("deduplicates progress by position and stage while retaining prelude transitions", () => {
+    const started = transitionParallelRun(run(), {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", status: "running", timestamp: 110,
+    });
+    const prelude = transitionParallelRun(started.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", progress: { position: 0, total: 4 },
+      activeStage: { socketId: "Socket-1", label: "Spawn-JJ-Workspace", transitionedAt: 111 },
+      lastEvent: { sequence: 1, type: "progress_checkpoint", occurredAt: 111 }, timestamp: 111,
+    });
+    expect(prelude.applied).toBe(true);
+    const nextPrelude = transitionParallelRun(prelude.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", progress: { position: 0, total: 4 },
+      activeStage: { socketId: "Socket-2", label: "Build", transitionedAt: 112 },
+      lastEvent: { sequence: 2, type: "progress_checkpoint", occurredAt: 112 }, timestamp: 112,
+    });
+    expect(nextPrelude).toMatchObject({ applied: true, state: { lanes: { "lane-api": { activeStage: { socketId: "Socket-2", label: "Build", transitionedAt: 112 } } } } });
+
+    const duplicate = transitionParallelRun(nextPrelude.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", progress: { position: 0, total: 4 },
+      activeStage: { socketId: "Socket-2", label: "Build", transitionedAt: 113 },
+      lastEvent: { sequence: 3, type: "progress_checkpoint", occurredAt: 113 }, timestamp: 113,
+    });
+    expect(duplicate).toMatchObject({ applied: false, reason: "progress_unchanged" });
+    expect(nextPrelude.state.lanes["lane-api"]?.lastEvent?.sequence).toBe(2);
+  });
+
+  test("rejects malformed or stale stages and clears them for a new attempt", () => {
+    const started = transitionParallelRun(run(), {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", status: "running", timestamp: 110,
+    });
+    const staged = transitionParallelRun(started.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", progress: { position: 1, total: 4 },
+      activeStage: { socketId: "Socket-2", label: "Build", transitionedAt: 120 },
+      lastEvent: { sequence: 1, type: "progress_checkpoint", occurredAt: 120 }, timestamp: 120,
+    });
+    expect(transitionParallelRun(staged.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", progress: { position: 2, total: 4 },
+      activeStage: { socketId: "Socket-3", label: "Eval", transitionedAt: 119 },
+      lastEvent: { sequence: 2, type: "progress_checkpoint", occurredAt: 119 }, timestamp: 119,
+    })).toMatchObject({ applied: false, reason: "stage_regression" });
+    expect(transitionParallelRun(staged.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", activeStage: { socketId: "Socket-2", label: "x".repeat(81), transitionedAt: 121 },
+      progress: { position: 2, total: 4 }, lastEvent: { sequence: 2, type: "progress_checkpoint", occurredAt: 121 }, timestamp: 121,
+    })).toMatchObject({ applied: false, reason: "stage_invalid" });
+    const failed = transitionParallelRun(staged.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", status: "failed", timestamp: 130,
+    });
+    const restarted = restartParallelLaneAttempt(failed.state, {
+      parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,
+      childCastId: "child-api", timestamp: 131,
+    });
+    expect(restarted.state.lanes["lane-api"]?.activeStage).toBeUndefined();
+  });
+
   test("resets event sequencing when a failed lane starts a new attempt", () => {
     const failed = transitionParallelRun(run(), {
       parentCastId: "cast-1", loopId: "build", runId: "run-1", laneId: "lane-api", attempt: 1,

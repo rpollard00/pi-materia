@@ -60,14 +60,14 @@ describe("child cast launch lifetime", () => {
     expect(emitChildNodeProgressCheckpoint(state, "agent-node")).toBe(false);
 
     expect(lines.map((line) => JSON.parse(line))).toEqual([
-      { type: "pi_materia_child_progress", position: 0, total: 6 },
-      { type: "pi_materia_child_progress", position: 1, total: 6 },
-      { type: "pi_materia_child_progress", position: 2, total: 6 },
-      { type: "pi_materia_child_progress", position: 1, total: 6 },
-      { type: "pi_materia_child_progress", position: 5, total: 6 },
-      { type: "pi_materia_child_progress", position: 6, total: 6 },
+      { type: "pi_materia_child_progress", position: 0, total: 6, socketId: "branch-prelude" },
+      { type: "pi_materia_child_progress", position: 1, total: 6, socketId: "utility-node" },
+      { type: "pi_materia_child_progress", position: 2, total: 6, socketId: "agent-node" },
+      { type: "pi_materia_child_progress", position: 1, total: 6, socketId: "utility-node" },
+      { type: "pi_materia_child_progress", position: 5, total: 6, socketId: "agent-node" },
+      { type: "pi_materia_child_progress", position: 6, total: 6, socketId: "validation-utility" },
     ]);
-    expect(Object.keys(JSON.parse(lines[1]!)).sort()).toEqual(["position", "total", "type"]);
+    expect(Object.keys(JSON.parse(lines[1]!)).sort()).toEqual(["position", "socketId", "total", "type"]);
   });
 
   test("waits through the idle gap before deferred socket advancement", async () => {

@@ -20,6 +20,7 @@ import type {
 } from "../application/parallelArtifacts.js";
 import { addUsage } from "../telemetry/usage.js";
 import { cloneExecutionScope, cloneParallelBranchExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
+import { resolvedMateriaDisplayName } from "./resolvedMateria.js";
 import { compileLoopRegionToChildLoadout, type CompiledLoopChildLoadout } from "../graph/loopCompiler.js";
 import {
   applyParallelRunPhaseTransition,
@@ -30,6 +31,7 @@ import {
 } from "./parallelCoordinatorState.js";
 import type {
   MateriaCastState,
+  MateriaParallelLaneStage,
   MateriaParallelLaneState,
   MateriaParallelRunState,
   MateriaParallelUsageTotals,
@@ -552,7 +554,7 @@ export class ParallelLoopDispatcher {
       this.#starting.delete(lane.laneId);
       this.#releaseLaneReservation(lane.laneId);
       active.subscription = this.#deps.children.subscribe({ childCastId, afterSequence: prepared.recoveryAfterSequence }, {
-        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, active!, event),
+        onEvent: (event) => this.#handleChildEvent(input, state, prepared.stream, prepared, active!, event),
         onTerminal: (result) => {
           const work = this.#terminalTail.catch(() => undefined).then(() => this.#handleChildTerminal(input, state, prepared.stream, active!, result));
           this.#terminalTail = work;
@@ -588,7 +590,7 @@ export class ParallelLoopDispatcher {
     }
   }
 
-  async #handleChildEvent(input: ParallelLoopDispatchInput, state: MateriaCastState, stream: NormalizedParallelStream, active: ActiveLane, event: ChildCastStreamEvent): Promise<void> {
+  async #handleChildEvent(input: ParallelLoopDispatchInput, state: MateriaCastState, stream: NormalizedParallelStream, prepared: PreparedLane, active: ActiveLane, event: ChildCastStreamEvent): Promise<void> {
     if (this.#run?.runId !== active.artifactIdentity.runId || this.#active.get(stream.laneId) !== active) return;
     // Usage already delivered by the child runner remains authoritative during
     // cancellation. Other late callbacks must not mutate a terminal lane.
@@ -609,9 +611,14 @@ export class ParallelLoopDispatcher {
       // tail so a queued stale callback cannot regress the lane baseline.
       const usage = checkpoint ? cumulativeUsage([this.#latestUsage.get(active.childCastId), checkpoint]) : undefined;
       const progress = event.type === "progress_checkpoint" && event.position !== undefined && event.total !== undefined
-        ? { position: event.position, total: event.total }
+        ? validProgressCheckpoint(event.position, event.total, this.#run?.lanes[stream.laneId]?.progress.total)
         : undefined;
-      const applied = this.#applyLaneTransition(input, state, { laneId: stream.laneId, attempt: active.attempt, childCastId: event.childCastId, lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt }, ...(usage ? { usage } : {}), ...(progress ? { progress } : {}), timestamp: event.occurredAt }, false);
+      if (event.type === "progress_checkpoint" && !progress) return;
+      const activeStage = progress && Object.hasOwn(event, "socketId")
+        ? resolveParallelLaneStage(prepared.compiledLoadout, event.socketId, event.occurredAt)
+        : undefined;
+      if (event.type === "progress_checkpoint" && Object.hasOwn(event, "socketId") && !activeStage) return;
+      const applied = this.#applyLaneTransition(input, state, { laneId: stream.laneId, attempt: active.attempt, childCastId: event.childCastId, lastEvent: { sequence: event.sequence, type: event.type, occurredAt: event.occurredAt }, ...(usage ? { usage } : {}), ...(progress ? { progress } : {}), ...(activeStage ? { activeStage } : {}), timestamp: event.occurredAt }, false);
       // A real cumulative usage delta is itself a durable boundary. The usage
       // checkpoint saves both accounting and the latest replay watermark.
       if (usage && applied) await this.#aggregateUsage(state, input, stream, active, usage);
@@ -980,7 +987,7 @@ export class ParallelLoopDispatcher {
     replaceParallelState(state, result.state);
     this.#run = state.parallelRuns?.[input.loopId];
     if (persist) this.#deps.state.saveCastState(input.pi, state);
-    if (transition.progress !== undefined || transition.status !== undefined) this.#requestProgressRefresh();
+    if (transition.progress !== undefined || transition.activeStage !== undefined || transition.status !== undefined) this.#requestProgressRefresh();
     return true;
   }
 
@@ -1097,6 +1104,34 @@ function compileStreams(input: ParallelLoopDispatchInput, plan: NormalizedParall
     return { stream, compiledLoadout: compiled.value };
   });
 }
+function validProgressCheckpoint(position: unknown, total: unknown, expectedTotal: unknown): { position: number; total: number } | undefined {
+  if (!Number.isSafeInteger(position) || !Number.isSafeInteger(total)) return undefined;
+  if ((position as number) < 0 || (total as number) < 0 || (position as number) > (total as number)) return undefined;
+  if (Number.isSafeInteger(expectedTotal) && total !== expectedTotal) return undefined;
+  return { position: position as number, total: total as number };
+}
+
+function resolveParallelLaneStage(compiled: CompiledLoopChildLoadout, socketId: unknown, transitionedAt: unknown): MateriaParallelLaneStage | undefined {
+  if (typeof socketId !== "string" || socketId.length === 0 || socketId.length > 512) return undefined;
+  if (typeof transitionedAt !== "number" || !Number.isFinite(transitionedAt)) return undefined;
+  const sockets = (compiled.loadout as unknown as { sockets?: Record<string, unknown> }).sockets;
+  if (!sockets || !Object.hasOwn(sockets, socketId)) return undefined;
+  const socket = sockets[socketId];
+  if (!isRecord(socket)) return undefined;
+  const resolvedLabel = resolvedMateriaDisplayName(socket as ResolvedMateriaSocket);
+  const authoredMateria = typeof socket.materia === "string" ? socket.materia : undefined;
+  const label = boundedStageLabel(resolvedLabel ?? authoredMateria);
+  if (!label) return undefined;
+  return { socketId, label, transitionedAt };
+}
+
+function boundedStageLabel(value: unknown, max = 80): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return undefined;
+  return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
+}
+
 function nominalProgressTotal(compiled: CompiledLoopChildLoadout): number {
   return deriveNominalParallelLaneProgress({
     definition: compiled.nominalProgress,
