@@ -100,6 +100,13 @@ describe("Integrate-JJ-Workspaces", () => {
 
     const integrated = await integrateJjWorkspaceExports(fixture.input);
     const cleanup = integrated.scope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]!.value as any;
+    const integrationExport = integrated.scope.exports[JJ_WORKSPACE_INTEGRATION_EXPORT]!.value as any;
+    expect(integrated.integration.removableWorkflowBoundary).toEqual({
+      commitId: fixture.baseline.commitId,
+      changeId: fixture.baseline.changeId,
+      expectedParent: integrated.integration.effectiveBase,
+    });
+    expect(integrationExport.removableWorkflowBoundary).toEqual(integrated.integration.removableWorkflowBoundary);
     expect(integrated.integration.orderedChangeIds).toHaveLength(2);
     expect(cleanup.sources).toHaveLength(2);
     for (const lane of fixture.lanes) {

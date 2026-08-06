@@ -5,6 +5,7 @@ import {
   createJjWorkspaceBackend,
   type JjFanInInput,
   type JjFanInResult,
+  type JjRemovableWorkflowBoundary,
   type JjWorkspaceBackend,
   type JjWorkspaceOwner,
   type JjWorkspaceRecord,
@@ -295,12 +296,16 @@ function intrinsicIdentity(state: unknown, input: IntegrateJjWorkspacesInput): P
 }
 
 function boundJjFanInResult(result: JjFanInResult): JjFanInResult {
+  const removableWorkflowBoundary = result.removableWorkflowBoundary === undefined
+    ? undefined
+    : boundedRemovableWorkflowBoundary(result.removableWorkflowBoundary, result);
   const boundedText = (value: string, max: number) => {
     const normalized = String(value).replace(/\s+/g, " ").trim();
     return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
   };
   return {
     ...structuredClone(result),
+    ...(removableWorkflowBoundary ? { removableWorkflowBoundary } : {}),
     satisfied: result.outcome === "clean",
     conflictedPaths: result.conflictedPaths.slice(0, 64).map((value) => boundedText(value, 512)),
     conflictDetails: result.conflictDetails.slice(0, 64).map((detail) => ({
@@ -334,8 +339,12 @@ function boundedReviewProvenance(integration: JjFanInResult) {
     });
   }
   const totalChangeCount = integration.orderedChangeIds.length;
+  const removableWorkflowBoundary = integration.removableWorkflowBoundary
+    ? boundedRemovableWorkflowBoundary(integration.removableWorkflowBoundary, integration)
+    : undefined;
   return {
     effectiveBase: boundedRevision(integration.effectiveBase),
+    ...(removableWorkflowBoundary ? { removableWorkflowBoundary } : {}),
     orderedWorkstreams,
     orderedChangeIds: integration.orderedChangeIds.slice(0, MAX_REVIEW_CHANGES).map(boundedReviewId),
     finalTip: boundedRevision(integration.finalTip),
@@ -349,6 +358,34 @@ function boundedReviewProvenance(integration: JjFanInResult) {
 
 function boundedRevision(revision: { commitId: string; changeId: string }) {
   return { commitId: boundedReviewId(revision.commitId), changeId: boundedReviewId(revision.changeId) };
+}
+
+function boundedRemovableWorkflowBoundary(
+  boundary: JjRemovableWorkflowBoundary,
+  integration: Pick<JjFanInResult, "baseline" | "effectiveBase" | "orderedChangeIds">,
+): JjRemovableWorkflowBoundary {
+  if (!isRemovableWorkflowBoundary(boundary)
+    || integration.orderedChangeIds.length === 0
+    || !isRevision(integration.baseline)
+    || boundary.commitId !== integration.baseline.commitId
+    || boundary.changeId !== integration.baseline.changeId
+    || !isRevision(integration.effectiveBase)
+    || boundary.expectedParent.commitId !== integration.effectiveBase.commitId
+    || boundary.expectedParent.changeId !== integration.effectiveBase.changeId
+    || integration.orderedChangeIds.includes(boundary.changeId)) {
+    throw new Error("Integrate-JJ-Workspaces returned inconsistent removable workflow-boundary provenance.");
+  }
+  const bounded = {
+    commitId: boundedReviewId(boundary.commitId),
+    changeId: boundedReviewId(boundary.changeId),
+    expectedParent: boundedRevision(boundary.expectedParent),
+  } satisfies JjRemovableWorkflowBoundary;
+  if (bounded.commitId !== boundary.commitId || bounded.changeId !== boundary.changeId
+    || bounded.expectedParent.commitId !== boundary.expectedParent.commitId
+    || bounded.expectedParent.changeId !== boundary.expectedParent.changeId) {
+    throw new Error("Integrate-JJ-Workspaces removable workflow-boundary provenance exceeds the bounded identity limit.");
+  }
+  return bounded;
 }
 
 function boundedReviewId(value: string): string {
@@ -372,6 +409,13 @@ function isOwner(value: unknown): value is JjWorkspaceOwner {
 
 function isRevision(value: unknown): value is { commitId: string; changeId: string } {
   return isRecord(value) && typeof value.commitId === "string" && value.commitId.trim().length > 0 && typeof value.changeId === "string" && value.changeId.trim().length > 0;
+}
+
+function isRemovableWorkflowBoundary(value: unknown): value is JjRemovableWorkflowBoundary {
+  return isRecord(value)
+    && typeof value.commitId === "string" && value.commitId.trim().length > 0
+    && typeof value.changeId === "string" && value.changeId.trim().length > 0
+    && isRevision(value.expectedParent);
 }
 
 function assertInput(input: IntegrateJjWorkspacesInput): void {

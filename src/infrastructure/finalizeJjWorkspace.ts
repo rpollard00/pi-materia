@@ -1,7 +1,13 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { createExecutionScope, type ExecutionScope, type ExecutionScopeExport } from "../domain/executionScope.js";
-import { createJjWorkspaceBackend, type JjRevisionIdentity, type JjWorkspaceBackend, type JjWorkspaceOwner } from "./jjWorkspaceBackend.js";
+import {
+  createJjWorkspaceBackend,
+  type JjRemovableWorkflowBoundary,
+  type JjRevisionIdentity,
+  type JjWorkspaceBackend,
+  type JjWorkspaceOwner,
+} from "./jjWorkspaceBackend.js";
 import { INTEGRATE_JJ_WORKSPACES_PRODUCER } from "./integrateJjWorkspaces.js";
 import { JJ_WORKSPACE_CLEANUP_EXPORT, JJ_WORKSPACE_INTEGRATION_EXPORT } from "./spawnJjWorkspace.js";
 
@@ -23,6 +29,7 @@ interface IntegrationExport extends OwnedWorkspaceExport {
   finalTip: JjRevisionIdentity;
   orderedChangeIds: string[];
   provenanceTruncated: boolean;
+  removableWorkflowBoundary?: JjRemovableWorkflowBoundary;
 }
 
 interface RevisionDetails extends JjRevisionIdentity {
@@ -268,6 +275,9 @@ function parseIntegration(value: ExecutionScopeExport | undefined): IntegrationE
     throw new Error("Finalize-JJ-Workspace integration export is malformed.");
   }
   if (new Set(raw.orderedChangeIds).size !== raw.orderedChangeIds.length) throw new Error("Finalize-JJ-Workspace integration change order contains duplicate stable identities.");
+  const removableWorkflowBoundary = raw.removableWorkflowBoundary === undefined
+    ? undefined
+    : parseRemovableWorkflowBoundary(raw.removableWorkflowBoundary, raw.effectiveBase, raw.orderedChangeIds);
   return {
     ...workspace,
     repositoryRoot: raw.repositoryRoot,
@@ -276,6 +286,26 @@ function parseIntegration(value: ExecutionScopeExport | undefined): IntegrationE
     finalTip: { ...raw.finalTip },
     orderedChangeIds: [...raw.orderedChangeIds],
     provenanceTruncated: raw.provenanceTruncated,
+    ...(removableWorkflowBoundary ? { removableWorkflowBoundary } : {}),
+  };
+}
+
+function parseRemovableWorkflowBoundary(
+  value: unknown,
+  effectiveBase: unknown,
+  orderedChangeIds: readonly string[],
+): JjRemovableWorkflowBoundary {
+  if (!isRemovableWorkflowBoundary(value)
+    || orderedChangeIds.length === 0
+    || !isBoundedRevision(effectiveBase)
+    || !sameRevision(value.expectedParent, effectiveBase)
+    || orderedChangeIds.includes(value.changeId)) {
+    throw new Error("Finalize-JJ-Workspace integration export has malformed or inconsistent removable workflow-boundary provenance.");
+  }
+  return {
+    commitId: value.commitId,
+    changeId: value.changeId,
+    expectedParent: { ...value.expectedParent },
   };
 }
 
@@ -312,7 +342,16 @@ async function readRevision(run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>, 
 function agentAccepted(state: unknown): boolean { return isRecord(state) && isRecord(state.envelope) && state.envelope.satisfied === true; }
 function isOwner(value: unknown): value is JjWorkspaceOwner { return isRecord(value) && [value.parentCastId, value.loopId, value.laneId].every((part) => typeof part === "string" && part.trim()); }
 function isRevision(value: unknown): value is JjRevisionIdentity { return isRecord(value) && isChangeId(value.commitId) && isChangeId(value.changeId); }
+function isBoundedRevision(value: unknown): value is JjRevisionIdentity { return isRevision(value) && value.commitId.length <= 512 && value.changeId.length <= 512; }
+function isRemovableWorkflowBoundary(value: unknown): value is JjRemovableWorkflowBoundary {
+  return isRecord(value)
+    && isBoundedRevisionFields(value.commitId, value.changeId)
+    && isBoundedRevision(value.expectedParent);
+}
 function isChangeId(value: unknown): value is string { return typeof value === "string" && /^[A-Za-z0-9]+$/.test(value); }
+function isBoundedRevisionFields(commitId: unknown, changeId: unknown): boolean {
+  return isChangeId(commitId) && commitId.length <= 512 && isChangeId(changeId) && changeId.length <= 512;
+}
 function isRecord(value: unknown): value is Record<string, any> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function revisionIdentity(value: JjRevisionIdentity): JjRevisionIdentity { return { commitId: value.commitId, changeId: value.changeId }; }
 function sameRevision(a: JjRevisionIdentity, b: JjRevisionIdentity): boolean { return a.commitId === b.commitId && a.changeId === b.changeId; }

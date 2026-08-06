@@ -364,6 +364,11 @@ describe("jj workspace lifecycle backend", () => {
     ]);
     expect(result.orderedHeads[0]?.head).toEqual({ commitId: "item-two", changeId: "change-item-two" });
     expect(result.effectiveBase).toEqual({ commitId: "root", changeId: "change-root" });
+    expect(result.removableWorkflowBoundary).toEqual({
+      commitId: "baseline",
+      changeId: "baseline-change",
+      expectedParent: { commitId: "root", changeId: "change-root" },
+    });
     expect(result.orderedChangeIds).toEqual(["change-item-one", "change-item-two"]);
     expect(result.rewrittenLaneTips).toEqual([{ laneId: "lane", revision: { commitId: "item-two", changeId: "change-item-two" } }]);
     expect(result.finalTip).toEqual({ commitId: "item-two", changeId: "change-item-two" });
@@ -593,6 +598,7 @@ describe("jj workspace lifecycle backend", () => {
     expect(result.orderedHeads[0]?.commits).toEqual([]);
     expect(result.orderedHeads[0]?.head).toEqual(pinned.baseline);
     expect(result.effectiveBase).toEqual(pinned.baseline);
+    expect(result.removableWorkflowBoundary).toBeUndefined();
   });
 
   test("rejects a real-jj dirty lane and a real non-empty accepted working tip", async () => {

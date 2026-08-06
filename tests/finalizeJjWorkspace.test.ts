@@ -122,6 +122,22 @@ describe("Finalize-JJ-Workspace", () => {
     expect(touched).toBe(false);
   });
 
+  test("rejects inconsistent removable workflow-boundary provenance", async () => {
+    const value = input(true);
+    const integration = value.executionScope.exports[JJ_WORKSPACE_INTEGRATION_EXPORT]!.value as any;
+    integration.removableWorkflowBoundary = {
+      commitId: "boundary",
+      changeId: "change-boundary",
+      expectedParent: { commitId: "wrong", changeId: "wrong-parent" },
+    };
+    let touched = false;
+    await expect(finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, {
+      createBackend: () => ({ inspect: async () => { touched = true; return undefined; }, cleanup: async () => { touched = true; return {} as any; } }),
+      runJj: async () => { touched = true; return ""; },
+    })).rejects.toThrow("malformed or inconsistent removable workflow-boundary");
+    expect(touched).toBe(false);
+  });
+
   test("validates every owned workspace before publication or cleanup", async () => {
     const mutations: string[] = [];
     await expect(finalizeJjWorkspace({ ...input(true), bookmarkName: "blackbelt/test" }, {

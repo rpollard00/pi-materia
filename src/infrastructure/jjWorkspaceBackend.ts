@@ -94,6 +94,14 @@ export interface JjFanInHead {
   workspaceRevision: JjRevisionIdentity;
 }
 
+export interface JjRemovableWorkflowBoundary {
+  /** The exact empty bootstrap boundary that fan-in replaced. */
+  commitId: string;
+  changeId: string;
+  /** The parent that fan-in used as the effective linear base. */
+  expectedParent: JjRevisionIdentity;
+}
+
 export interface JjFanInProvenance {
   version: 1;
   parentCastId: string;
@@ -102,6 +110,8 @@ export interface JjFanInProvenance {
   baseline: JjRevisionIdentity;
   /** Baseline parent when the cast baseline is an empty workflow boundary. */
   effectiveBase: JjRevisionIdentity;
+  /** Present only when non-empty fan-in deliberately replaced that boundary. */
+  removableWorkflowBoundary?: JjRemovableWorkflowBoundary;
   parentRevisionBefore: JjRevisionIdentity;
   parentRevisionAfter: JjRevisionIdentity;
   orderedHeads: JjFanInHead[];
@@ -589,9 +599,10 @@ export class JjWorkspaceBackend {
       }
 
       const meaningfulHeads = orderedHeads.filter(({ commits }) => commits.length > 0);
-      const effectiveBase = meaningfulHeads.length > 0
-        ? await this.#effectiveBaseForWorkflowBoundary(capability.repositoryRoot, input.baseline)
-        : { ...input.baseline };
+      const removableWorkflowBoundary = meaningfulHeads.length > 0
+        ? await this.#removableWorkflowBoundaryFor(capability.repositoryRoot, input.baseline)
+        : undefined;
+      const effectiveBase = removableWorkflowBoundary?.expectedParent ?? { ...input.baseline };
       const orderedChangeIds = meaningfulHeads.flatMap(({ commits }) => commits.map(({ changeId }) => changeId));
       const rewrittenLaneTips: Array<{ laneId: string; revision: JjRevisionIdentity }> = [];
       const conflictPaths = new Set<string>();
@@ -654,6 +665,7 @@ export class JjWorkspaceBackend {
         runId: input.runId,
         baseline: { ...input.baseline },
         effectiveBase,
+        ...(removableWorkflowBoundary ? { removableWorkflowBoundary } : {}),
         parentRevisionBefore: parentBefore,
         parentRevisionAfter: parentAfter,
         orderedHeads,
@@ -1250,13 +1262,23 @@ export class JjWorkspaceBackend {
     return meaningful.map(({ commitId, changeId }) => ({ commitId, changeId }));
   }
 
-  async #effectiveBaseForWorkflowBoundary(cwd: string, baseline: JjRevisionIdentity): Promise<JjRevisionIdentity> {
+  async #removableWorkflowBoundaryFor(cwd: string, baseline: JjRevisionIdentity): Promise<JjRemovableWorkflowBoundary | undefined> {
     const details = await this.#readStackRevision(cwd, baseline.commitId);
-    if (!sameRevision(details, baseline) || !details.empty) return { ...baseline };
+    // A boundary is removable only when the pinned identity still names the
+    // same clean empty revision. Older or unusual baselines remain the
+    // conservative effective base and produce no retirement authority.
+    if (!sameRevision(details, baseline) || !details.empty || details.conflict) return undefined;
     if (details.parents.length !== 1) {
       throw new JjWorkspaceError("fan_in_baseline_boundary_malformed", "The empty cast baseline is not a removable single-parent workflow boundary.");
     }
-    return this.#readRevision(cwd, details.parents[0]!);
+    const expectedParent = await this.#readRevision(cwd, details.parents[0]!);
+    const boundary: JjRemovableWorkflowBoundary = {
+      commitId: baseline.commitId,
+      changeId: baseline.changeId,
+      expectedParent,
+    };
+    assertBoundedRemovableWorkflowBoundary(boundary);
+    return boundary;
   }
 
   async #readStackRevision(cwd: string, revset: string): Promise<StackRevision> {
@@ -1422,6 +1444,18 @@ function validateParallelFinalizeInput(input: JjParallelFinalizeInput): void {
   if (!isRevision(input.fanIn.baseline) || !isRevision(input.fanIn.parentRevisionBefore) || !isRevision(input.fanIn.parentRevisionAfter) || (input.fanIn.integrationRevision !== undefined && !isRevision(input.fanIn.integrationRevision))) {
     throw new JjWorkspaceError("finalize_fan_in_invalid", "Parallel finalization fan-in provenance has invalid parent or baseline revisions.");
   }
+  if (input.fanIn.removableWorkflowBoundary !== undefined) {
+    try {
+      assertRemovableWorkflowBoundaryConsistent(
+        input.fanIn.removableWorkflowBoundary,
+        input.fanIn.baseline,
+        input.fanIn.effectiveBase,
+        input.fanIn.orderedChangeIds,
+      );
+    } catch {
+      throw new JjWorkspaceError("finalize_fan_in_invalid", "Parallel finalization fan-in provenance has malformed or inconsistent removable workflow-boundary data.");
+    }
+  }
 }
 
 function validateFanInInput(input: JjFanInInput): void {
@@ -1510,6 +1544,41 @@ function sameOwner(left: JjWorkspaceOwner, right: JjWorkspaceOwner): boolean {
 
 function sameRevisionList(left: readonly JjRevisionIdentity[], right: readonly JjRevisionIdentity[]): boolean {
   return left.length === right.length && left.every((revision, index) => sameRevision(revision, right[index]!));
+}
+
+function assertBoundedRemovableWorkflowBoundary(boundary: JjRemovableWorkflowBoundary): void {
+  if (!isRemovableWorkflowBoundary(boundary)
+    || boundary.commitId.length > MAX_FAN_IN_IDENTITY_LENGTH
+    || boundary.changeId.length > MAX_FAN_IN_IDENTITY_LENGTH
+    || boundary.expectedParent.commitId.length > MAX_FAN_IN_IDENTITY_LENGTH
+    || boundary.expectedParent.changeId.length > MAX_FAN_IN_IDENTITY_LENGTH) {
+    throw new JjWorkspaceError("fan_in_preparation_too_large", "Removable workflow-boundary provenance exceeds the recoverable identity limit.");
+  }
+}
+
+function assertRemovableWorkflowBoundaryConsistent(
+  boundary: unknown,
+  baseline: unknown,
+  effectiveBase: unknown,
+  orderedChangeIds: unknown,
+): asserts boundary is JjRemovableWorkflowBoundary {
+  if (!isRemovableWorkflowBoundary(boundary)
+    || !isRevision(baseline)
+    || boundary.commitId !== baseline.commitId
+    || boundary.changeId !== baseline.changeId
+    || !Array.isArray(orderedChangeIds) || orderedChangeIds.length === 0
+    || !isRevision(effectiveBase) || !sameRevision(boundary.expectedParent, effectiveBase)
+    || orderedChangeIds.includes(boundary.changeId)) {
+    throw new Error("invalid removable workflow-boundary provenance");
+  }
+  assertBoundedRemovableWorkflowBoundary(boundary);
+}
+
+function isRemovableWorkflowBoundary(value: unknown): value is JjRemovableWorkflowBoundary {
+  return isRecord(value)
+    && typeof value.commitId === "string" && value.commitId.trim().length > 0
+    && typeof value.changeId === "string" && value.changeId.trim().length > 0
+    && isRevision(value.expectedParent);
 }
 
 function parseStackRevision(line: string): StackRevision | undefined {
