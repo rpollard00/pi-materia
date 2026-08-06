@@ -1,6 +1,7 @@
 import path from "node:path";
 import { tmpdir } from "node:os";
-import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ExtensionHandler, SessionEntry, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Component, TUI } from "@earendil-works/pi-tui";
 
 export type FakeEventName = Parameters<ExtensionAPI["on"]>[0];
 
@@ -19,7 +20,21 @@ export interface FakeCommandContext extends ExtensionContext {
   waitForIdle(): Promise<void>;
 }
 
+export interface FakePiTheme {
+  fg(color: string, text: string): string;
+  bg?(color: string, text: string): string;
+}
+
+export type FakeWidgetFactory = (
+  tui: TUI,
+  theme: Theme,
+) => Component & { dispose?(): void };
+
+export type FakeWidgetContent = string[] | FakeWidgetFactory | undefined;
+
 export interface FakePiHarnessOptions {
+  /** Active theme exposed to component factories in focused widget tests. */
+  theme?: FakePiTheme;
   /**
    * Simulate Pi's unsafe scheduling window by dropping triggerTurn sends made
    * while an agent_end handler is active. Defaults to false so existing tests
@@ -98,7 +113,8 @@ export class FakePiHarness {
   readonly suppressedTriggerTurnSends: SuppressedTriggerTurnSend[] = [];
   readonly userMessages: Array<{ content: unknown; options?: unknown }> = [];
   readonly appendedEntries: Array<{ customType: string; data?: unknown }> = [];
-  readonly widgets = new Map<string, { content: string[] | undefined; options?: unknown }>();
+  readonly widgets = new Map<string, { content: FakeWidgetContent; options?: unknown }>();
+  private readonly widgetComponents = new Map<string, Component & { dispose?(): void }>();
   readonly notifications: FakeUiNotification[] = [];
   readonly statuses = new Map<string, string | undefined>();
   readonly registeredRenderers = new Map<string, unknown>();
@@ -120,10 +136,12 @@ export class FakePiHarness {
   sessionName: string | undefined;
   idle = true;
   private agentEndHandlerDepth = 0;
+  readonly theme: FakePiTheme;
 
   constructor(cwd = process.cwd(), private readonly options: FakePiHarnessOptions = {}) {
     process.env.PI_MATERIA_PROFILE_DIR ??= path.join(tmpdir(), `pi-materia-fake-profile-${process.pid}`);
     this.cwd = cwd;
+    this.theme = options.theme ?? { fg: (_color, text) => text, bg: (_color, text) => text };
     this.sessionManager = new FakeSessionManager(cwd);
     this.pi = this.createPi();
     this.ctx = this.createContext();
@@ -191,7 +209,11 @@ export class FakePiHarness {
         setWorkingVisible: () => undefined,
         setWorkingIndicator: () => undefined,
         setHiddenThinkingLabel: () => undefined,
-        setWidget: (key: string, content: string[] | undefined, options?: unknown) => this.widgets.set(key, { content, options }),
+        setWidget: (key: string, content: FakeWidgetContent, options?: unknown) => {
+          this.widgetComponents.get(key)?.dispose?.();
+          this.widgetComponents.delete(key);
+          this.widgets.set(key, { content, options });
+        },
         setFooter: () => undefined,
         setHeader: () => undefined,
         setTitle: () => undefined,
@@ -202,7 +224,7 @@ export class FakePiHarness {
         editor: async () => undefined,
         addAutocompleteProvider: () => undefined,
         setEditorComponent: () => undefined,
-        theme: {},
+        theme: this.theme,
         getAllThemes: () => [],
         getTheme: () => undefined,
         setTheme: () => ({ success: true }),
@@ -240,6 +262,25 @@ export class FakePiHarness {
       fork: async () => ({ cancelled: false }),
       navigateTree: async () => ({ cancelled: false }),
     } as unknown as FakeCommandContext;
+  }
+
+  /** Render a registered component widget through the same late-bound path Pi uses. */
+  renderWidget(key: string, width = 80, theme: FakePiTheme = this.theme): string[] | undefined {
+    const widget = this.widgets.get(key);
+    if (!widget || widget.content === undefined) return undefined;
+    if (Array.isArray(widget.content)) return [...widget.content];
+
+    let component = this.widgetComponents.get(key);
+    if (!component) {
+      component = widget.content({} as TUI, theme as unknown as Theme);
+      this.widgetComponents.set(key, component);
+    }
+    return component.render(width);
+  }
+
+  /** Exercise a widget's invalidate hook without replacing its factory instance. */
+  invalidateWidget(key: string): void {
+    this.widgetComponents.get(key)?.invalidate();
   }
 
   private extractTriggerTurnTarget(message: unknown): SuppressedTriggerTurnSend["target"] {
