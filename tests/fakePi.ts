@@ -219,7 +219,7 @@ export class FakePiHarness {
             // Keep the long-standing fake inspection surface as plain rows for
             // the default identity theme while renderWidget exercises the
             // actual late-bound factory. Custom-theme tests retain the factory.
-            const storedContent = (key === "materia" || key === "materia-webui") && this.options.theme === undefined
+            const storedContent = (key === "materia" || key === "materia-webui" || key === "materia-loadouts") && this.options.theme === undefined
               ? content({} as TUI, { fg: (_token: string, text: string) => text } as unknown as Theme).render(80)
               : content;
             this.widgets.set(key, { content: storedContent, options });

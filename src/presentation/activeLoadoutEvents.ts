@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import type { LoadedConfig } from "../types.js";
 import { renderLoadoutList } from "../loadout/loadouts.js";
 import { syncConfiguredLoadoutWidget } from "./ui.js";
+import { updateMateriaLoadoutWidget } from "./loadoutWidget.js";
 import { appendMateriaPresentation } from "./materiaPresentation.js";
 
 export const ACTIVE_LOADOUT_CHANGED_EVENT = "active-loadout-changed";
@@ -53,7 +54,7 @@ export function publishActiveLoadoutChange(
   };
 
   if (options.setLoadoutWidget ?? true) {
-    ctx.ui.setWidget("materia-loadouts", lines, { placement: "belowEditor" });
+    updateMateriaLoadoutWidget(ctx, options.loaded.config, options.loaded.source);
   }
   syncConfiguredLoadoutWidget(ctx, activeLoadout);
   if (options.notifyMessage) ctx.ui.notify(options.notifyMessage, "info");
