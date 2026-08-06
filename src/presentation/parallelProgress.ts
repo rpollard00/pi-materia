@@ -256,6 +256,7 @@ function progressRole(
   part: ParallelProgressPart,
 ): MateriaThemeRole {
   if (part === "aggregate") return "accent";
+  if (part === "fill") return "warning";
   if (part === "track") return "dim";
   switch (status) {
     case "running": return "accent";

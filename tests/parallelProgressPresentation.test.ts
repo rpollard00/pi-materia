@@ -165,12 +165,33 @@ describe("parallel progress presentation", () => {
 
     expect(rows).toHaveLength(6);
     expect(calls).toContainEqual(["accent", "Parallel slots: 1/3 running"]);
-    expect(calls).toContainEqual(["accent", "||||||||"]);
+    expect(calls).toContainEqual(["warning", "||||||||"]);
     expect(calls).toContainEqual(["dim", "            "]);
     expect(calls).toContainEqual(["muted", "日本語 stream 0"]);
     expect(calls).toContainEqual(["success", "Completed"]);
     expect(calls).toContainEqual(["error", "Failed"]);
     expect(calls).toContainEqual(["error", "Interrupted"]);
+    expect(calls.filter(([, text]) => text === "[").map(([role]) => role)).toEqual([
+      "muted",
+      "accent",
+      "success",
+      "error",
+      "error",
+    ]);
+    expect(calls.filter(([, text]) => text === "]").map(([role]) => role)).toEqual([
+      "muted",
+      "accent",
+      "success",
+      "error",
+      "error",
+    ]);
+    expect(calls.filter(([, text]) => text === "||||||||").map(([role]) => role)).toEqual([
+      "warning",
+      "warning",
+      "warning",
+      "warning",
+      "warning",
+    ]);
 
     for (const width of [1, 8, 18, 32]) {
       const narrowRows = formatParallelProgress(
