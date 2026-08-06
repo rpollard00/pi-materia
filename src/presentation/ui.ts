@@ -22,6 +22,13 @@ import type {
   UsageReport,
   UsageTotals,
 } from "../types.js";
+import {
+  createMateriaThemedWidgetFactory,
+} from "./themedWidget.js";
+import type {
+  MateriaSemanticTheme,
+  MateriaThemeRole,
+} from "./theme.js";
 
 const WIDGET_MAX_LINE_LENGTH = 78;
 const MATERIA_WIDGET_MAX_LINES = 10;
@@ -93,7 +100,14 @@ export function syncConfiguredLoadoutWidget(
     return true;
   }
 
-  setMateriaWidgetLines(ctx, renderConfiguredLoadoutWidget(loadoutName));
+  setMateriaWidgetLines(
+    ctx,
+    renderConfiguredLoadoutWidget(loadoutName),
+    (theme) => renderMateriaStatusWidgetThemed(
+      createConfiguredLoadoutStatusModel(loadoutName),
+      theme,
+    ),
+  );
   return true;
 }
 
@@ -130,16 +144,34 @@ function acceptMateriaWidgetState(
 
 function renderMateriaWidgetController(controller: MateriaWidgetController): void {
   controller.lines = renderMateriaWidgetState(controller.state);
-  setMateriaWidgetLines(controller.ctx, controller.lines);
+  setMateriaWidgetLines(
+    controller.ctx,
+    controller.lines,
+    (theme) => renderMateriaWidgetStateThemed(controller.state, theme),
+  );
 }
 
 function setMateriaWidgetLines(
   ctx: ExtensionContext,
   lines: string[] | undefined,
+  themedRenderer?: (theme: MateriaSemanticTheme, width: number) => readonly string[],
 ): void {
-  ctx.ui.setWidget("materia", lines, {
-    placement: "belowEditor",
-  });
+  const options = { placement: "belowEditor" as const };
+  if (themedRenderer && supportsThemedWidgets(ctx)) {
+    ctx.ui.setWidget(
+      "materia",
+      createMateriaThemedWidgetFactory(themedRenderer, {
+        maxLines: MATERIA_WIDGET_MAX_LINES,
+      }),
+      options,
+    );
+    return;
+  }
+  ctx.ui.setWidget("materia", lines, options);
+}
+
+function supportsThemedWidgets(ctx: ExtensionContext): boolean {
+  return ctx.mode === "tui" && typeof ctx.ui.theme?.fg === "function";
 }
 
 function ensureMateriaWidgetControllerTicker(controller: MateriaWidgetController): void {
@@ -274,6 +306,36 @@ export function renderMateriaCastStatusWidget(
   return appendParallelProgressRows(baseLines, state);
 }
 
+function renderMateriaWidgetStateThemed(
+  state: MateriaWidgetState,
+  theme: MateriaSemanticTheme,
+): string[] {
+  return isMateriaCastWidgetState(state)
+    ? renderMateriaCastStatusWidgetThemed(state, theme)
+    : renderMateriaRunWidgetThemed(state, theme);
+}
+
+function renderMateriaRunWidgetThemed(
+  state: MateriaRunState,
+  theme: MateriaSemanticTheme,
+): string[] {
+  return renderMateriaStatusWidgetThemed(
+    createMateriaRunStatusModel(state, Date.now()),
+    theme,
+  );
+}
+
+function renderMateriaCastStatusWidgetThemed(
+  state: MateriaCastState,
+  theme: MateriaSemanticTheme,
+): string[] {
+  const baseLines = renderMateriaStatusWidgetThemed(
+    createMateriaCastStatusModel(state, Date.now()),
+    theme,
+  );
+  return appendParallelProgressRows(baseLines, state);
+}
+
 export type MateriaStatusSegmentKind =
   | "cast"
   | "loadout"
@@ -296,6 +358,7 @@ export type MateriaStatusSegment = {
 export type MateriaStatusRenderModel = {
   segments: MateriaStatusSegment[];
   panelLines: Array<MateriaStatusSegment[]>;
+  statusRole?: MateriaThemeRole;
 };
 
 const FIRST_LINE_SEGMENTS: Array<{
@@ -338,7 +401,7 @@ function createMateriaRunStatusModel(
     task: displayMateriaStatusValue(state, state.currentTask ?? "-"),
     path: "-",
     message: displayMateriaStatusValue(state, state.lastMessage ?? "-"),
-  });
+  }, state.endedAt === undefined ? "accent" : "success");
 }
 
 function createConfiguredLoadoutStatusModel(
@@ -354,7 +417,7 @@ function createConfiguredLoadoutStatusModel(
     task: "active loadout",
     path: "-",
     message: "Ready for the next pi-materia cast.",
-  });
+  }, "success");
 }
 
 function createMateriaCastStatusModel(
@@ -403,7 +466,26 @@ function createMateriaCastStatusModel(
     ),
     path: loop?.path ?? "-",
     message: displayMateriaStatusValue(state.runState, [parallelStatus, status].filter(Boolean).join(" · ")),
-  });
+  }, materiaCastStatusRole(state, socketState));
+}
+
+function materiaCastStatusRole(
+  state: MateriaCastState,
+  socketState: string,
+): MateriaThemeRole {
+  if (state.failedReason || state.inferenceInterruption) return "error";
+  if (socketState === "awaiting_user_refinement") return "warning";
+  if (state.active) return "accent";
+  return statusRoleForValue(state.phase);
+}
+
+function statusRoleForValue(value: string): MateriaThemeRole {
+  const normalized = value.toLowerCase();
+  if (/(fail|error|abort|interrupt|cancel)/.test(normalized)) return "error";
+  if (/(wait|refin|retry|nudge|queue|pending)/.test(normalized)) return "warning";
+  if (/(ready|complete|done|success|accept)/.test(normalized)) return "success";
+  if (/(active|run)/.test(normalized)) return "accent";
+  return "text";
 }
 
 function activeParallelRun(state: MateriaCastState): ParallelRunMonitorSummary | undefined {
@@ -452,6 +534,7 @@ export function formatParallelRunCompactStatus(summary: ParallelRunMonitorSummar
 
 function createMateriaStatusRenderModel(
   values: Record<MateriaStatusSegmentKind, string>,
+  statusRole?: MateriaThemeRole,
 ): MateriaStatusRenderModel {
   const firstLine = FIRST_LINE_SEGMENTS.map((definition) => ({
     ...definition,
@@ -470,11 +553,19 @@ function createMateriaStatusRenderModel(
   return {
     segments: [...firstLine, ...secondLine, message],
     panelLines: [firstLine, secondLine, [message]],
+    statusRole,
   };
 }
 
 function renderMateriaStatusWidget(model: MateriaStatusRenderModel): string[] {
   return model.panelLines.map((segments) => renderMateriaStatusLine(segments));
+}
+
+function renderMateriaStatusWidgetThemed(
+  model: MateriaStatusRenderModel,
+  theme: MateriaSemanticTheme,
+): string[] {
+  return model.panelLines.map((segments) => renderMateriaStatusLineThemed(segments, model, theme));
 }
 
 function renderMateriaStatusLine(segments: MateriaStatusSegment[]): string {
@@ -490,6 +581,40 @@ function renderMateriaStatusLine(segments: MateriaStatusSegment[]): string {
       : fixedCell(value, segment.width);
   });
   return truncateLine(joinCells(cells));
+}
+
+function renderMateriaStatusLineThemed(
+  segments: MateriaStatusSegment[],
+  model: MateriaStatusRenderModel,
+  theme: MateriaSemanticTheme,
+): string {
+  if (segments.length === 1 && segments[0].kind === "message") {
+    const segment = segments[0];
+    const value = `${segment.label} ${truncateValue(segment.value, WIDGET_MAX_LINE_LENGTH - 2)}`;
+    return theme.fg(statusRoleForSegment(segment, model), value);
+  }
+  const cells = segments.map((segment) => {
+    const value = `${segment.label} ${segment.value}`;
+    const cell = segment.width === undefined ? value : fixedCell(value, segment.width);
+    // `truncateLine` normalizes whitespace in the plain formatter. Do that
+    // before styling so stripping ANSI reproduces the exact transcript row.
+    const visibleCell = cell.replace(/\s+/g, " ").trim();
+    return theme.fg(statusRoleForSegment(segment, model), visibleCell);
+  });
+  return cells.join(" ");
+}
+
+function statusRoleForSegment(
+  segment: MateriaStatusSegment,
+  model: MateriaStatusRenderModel,
+): MateriaThemeRole {
+  if (segment.kind === "cast" || segment.kind === "message") {
+    return model.statusRole ?? "text";
+  }
+  if (segment.kind === "retry") return "warning";
+  if (segment.kind === "task") return "text";
+  if (segment.kind === "loadout" || segment.kind === "path") return "muted";
+  return "dim";
 }
 
 export function updateMateriaWebUiStatusWidget(

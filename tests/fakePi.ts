@@ -114,6 +114,7 @@ export class FakePiHarness {
   readonly userMessages: Array<{ content: unknown; options?: unknown }> = [];
   readonly appendedEntries: Array<{ customType: string; data?: unknown }> = [];
   readonly widgets = new Map<string, { content: FakeWidgetContent; options?: unknown }>();
+  private readonly widgetFactories = new Map<string, FakeWidgetFactory>();
   private readonly widgetComponents = new Map<string, Component & { dispose?(): void }>();
   readonly notifications: FakeUiNotification[] = [];
   readonly statuses = new Map<string, string | undefined>();
@@ -212,6 +213,18 @@ export class FakePiHarness {
         setWidget: (key: string, content: FakeWidgetContent, options?: unknown) => {
           this.widgetComponents.get(key)?.dispose?.();
           this.widgetComponents.delete(key);
+          this.widgetFactories.delete(key);
+          if (typeof content === "function") {
+            this.widgetFactories.set(key, content);
+            // Keep the long-standing fake inspection surface as plain rows for
+            // the default identity theme while renderWidget exercises the
+            // actual late-bound factory. Custom-theme tests retain the factory.
+            const storedContent = key === "materia" && this.options.theme === undefined
+              ? content({} as TUI, { fg: (_token: string, text: string) => text } as unknown as Theme).render(80)
+              : content;
+            this.widgets.set(key, { content: storedContent, options });
+            return;
+          }
           this.widgets.set(key, { content, options });
         },
         setFooter: () => undefined,
@@ -232,6 +245,7 @@ export class FakePiHarness {
         setToolsExpanded: () => undefined,
       },
       hasUI: true,
+      mode: "tui",
       cwd: this.cwd,
       sessionManager: this.sessionManager,
       modelRegistry: {
@@ -267,12 +281,15 @@ export class FakePiHarness {
   /** Render a registered component widget through the same late-bound path Pi uses. */
   renderWidget(key: string, width = 80, theme: FakePiTheme = this.theme): string[] | undefined {
     const widget = this.widgets.get(key);
-    if (!widget || widget.content === undefined) return undefined;
-    if (Array.isArray(widget.content)) return [...widget.content];
+    const factory = this.widgetFactories.get(key);
+    if (!widget || (widget.content === undefined && !factory)) return undefined;
+    if (!factory && Array.isArray(widget.content)) return [...widget.content];
 
     let component = this.widgetComponents.get(key);
     if (!component) {
-      component = widget.content({} as TUI, theme as unknown as Theme);
+      component = factory
+        ? factory({} as TUI, theme as unknown as Theme)
+        : (widget.content as FakeWidgetFactory)({} as TUI, theme as unknown as Theme);
       this.widgetComponents.set(key, component);
     }
     return component.render(width);

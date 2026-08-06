@@ -5,6 +5,7 @@ import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
 import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
 import type { ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
+import { FakePiHarness } from "./fakePi.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
   return {
@@ -60,6 +61,10 @@ function loopCastState(overrides: Partial<MateriaCastState> = {}): MateriaCastSt
     },
     ...overrides,
   } as MateriaCastState;
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "");
 }
 
 describe("persistent Materia widget formatting", () => {
@@ -122,6 +127,35 @@ describe("persistent Materia widget formatting", () => {
 
     const lines = renderMateriaRunWidget(state, 2_000);
     expect(lines[0]).toContain("⌘ Yolo");
+  });
+
+  test("themes the persistent panel while preserving its plain visible rows", () => {
+    const tokens: string[] = [];
+    const harness = new FakePiHarness(process.cwd(), {
+      theme: {
+        fg: (token, text) => {
+          tokens.push(token);
+          return `\u001b[35m${text}\u001b[0m`;
+        },
+      },
+    });
+    const state = runState({
+      endedAt: 2_000,
+      loadoutName: "Review",
+      currentMateria: "Build",
+      currentTask: "Finished task",
+      lastMessage: "completed",
+    });
+    const plain = renderMateriaRunWidget(state, 2_000);
+
+    try {
+      updateWidget(harness.ctx, state, { replaceOwner: true });
+      const themed = harness.renderWidget("materia", 78) ?? [];
+      expect(themed.map(stripAnsi)).toEqual(plain);
+      expect(tokens).toEqual(expect.arrayContaining(["success", "warning", "muted", "dim", "text"]));
+    } finally {
+      clearWidgetTicker(harness.ctx);
+    }
   });
 
   test("renders configured loadout when no cast widget is active", () => {
