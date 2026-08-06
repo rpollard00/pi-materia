@@ -154,6 +154,7 @@ export async function finalizeJjWorkspace(
   const recovered = await readPublishedRetry(runJj, input, meaningfulTip);
   if (recovered) {
     for (const workspace of pendingCleanup) await backend.cleanup(workspace);
+    await retireWorkflowBoundary(runJj, integration.removableWorkflowBoundary, recovered.published, recovered.baseWorking, integration.repositoryRoot);
     return finalizeResult(input, integration, verified, recovered.published, recovered.baseWorking, recovered.reviewCorrection);
   }
 
@@ -210,7 +211,47 @@ export async function finalizeJjWorkspace(
   }
 
   for (const workspace of pendingCleanup) await backend.cleanup(workspace);
+  await retireWorkflowBoundary(runJj, integration.removableWorkflowBoundary, published, baseWorking, integration.repositoryRoot);
   return finalizeResult(input, integration, verified, published, baseWorking, reviewCorrection, description);
+}
+
+async function retireWorkflowBoundary(
+  run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>,
+  boundary: JjRemovableWorkflowBoundary | undefined,
+  published: JjRevisionIdentity,
+  baseWorking: RevisionDetails,
+  cwd: string,
+): Promise<void> {
+  if (!boundary) return;
+  if (!baseWorking.empty || baseWorking.conflict || baseWorking.parents.length !== 1 || baseWorking.parents[0] !== published.commitId) {
+    throw new Error("Finalize-JJ-Workspace cannot retire the workflow boundary without preserving the verified empty base working commit.");
+  }
+
+  // Re-read the recorded revision immediately before abandonment. The
+  // revision identity and its single effective-base parent are the complete
+  // authority for this narrow cleanup; never replace it with a broad revset.
+  const candidate = await readRevision(run, boundary.commitId, cwd);
+  if (!sameRevision(candidate, boundary)
+    || !candidate.empty
+    || candidate.conflict
+    || candidate.parents.length !== 1
+    || candidate.parents[0] !== boundary.expectedParent.commitId) {
+    throw new Error("Finalize-JJ-Workspace recorded workflow boundary no longer matches the verified empty single-parent candidate.");
+  }
+  const candidateParent = await readRevision(run, candidate.parents[0], cwd);
+  if (!sameRevision(candidateParent, boundary.expectedParent)) {
+    throw new Error("Finalize-JJ-Workspace recorded workflow boundary parent drifted before retirement.");
+  }
+
+  await run(["abandon", boundary.commitId], cwd);
+  const preservedBaseWorking = await readRevision(run, "@", cwd, false);
+  if (!sameRevision(preservedBaseWorking, baseWorking)
+    || preservedBaseWorking.empty !== baseWorking.empty
+    || preservedBaseWorking.conflict !== baseWorking.conflict
+    || preservedBaseWorking.parents.length !== 1
+    || preservedBaseWorking.parents[0] !== published.commitId) {
+    throw new Error("Finalize-JJ-Workspace workflow-boundary retirement did not preserve the empty base working commit.");
+  }
 }
 
 async function readPublishedRetry(

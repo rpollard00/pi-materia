@@ -141,6 +141,50 @@ describe("Integrate-JJ-Workspaces", () => {
     for (const lane of fixture.lanes) expect(listed).not.toContain(`${lane.workspace.workspaceName}:`);
   });
 
+  test("retires the consumed empty workflow boundary while preserving the normal base working child", async () => {
+    if (!(await hasJj())) return;
+    const fixture = await realFixture(1, true, true);
+    await realJj(["bookmark", "create", "blackbelt/end-to-end", "-r", fixture.baseline.commitId], fixture.repositoryRoot);
+    const integrated = await integrateJjWorkspaceExports(fixture.input);
+    const boundary = integrated.integration.removableWorkflowBoundary!;
+
+    const finalized = await finalizeJjWorkspace({
+      cwd: integrated.scope.cwd,
+      executionScope: integrated.scope,
+      baseScope: createExecutionScope({ id: "cast:parent:base", cwd: fixture.repositoryRoot }),
+      state: { envelope: { satisfied: true } },
+      bookmarkName: "blackbelt/end-to-end",
+    });
+
+    expect(await revisionAt(fixture.repositoryRoot, "blackbelt/end-to-end")).toEqual(finalized.integrationRevision);
+    const baseWorking = await revisionDetailsAt(fixture.repositoryRoot, "@");
+    expect(baseWorking).toMatchObject({
+      empty: true,
+      conflict: false,
+      parents: [finalized.integrationRevision.commitId],
+    });
+    const firstMeaningful = finalized.orderedChangeIds[0]!;
+    const effectiveBaseChildren = await revisionDetails(fixture.repositoryRoot, `children(${boundary.expectedParent.commitId})`);
+    expect(effectiveBaseChildren).toHaveLength(1);
+    expect(effectiveBaseChildren[0]!.changeId).toBe(firstMeaningful);
+
+    const history = [] as Awaited<ReturnType<typeof revisionDetailsAt>>[];
+    let current = finalized.integrationRevision.commitId;
+    for (let index = 0; index < finalized.orderedChangeIds.length + 1; index += 1) {
+      const revision = await revisionDetailsAt(fixture.repositoryRoot, current);
+      history.unshift(revision);
+      if (revision.changeId === boundary.expectedParent.changeId) break;
+      expect(revision.parents).toHaveLength(1);
+      current = revision.parents[0]!;
+    }
+    expect(history.map(({ changeId }) => changeId)).toEqual([
+      boundary.expectedParent.changeId,
+      ...finalized.orderedChangeIds,
+    ]);
+    const visibleGraph = (await realJj(["log"], fixture.repositoryRoot)).stdout;
+    expect(visibleGraph).not.toContain(boundary.commitId.slice(0, 8));
+  });
+
   test("materializes one real workspace and emits its bounded result as utility state", async () => {
     if (!(await hasJj())) return;
     const fixture = await realFixture(1);
@@ -266,12 +310,16 @@ function fakeDeps(sources: Array<ReturnType<typeof source>>, outcome: "clean" | 
   };
 }
 
-async function realFixture(count: number, meaningful = false) {
+async function realFixture(count: number, meaningful = false, workflowBoundary = false) {
   const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-integrate-repo-"));
   const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-integrate-workspaces-"));
   await realJj(["git", "init", repositoryRoot], process.cwd());
   const backend = createJjWorkspaceBackend({ workspaceRoot, repositoryRoot });
-  const baseline = (await backend.pinBaseline(repositoryRoot)).baseline;
+  let baseline = (await backend.pinBaseline(repositoryRoot)).baseline;
+  if (workflowBoundary) {
+    await realJj(["new"], repositoryRoot);
+    baseline = await revisionAt(repositoryRoot, "@");
+  }
   const lanes = await Promise.all(Array.from({ length: count }, async (_, index) => {
     const laneId = `lane-${index}`;
     const workspace = await backend.createWorkspace({
@@ -363,6 +411,23 @@ async function revisionAt(cwd: string, revset: string): Promise<{ commitId: stri
   const result = await realJj(["log", "-r", revset, "--no-graph", "-T", "commit_id ++ \"\\t\" ++ change_id"], cwd);
   const [commitId, changeId] = result.stdout.trim().split("\t");
   return { commitId: commitId!, changeId: changeId! };
+}
+
+async function revisionDetailsAt(cwd: string, revset: string) {
+  const entries = await revisionDetails(cwd, revset);
+  if (entries.length !== 1) throw new Error(`expected one revision for ${revset}, got ${entries.length}`);
+  return entries[0]!;
+}
+
+async function revisionDetails(cwd: string, revset: string) {
+  const template = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
+  const result = await realJj(["log", "-r", revset, "--no-graph", "-T", template], cwd);
+  return result.stdout.trim().split(/\r?\n/).filter(Boolean).map(parseDetails);
+}
+
+function parseDetails(line: string) {
+  const [commitId, changeId, parents = "", conflict, empty] = line.split("\t");
+  return { commitId: commitId!, changeId: changeId!, parents: parents ? parents.split(",") : [], conflict: conflict === "true", empty: empty === "true" };
 }
 
 async function realJj(args: readonly string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
