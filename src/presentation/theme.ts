@@ -37,6 +37,8 @@ export type MateriaTheme = MateriaSemanticTheme;
 export interface MateriaSemanticTheme {
   /** Apply the Pi token associated with a Materia role. */
   fg(role: MateriaThemeRole, text: string): string;
+  /** Apply a scoped blink while retaining the role's foreground color. */
+  blink(role: MateriaThemeRole, text: string): string;
   /** Return a reusable role-aware styling function. */
   style(role: MateriaThemeRole): (text: string) => string;
   /** Resolve a role to its Pi token for callers that need token-level access. */
@@ -58,8 +60,17 @@ export function createMateriaSemanticTheme(
     return theme.fg(MATERIA_THEME_TOKENS[role], text);
   };
 
+  const blink = (role: MateriaThemeRole, text: string): string => {
+    if (!theme || typeof theme.fg !== "function") return text;
+    // Keep the decoration inside Pi's foreground scope. SGR 25 is narrower
+    // than a full reset and sits directly after the target text, so a blink
+    // cannot leak into adjacent glyphs or reset the semantic foreground.
+    return fg(role, `\u001b[5m${text}\u001b[25m`);
+  };
+
   return {
     fg,
+    blink,
     style: (role) => (text) => fg(role, text),
     token: (role) => MATERIA_THEME_TOKENS[role],
   };

@@ -22,11 +22,31 @@ describe("Materia semantic widget theming", () => {
 
     expect(semantic.fg("accent", "active")).toBe("<accent>active");
     expect(semantic.style("success")("ready")).toBe("<success>ready");
+    expect(semantic.blink("warning", "busy")).toBe("<warning>\u001b[5mbusy\u001b[25m");
     expect(semantic.token("warning")).toBe(MATERIA_THEME_TOKENS.warning);
     expect(calls).toEqual([
       ["accent", "active"],
       ["success", "ready"],
+      ["warning", "\u001b[5mbusy\u001b[25m"],
     ]);
+  });
+
+  test("scopes blink reset after the target glyph while retaining ANSI foreground styling", () => {
+    const semantic = createMateriaSemanticTheme({
+      fg: (token, text) => `\u001b[38;5;${token === "warning" ? "214" : "39"}m${text}\u001b[39m`,
+    });
+
+    const rendered = semantic.blink("warning", "|");
+    expect(rendered).toBe("\u001b[38;5;214m\u001b[5m|\u001b[25m\u001b[39m");
+    expect(rendered).not.toContain("|\u001b[0m");
+    expect(semantic.fg("text", "next")).toBe("\u001b[38;5;39mnext\u001b[39m");
+  });
+
+  test("keeps blink ANSI-free when no live Pi theme is available", () => {
+    const semantic = createMateriaSemanticTheme(undefined);
+
+    expect(semantic.blink("warning", "|")).toBe("|");
+    expect(semantic.fg("warning", "next")).toBe("next");
   });
 
   test("uses a late-bound factory, invalidates without cached ANSI, and bounds visible width", () => {
