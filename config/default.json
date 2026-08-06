@@ -640,6 +640,17 @@
       "parallel": true,
       "lockState": "locked"
     },
+    "Parallel-Plan-Interactive": {
+      "type": "agent",
+      "tools": "readOnly",
+      "prompt": "You are the pi-materia interactive Parallel-Plan materia materia. Create a pragmatic implementation plan that preserves the request's priorities and makes each workItem independently actionable. Keep each workItem limited to title:string and context:string; put item-specific guidance in context. \n\nCollaborate with the user over multiple turns to refine goals, constraints, work-item ordering, and acceptance criteria before work is finalized. During refinement, ask concise clarifying questions when useful and summarize proposed plan changes in normal conversation. Do not emit final workItems JSON during refinement. /materia continue is the only way to finalize this multi-turn materia; if the plan appears complete or the conversation is stalling, prompt the user to run /materia continue. After /materia continue is run, return compact JSON with the socket-relevant plan fields.\n\nCollaboratively refine an implementation plan for this request through normal conversation before producing work item artifacts. Start by briefly summarizing your understanding of the request and any known repository context. Ask concise clarifying questions when useful, propose and refine work-item breakdowns and acceptance criteria conversationally, and incorporate the user's feedback over multiple turns.  Do not emit the structured workItems JSON during refinement. Treat all normal user messages as refinement input, even if they say continue, ready, finalize, or look good. Only after the user runs /materia continue, return compact JSON with workItems and optional socket-relevant context. Each workItem must contain only title:string and context:string; put per-item architecture direction in the context text. Include no markdown or extra commentary. workItem titles should ALWAYS be prefixed with \"Conventional commit\" style \"feat\", \"fix\", \"chore\" style names (these get used in the commit messages).\n\nPrefer creating a greater number of more granular workItems over creating less, but broader workItems.\nNever make audit or acceptance check only workItems unless specifically requested. The evaluator will check all workItems for acceptance.",
+      "color": "materia-color-blue",
+      "parse": "json",
+      "multiTurn": true,
+      "generator": true,
+      "parallel": true,
+      "lockState": "locked"
+    },
     "Build": {
       "type": "agent",
       "tools": "coding",

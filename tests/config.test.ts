@@ -1097,6 +1097,7 @@ describe("config loadouts", () => {
       ["Commit-Sigil", "json"],
       ["Auto-Architect", "json"],
       ["Parallel-Plan", "json"],
+      ["Parallel-Plan-Interactive", "json"],
       ["Integration-Review", "json"],
       ["Chain-Context", "json"],
       ["Build", "text"],
