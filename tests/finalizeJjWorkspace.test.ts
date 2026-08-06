@@ -126,7 +126,7 @@ describe("Finalize-JJ-Workspace", () => {
       if (args[0] === "abandon") { boundaryVisible = false; abandonCalls += 1; return ""; }
       const revision = String(args[args.indexOf("-r") + 1]);
       if (revision.includes("conflicts()")) return "";
-      if (revision.includes("ancestors(")) return "";
+      if (revision.includes("ancestors(") || revision.includes("children(")) return "";
       if (revision === "boundary & visible()") return boundaryVisible ? details("boundary", "changeboundary", "base", false, true) : "";
       if (revision === "base & visible()") return details("base", "changebase", "root", false, false);
       if (revision === "changebase") return details("base", "changebase", "root", false, false);
@@ -156,7 +156,13 @@ describe("Finalize-JJ-Workspace", () => {
     expect(newCalls).toBe(1);
   });
 
-  test("preserves a workflow boundary retained by another bookmark", async () => {
+  test.each([
+    ["another bookmark", "boundary & ancestors(bookmarks())"],
+    ["a tag", "boundary & ancestors(tags())"],
+    ["a remote bookmark", "boundary & ancestors(remote_bookmarks())"],
+    ["another working copy", "boundary & ancestors(working_copies())"],
+    ["an unrelated visible child", "children(boundary) & visible()"],
+  ])("preserves a workflow boundary retained by %s", async (_label, protectedRevset) => {
     const value = input(true, true);
     let published = false;
     let baseCreated = false;
@@ -170,8 +176,8 @@ describe("Finalize-JJ-Workspace", () => {
       if (revision.includes("conflicts()")) return "";
       if (revision === "boundary & visible()") return details("boundary", "changeboundary", "base", false, true);
       if (revision === "base & visible()") return details("base", "changebase", "root", false, false);
-      if (revision.includes("ancestors(bookmarks())")) return "boundary\\n";
-      if (revision.includes("ancestors(")) return "";
+      if (revision === protectedRevset) return "protected\\n";
+      if (revision.includes("ancestors(") || revision.includes("children(")) return "";
       if (revision === "changebase") return details("base", "changebase", "root", false, false);
       if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
       if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);

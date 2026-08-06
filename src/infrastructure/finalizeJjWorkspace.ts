@@ -276,6 +276,11 @@ async function eligibleWorkflowBoundary(
   const candidateParent = await readRevisionIfPresent(run, `${candidate.parents[0]} & visible()`, cwd);
   if (!candidateParent || !sameRevision(candidateParent, boundary.expectedParent)) return undefined;
 
+  // The consumed boundary must be an orphan. Even without a named reference,
+  // abandoning it would rewrite any visible child and therefore mutate
+  // unrelated history rather than retiring one exact workflow revision.
+  if (await revsetHasRevision(run, `children(${candidate.commitId}) & visible()`, cwd)) return undefined;
+
   // Protect any externally retained history, not only a ref pointing at the
   // candidate itself. Abandoning an ancestor would otherwise rewrite another
   // bookmark, tag, remote bookmark, or working copy.
