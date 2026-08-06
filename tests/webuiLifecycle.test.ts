@@ -10,7 +10,7 @@ import {
 } from "../src/webui/launcher.js";
 import { ensureMateriaWebUi } from "../src/webui/service.js";
 import { getUserProfileConfigPath, loadConfig } from "../src/config/config.js";
-import { FakePiHarness } from "./fakePi.js";
+import { FakePiHarness, type FakePiHarnessOptions } from "./fakePi.js";
 
 const previousProfileDir = process.env.PI_MATERIA_PROFILE_DIR;
 
@@ -21,11 +21,14 @@ afterEach(() => {
   else process.env.PI_MATERIA_PROFILE_DIR = previousProfileDir;
 });
 
-async function harnessWithProfile(prefix = "pi-materia-webui-") {
+async function harnessWithProfile(
+  prefix = "pi-materia-webui-",
+  options?: FakePiHarnessOptions,
+) {
   const cwd = await mkdtemp(path.join(tmpdir(), prefix));
   const profile = await mkdtemp(path.join(tmpdir(), `${prefix}profile-`));
   process.env.PI_MATERIA_PROFILE_DIR = profile;
-  const harness = new FakePiHarness(cwd);
+  const harness = new FakePiHarness(cwd, options);
   piMateria(harness.pi);
   return { harness, profile };
 }
@@ -45,6 +48,10 @@ async function waitForNotification(
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error(`Timed out waiting for notification including ${includes}`);
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "");
 }
 
 function minimalLoadout(id: string) {
@@ -177,6 +184,34 @@ describe("/materia ui lifecycle", () => {
     releaseBuild();
     await Promise.all([first, second]);
     expect(builds).toBe(1);
+  });
+
+  test("themes the persistent WebUI widget while preserving its visible lifecycle text", async () => {
+    const tokens: string[] = [];
+    const { harness } = await harnessWithProfile(
+      "pi-materia-webui-theme-",
+      {
+        theme: {
+          fg: (token, text) => {
+            tokens.push(token);
+            return `\u001b[35m${text}\u001b[0m`;
+          },
+        },
+      },
+    );
+
+    await harness.runCommand("materia", "ui");
+    const first = harness.appendedEntries.at(-1)?.data as { url: string };
+    const started = harness.renderWidget("materia-webui") ?? [];
+    expect(started.map(stripAnsi)).toEqual([`WebUI started: ${first.url}`]);
+    expect(tokens).toEqual(["accent", "accent", "dim", "muted"]);
+
+    await harness.runCommand("materia", "ui");
+    const reused = harness.renderWidget("materia-webui") ?? [];
+    expect(reused.map(stripAnsi)).toEqual([`WebUI ready (reused): ${first.url}`]);
+    expect(tokens.slice(-4)).toEqual(["accent", "success", "dim", "muted"]);
+
+    await harness.emit("session_shutdown");
   });
 
   test("command launches a session-scoped server in the background without waiting for idle and reuses it", async () => {

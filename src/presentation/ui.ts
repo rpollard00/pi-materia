@@ -641,9 +641,20 @@ export function updateMateriaWebUiStatusWidget(
   ctx: ExtensionContext,
   input: { url: string; status: "started" | "reused" },
 ): void {
-  ctx.ui.setWidget("materia-webui", renderMateriaWebUiStatusWidget(input), {
-    placement: "belowEditor",
-  });
+  const options = { placement: "belowEditor" as const };
+  const lines = renderMateriaWebUiStatusWidget(input);
+  if (supportsThemedWidgets(ctx)) {
+    ctx.ui.setWidget(
+      "materia-webui",
+      createMateriaThemedWidgetFactory(
+        (theme) => renderMateriaWebUiStatusWidgetThemed(input, theme),
+        { maxLines: 1 },
+      ),
+      options,
+    );
+    return;
+  }
+  ctx.ui.setWidget("materia-webui", lines, options);
 }
 
 export function renderMateriaWebUiStatusWidget(input: {
@@ -652,6 +663,20 @@ export function renderMateriaWebUiStatusWidget(input: {
 }): string[] {
   const state = input.status === "reused" ? "ready (reused)" : "started";
   return [`WebUI ${state}: ${truncateLine(input.url)}`];
+}
+
+export function renderMateriaWebUiStatusWidgetThemed(
+  input: {
+    url: string;
+    status: "started" | "reused";
+  },
+  theme: MateriaSemanticTheme,
+): string[] {
+  const state = input.status === "reused" ? "ready (reused)" : "started";
+  const stateRole: MateriaThemeRole = input.status === "reused" ? "success" : "accent";
+  return [
+    `${theme.fg("accent", "WebUI")} ${theme.fg(stateRole, state)}${theme.fg("dim", ":")} ${theme.fg("muted", truncateLine(input.url))}`,
+  ];
 }
 
 export function clearMateriaAuxiliaryWidgets(ctx: ExtensionContext): void {
