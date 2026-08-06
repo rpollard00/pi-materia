@@ -106,7 +106,7 @@ Core never shallow-merges branch state, inspects files, combines revisions, or c
 
 Repository integration is an optional utility after the barrier. Thus a branch “conflict” is not a core parallel outcome: repository conflicts can only be reported by a utility that understands its own exports.
 
-## 6. Optional jj composition
+## 6. Optional jj compositions
 
 The shipped `Parallel-Experimental` loadout composes generic core behavior with jj utilities:
 
@@ -120,6 +120,22 @@ Parallel-Plan (`generator: true`, `parallel: true`)
   -> Finalize-JJ-Workspace
   -> Narrate
 ```
+
+The locked `Parallel-Interactive` loadout uses the same jj composition with a multi-turn parent planner:
+
+```text
+Parallel-Plan-Interactive (`generator: true`, `parallel: true`, `multiTurn: true`)
+  -> per stream: Spawn-JJ-Workspace                 # non-interactive prelude, once
+  -> per item:   Build -> Auto-Eval -> Blackbelt-Maintain
+                                                    # non-interactive, parallel-safe loop
+  -> intrinsic ordered barrier
+  -> Integrate-JJ-Workspaces
+  -> Integration-Review                             # always
+  -> Finalize-JJ-Workspace
+  -> Narrate
+```
+
+Only `Parallel-Plan-Interactive`, the parent generator, is multi-turn: it accepts conversational refinement until `/materia continue`, then emits the final `workItems` and `parallelSchedule`. The copied branch prelude and loop materia remain non-interactive and explicitly declare `parallelSafe: true`; no child asks the user for input. Once the planner is finalized, `Parallel-Interactive` has the same derived branches, ordered barrier, schedule-ordered fan-in, and jj integration/review/finalization semantics as `Parallel-Experimental`. Interactivity changes only when planning happens, not how streams execute or how accepted work is integrated.
 
 `Spawn-JJ-Workspace` replaces the branch active scope with an owned, bookmarkless external lane workspace and opaque integration/cleanup exports while leaving the base working copy and original cast bookmark unchanged. The same utility can be placed after a regular generator and before a sequential loop to give the entire sequential path one workspace.
 
