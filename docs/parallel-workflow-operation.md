@@ -25,6 +25,26 @@ The generator's single deterministic path must reach one consuming loop. Sockets
 
 Do not add a schedule normalizer, authored lane sockets, fan-in routes, workspace mode, plan input, or failure policy. Core injects planning instructions, validates `parallelSchedule`, derives the region, queues streams, and creates the barrier.
 
+## Select interactive or non-interactive planning
+
+Use `Parallel-Interactive` when you want to review and refine the plan with the operator before any child work starts:
+
+```text
+/materia loadout Parallel-Interactive
+/materia cast <request>
+```
+
+Planning remains conversational until `/materia continue`. Review or revise the proposed work items and stream partition with ordinary messages; the cast does not advance to the parallel region while the planner is waiting for refinement. Run `/materia continue` only when the plan is ready to finalize. That finalization turn produces the definitive `workItems` and `parallelSchedule`; only after both are produced and validated do child streams launch.
+
+`Parallel-Experimental` is the non-interactive variant. It does not pause for conversational planning or operator approval:
+
+```text
+/materia loadout Parallel-Experimental
+/materia cast <request>
+```
+
+Its planner proceeds directly to the final structured plan, after which the runtime validates the schedule and starts the derived child streams. Choose it for an autonomous cast; choose `Parallel-Interactive` when the work breakdown needs a conversational review first.
+
 ### Plan independent streams
 
 Every stream starts concurrently from the same pinned cast baseline. The order of `parallelSchedule.streams` controls deterministic fan-in after execution; it does **not** make a later stream depend on an earlier stream's output. Put shared contracts, dependent or order-sensitive changes, and work likely to touch the same files or modules in one stream. Keep cross-stream ownership narrow and prefer genuine independence over evenly balanced streams. Use one stream when the work cannot be partitioned safely.
