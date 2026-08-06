@@ -356,7 +356,7 @@ describe("bundled utility materia defaults", () => {
     for (const [loadoutName, loadout] of Object.entries(config.loadouts ?? {})) {
       // The opt-in experimental parallel workflow intentionally uses the jj
       // bootstrap utility; the standard shipped loadouts avoid VCS maintenance.
-      if (loadoutName === "Parallel-Experimental") continue;
+      if (["Parallel-Experimental", "Parallel-Interactive"].includes(loadoutName)) continue;
       for (const [socketId, socket] of Object.entries((loadout as { sockets?: Record<string, { materia?: string }> }).sockets ?? {})) {
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-Bootstrap`).not.toBe("Mime-Bootstrap");
         expect(socket.materia, `${loadoutName}.${socketId} should not reference Mime-Maintain`).not.toBe("Mime-Maintain");

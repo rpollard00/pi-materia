@@ -610,6 +610,159 @@
           "parse": "text"
         }
       }
+    },
+    "Parallel-Interactive": {
+      "id": "default:parallel-interactive",
+      "lockState": "locked",
+      "entry": "Socket-1",
+      "loops": {
+        "parallelWork": {
+          "consumes": {
+            "from": "Socket-4",
+            "output": "workItems"
+          },
+          "exit": {
+            "from": "Socket-8",
+            "when": "satisfied",
+            "to": "Socket-9"
+          },
+          "sockets": [
+            "Socket-6",
+            "Socket-7",
+            "Socket-8"
+          ]
+        }
+      },
+      "sockets": {
+        "Socket-1": {
+          "socketKind": "entry",
+          "materia": "Ignore-Artifacts",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-2"
+            }
+          ]
+        },
+        "Socket-2": {
+          "socketKind": "normal",
+          "materia": "Detect-VCS",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-3"
+            }
+          ]
+        },
+        "Socket-3": {
+          "socketKind": "normal",
+          "materia": "Blackbelt-Bootstrap",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-4"
+            }
+          ]
+        },
+        "Socket-4": {
+          "socketKind": "normal",
+          "materia": "Parallel-Plan-Interactive",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-5"
+            }
+          ]
+        },
+        "Socket-5": {
+          "socketKind": "normal",
+          "materia": "Spawn-JJ-Workspace",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ]
+        },
+        "Socket-6": {
+          "socketKind": "normal",
+          "materia": "Build",
+          "parse": "text",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-7"
+            }
+          ]
+        },
+        "Socket-7": {
+          "socketKind": "normal",
+          "materia": "Auto-Eval",
+          "parse": "json",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-8"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-6",
+              "maxTraversals": 3
+            }
+          ]
+        },
+        "Socket-8": {
+          "socketKind": "normal",
+          "materia": "Blackbelt-Maintain",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-6"
+            }
+          ]
+        },
+        "Socket-9": {
+          "socketKind": "normal",
+          "materia": "Integrate-JJ-Workspaces",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-10"
+            }
+          ]
+        },
+        "Socket-10": {
+          "socketKind": "normal",
+          "materia": "Integration-Review",
+          "parse": "json",
+          "edges": [
+            {
+              "when": "satisfied",
+              "to": "Socket-11"
+            },
+            {
+              "when": "not_satisfied",
+              "to": "Socket-10",
+              "maxTraversals": 3
+            }
+          ]
+        },
+        "Socket-11": {
+          "socketKind": "normal",
+          "materia": "Finalize-JJ-Workspace",
+          "edges": [
+            {
+              "when": "always",
+              "to": "Socket-12"
+            }
+          ]
+        },
+        "Socket-12": {
+          "socketKind": "normal",
+          "materia": "Narrate",
+          "parse": "text"
+        }
+      }
     }
   },
   "materia": {

@@ -850,12 +850,20 @@ describe("config loadouts", () => {
   test("ships the opt-in locked parallel workflow without changing the active default", async () => {
     const rawDefault = JSON.parse(await readFile(path.resolve("config", "default.json"), "utf8")) as {
       activeLoadout?: string;
-      loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown; consumes?: { from?: string }; exit?: { to?: string } }> }>;
+      loadouts?: Record<string, { id?: string; lockState?: string; loops?: Record<string, { parallel?: unknown; consumes?: { from?: string }; exit?: { to?: string } }>; sockets?: Record<string, { materia?: string }> }>;
       materia?: Record<string, { description?: string; prompt?: string; lockState?: string; generator?: boolean; parallel?: boolean; parallelSafe?: boolean; type?: string; tools?: string; parse?: string }>;
     };
     const experimental = rawDefault.loadouts?.["Parallel-Experimental"];
+    const interactive = rawDefault.loadouts?.["Parallel-Interactive"];
     expect(rawDefault.activeLoadout).toBe("Full-Auto");
     expect(experimental).toMatchObject({ id: "default:parallel-experimental", lockState: "locked" });
+    expect(interactive).toMatchObject({ id: "default:parallel-interactive", lockState: "locked" });
+    expect(interactive?.loops?.parallelWork).toMatchObject({
+      consumes: { from: "Socket-4" },
+      exit: { to: "Socket-9" },
+    });
+    expect(interactive?.sockets?.["Socket-4"]?.materia).toBe("Parallel-Plan-Interactive");
+    expect(interactive?.sockets?.["Socket-6"]?.materia).toBe("Build");
     expect(rawDefault.parallelism).toEqual({ maxConcurrency: 2 });
     expect(experimental?.loops?.parallelWork).toMatchObject({
       consumes: { from: "Socket-4" },
@@ -884,6 +892,7 @@ describe("config loadouts", () => {
     expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("removes ownership-checked parked lane heads");
     expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("never abandons pre-existing bookmarked baselines");
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
+    expect(rawDefault.materia?.["Parallel-Plan-Interactive"]).toMatchObject({ generator: true, parallel: true, multiTurn: true });
     for (const id of ["Spawn-JJ-Workspace", "Build", "Auto-Eval", "Blackbelt-Maintain"]) {
       expect(rawDefault.materia?.[id]?.parallelSafe, id).toBe(true);
     }
@@ -896,6 +905,7 @@ describe("config loadouts", () => {
       const loaded = await loadConfig(cwd);
       expect(loaded.config.activeLoadout).toBe("Full-Auto");
       expect(loaded.loadoutSources?.["Parallel-Experimental"]).toBe("default");
+      expect(loaded.loadoutSources?.["Parallel-Interactive"]).toBe("default");
       expect(loaded.config.materia["Normalize-Parallel-Streams"]).toBeUndefined();
       expect(loaded.config.materia["Parallel-Lane-Checkpoint"]).toBeUndefined();
       expect(loaded.config.materia["Parallel-Finalize"]).toBeUndefined();
@@ -934,6 +944,22 @@ describe("config loadouts", () => {
       for (const id of ["Socket-5", "Socket-6", "Socket-7", "Socket-8"]) {
         expect(pipeline.sockets[id].materia, id).toMatchObject({ parallelSafe: true });
       }
+
+      loaded.config.activeLoadout = "Parallel-Interactive";
+      const interactivePipeline = resolvePipeline(loaded.config);
+      expect(interactivePipeline.sockets["Socket-4"].socket.materia).toBe("Parallel-Plan-Interactive");
+      expect(interactivePipeline.sockets["Socket-4"].materia).toMatchObject({ generator: true, parallel: true, multiTurn: true });
+      expect(interactivePipeline.loops?.parallelWork).toMatchObject({
+        consumes: { from: "Socket-4", output: "workItems" },
+        exit: { from: "Socket-8", when: "satisfied", to: "Socket-9" },
+      });
+      expect(parallelLoopForSocket({ pipeline: interactivePipeline } as any, "Socket-5")).toEqual({ loopId: "parallelWork" });
+      expect(interactivePipeline.sockets["Socket-5"].materiaId).toBe("Spawn-JJ-Workspace");
+      expect(interactivePipeline.sockets["Socket-9"].materiaId).toBe("Integrate-JJ-Workspaces");
+      for (const id of ["Socket-5", "Socket-6", "Socket-7", "Socket-8"]) {
+        expect(interactivePipeline.sockets[id].materia, id).toMatchObject({ parallelSafe: true });
+      }
+      loaded.config.activeLoadout = "Parallel-Experimental";
 
       // The workspace utilities are not coupled to intrinsic dispatch. In the
       // equivalent ordinary-generator composition, one workspace is spawned

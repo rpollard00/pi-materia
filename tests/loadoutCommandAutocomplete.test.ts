@@ -30,7 +30,7 @@ async function makeHarness(loadouts: Record<string, unknown> = {}, activeLoadout
 }
 
 /** Default loadouts from config/default.json always merge in. */
-const defaultLoadoutNames = ["Full-Auto", "Planning-Consult", "Hojo-Consult", "Parallel-Experimental"];
+const defaultLoadoutNames = ["Full-Auto", "Planning-Consult", "Hojo-Consult", "Parallel-Experimental", "Parallel-Interactive"];
 
 describe("/materia loadout autocomplete", () => {
   test("empty query returns all loadouts for arrow navigation", async () => {
@@ -222,7 +222,7 @@ describe("/materia loadout autocomplete", () => {
   });
 
   test("no loadouts configured returns loadouts from default config", async () => {
-    // Even with no custom loadouts in the project config, the four default
+    // Even with no custom loadouts in the project config, the bundled default
     // loadouts are merged in.
     const harness = await makeHarness({}, "");
     const completions = await harness.getCommandCompletions("materia", "loadout ");
