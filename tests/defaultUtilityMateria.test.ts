@@ -196,6 +196,7 @@ describe("bundled utility materia defaults", () => {
     expect(materia?.description).toContain("parks each owned empty lane workspace tip");
     expect(materia?.description).toContain("exact meaningful revisions");
     expect(materia?.description).toContain("separate publishable chain");
+    expect(materia?.description).toContain("exact consumed empty bootstrap boundary");
     expect(materia?.description).toContain("without a synthetic merge commit");
     expect(materia?.description).toContain("rather than automatic ours/theirs resolution");
     expect((materia as { command?: unknown }).command).toBeUndefined();
@@ -217,6 +218,9 @@ describe("bundled utility materia defaults", () => {
     expect(materia?.description).toContain("complete publishable linear history");
     expect(materia?.description).toContain("original cast bookmark");
     expect(materia?.description).toContain("integration-fix commit");
+    expect(materia?.description).toContain("empty editable @ directly above");
+    expect(materia?.description).toContain("exact unreferenced consumed bootstrap-boundary sibling");
+    expect(materia?.description).toContain("preserves externally referenced or non-workflow revisions");
     expect(materia?.description).toContain("ownership-checked parked lane heads and review workspaces");
     expect(materia?.description).toContain("never abandons pre-existing bookmarked baselines");
     expect((materia as { command?: unknown }).command).toBeUndefined();

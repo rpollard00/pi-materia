@@ -887,9 +887,12 @@ describe("config loadouts", () => {
     expect(rawDefault.materia?.["Blackbelt-Maintain"]?.description).toContain("never create one");
     expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("parks each owned empty lane workspace tip");
     expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("separate publishable chain");
+    expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("exact consumed empty bootstrap boundary");
     expect(rawDefault.materia?.["Integrate-JJ-Workspaces"]?.description).toContain("rather than automatic ours/theirs resolution");
     expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("original cast bookmark");
-    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("removes ownership-checked parked lane heads");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("empty editable @ directly above");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("exact unreferenced consumed bootstrap-boundary sibling");
+    expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("preserves externally referenced or non-workflow revisions");
     expect(rawDefault.materia?.["Finalize-JJ-Workspace"]?.description).toContain("never abandons pre-existing bookmarked baselines");
     expect(rawDefault.materia?.["Parallel-Plan"]).toMatchObject({ generator: true, parallel: true });
     expect(rawDefault.materia?.["Parallel-Plan-Interactive"]).toMatchObject({ generator: true, parallel: true, multiTurn: true });

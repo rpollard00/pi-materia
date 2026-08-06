@@ -919,7 +919,7 @@
     "Integrate-JJ-Workspaces": {
       "type": "utility",
       "label": "Integrate-JJ-Workspaces",
-      "description": "Consumes schedule-ordered intrinsic barrier exports, parks each owned empty lane workspace tip at the shared pinned baseline, linearly rebases only exact meaningful revisions into the separate publishable chain without a synthetic merge commit, and activates a review workspace with full-range conflict provenance rather than automatic ours/theirs resolution.",
+      "description": "Consumes schedule-ordered intrinsic barrier exports, parks each owned empty lane workspace tip at the shared pinned baseline, records the exact consumed empty bootstrap boundary when non-empty fan-in replaces it, linearly rebases only exact meaningful revisions into the separate publishable chain without a synthetic merge commit, and activates a review workspace with full-range conflict provenance rather than automatic ours/theirs resolution.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
@@ -928,7 +928,7 @@
     "Finalize-JJ-Workspace": {
       "type": "utility",
       "label": "Finalize-JJ-Workspace",
-      "description": "After explicit agent acceptance, verifies the complete publishable linear history is conflict-free, retains at most one meaningful integration-fix commit, advances only the original cast bookmark to the meaningful tip, leaves one empty base working commit outside published history, removes ownership-checked parked lane heads and review workspaces, and never abandons pre-existing bookmarked baselines.",
+      "description": "After explicit agent acceptance, verifies the complete publishable linear history is conflict-free, retains at most one meaningful integration-fix commit, advances only the original cast bookmark to the meaningful tip, keeps the normal verified empty editable @ directly above that bookmarked meaningful tip, removes the exact unreferenced consumed bootstrap-boundary sibling when provenance proves it was replaced, removes ownership-checked parked lane heads and review workspaces, preserves externally referenced or non-workflow revisions, and never abandons pre-existing bookmarked baselines.",
       "group": "Utility",
       "color": "materia-color-black-gray",
       "parse": "json",
