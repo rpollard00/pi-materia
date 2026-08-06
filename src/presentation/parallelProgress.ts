@@ -231,12 +231,28 @@ function progressBar(
 ): string {
   const filled = total === 0 ? 0 : Math.min(width, Math.max(0, Math.floor((position / total) * width)));
   const border = progressRole(status, "border");
+  const fill = renderFill(filled, status, options);
   return [
     styleText("[", status, "border", options, border),
-    styleText("|".repeat(filled), status, "fill", options),
+    fill,
     styleText(" ".repeat(width - filled), status, "track", options),
     styleText("]", status, "border", options, border),
   ].join("");
+}
+
+function renderFill(
+  filled: number,
+  status: ProgressLane["status"],
+  options: ParallelProgressFormatOptions,
+): string {
+  const text = "|".repeat(filled);
+  if (options.style || status !== "running" || filled === 0) {
+    return styleText(text, status, "fill", options);
+  }
+
+  const staticFill = styleText(text.slice(0, -1), status, "fill", options);
+  const activeEdge = options.theme?.blink(progressRole(status, "fill"), "|") ?? "|";
+  return `${staticFill}${activeEdge}`;
 }
 
 function styleText(

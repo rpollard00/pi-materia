@@ -541,6 +541,44 @@ describe("persistent Materia widget formatting", () => {
     expect(lines.every((line) => visibleWidth(line) <= 78)).toBe(true);
   });
 
+  test("blinks only a running lane's active bar edge through the persistent themed widget", () => {
+    const harness = new FakePiHarness(process.cwd(), {
+      theme: {
+        fg: (_token, text) => `\u001b[35m${text}\u001b[0m`,
+      },
+    });
+    const cases = [
+      { status: "running" as const, position: 2, total: 5, blinks: 1 },
+      { status: "running" as const, position: 1, total: 19, blinks: 1 },
+      { status: "running" as const, position: 5, total: 5, blinks: 1 },
+      { status: "running" as const, position: 0, total: 5, blinks: 0 },
+      { status: "queued" as const, position: 2, total: 5, blinks: 0 },
+      { status: "accepted" as const, position: 5, total: 5, blinks: 0 },
+      { status: "failed" as const, position: 2, total: 5, blinks: 0 },
+      { status: "interrupted" as const, position: 2, total: 5, blinks: 0 },
+    ];
+
+    try {
+      for (const { status, position, total, blinks } of cases) {
+        const { state, run } = parallelCastState(1);
+        run.phase = "dispatching";
+        run.lanes["lane-0"]!.status = status;
+        run.lanes["lane-0"]!.progress = { position, total };
+
+        const plainRow = renderMateriaCastStatusWidget(state, 2_000).find((line) => line.includes("Stream 0"));
+        updateWidget(harness.ctx, state, { replaceOwner: true });
+        const themedRow = harness.renderWidget("materia", 78)?.find((line) => stripAnsi(line).includes("Stream 0"));
+
+        expect(themedRow).toBeDefined();
+        expect(stripAnsi(themedRow ?? "")).toBe(plainRow);
+        expect(visibleWidth(themedRow ?? "")).toBeLessThanOrEqual(78);
+        expect((themedRow?.match(/\u001b\[5m/g) ?? []).length).toBe(blinks);
+      }
+    } finally {
+      clearWidgetTicker(harness.ctx);
+    }
+  });
+
   test("hides parallel detail rows once fan-in starts", () => {
     const { state, run } = parallelCastState(2);
     run.phase = "awaiting_lanes";

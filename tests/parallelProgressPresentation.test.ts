@@ -190,8 +190,9 @@ describe("parallel progress presentation", () => {
       "warning",
       "warning",
       "warning",
-      "warning",
     ]);
+    expect(calls.filter(([, text]) => text === "|||||||").map(([role]) => role)).toEqual(["warning"]);
+    expect(calls.filter(([, text]) => text === "\u001b[5m|\u001b[25m").map(([role]) => role)).toEqual(["warning"]);
 
     for (const width of [1, 8, 18, 32]) {
       const narrowRows = formatParallelProgress(
@@ -202,4 +203,32 @@ describe("parallel progress presentation", () => {
       expect(narrowRows.every((row) => row.length > 0 && visibleWidth(row) <= width)).toBe(true);
     }
   });
+
+  test("blinks only the filled edge of running bars and preserves plain output", () => {
+    const theme = createMateriaSemanticTheme({
+      fg: (token, text) => `\u001b[38;5;${token === "warning" ? "214" : "39"}m${text}\u001b[39m`,
+    });
+    const cases = [
+      { lane: lane({ progress: { position: 2, total: 5 } }), blinks: 1 },
+      { lane: lane({ progress: { position: 1, total: 19 } }), blinks: 1 },
+      { lane: lane({ progress: { position: 5, total: 5 } }), blinks: 1 },
+      { lane: lane({ progress: { position: 0, total: 5 } }), blinks: 0 },
+      { lane: lane({ status: "queued", progress: { position: 2, total: 5 } }), blinks: 0 },
+      { lane: lane({ status: "accepted", progress: { position: 5, total: 5 } }), blinks: 0 },
+      { lane: lane({ status: "failed", progress: { position: 2, total: 5 } }), blinks: 0 },
+      { lane: lane({ status: "interrupted", progress: { position: 2, total: 5 } }), blinks: 0 },
+    ];
+
+    for (const { lane: current, blinks } of cases) {
+      const [plain] = formatParallelProgress([current], 80);
+      const [themed] = formatParallelProgress([current], 80, { theme });
+      expect(stripAnsi(themed ?? "")).toBe(plain);
+      expect(visibleWidth(themed ?? "")).toBeLessThanOrEqual(80);
+      expect((themed?.match(/\u001b\[5m/g) ?? []).length).toBe(blinks);
+    }
+  });
 });
+
+function stripAnsi(value: string): string {
+  return value.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "");
+}
