@@ -5,7 +5,7 @@ import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
 import { publishActiveLoadoutChange } from "../src/presentation/activeLoadoutEvents.js";
 import { createMateriaSemanticTheme } from "../src/presentation/theme.js";
 import { renderLoadoutListThemed, updateMateriaLoadoutWidget } from "../src/presentation/loadoutWidget.js";
-import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
+import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, showUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
 import type { ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
@@ -668,6 +668,36 @@ describe("persistent Materia widget formatting", () => {
     expect(lines).toEqual(["Usage total 19k tokens"]);
     expect(lines.join("\n")).not.toContain("estimated token value");
     expect(lines.join("\n")).not.toContain("billing");
+    expect(lines.join("\n")).not.toContain("\u001b[");
+  });
+
+  test("themes the persistent usage widget without changing wording or placement", () => {
+    const calls: Array<[string, string]> = [];
+    const harness = new FakePiHarness(process.cwd(), {
+      theme: {
+        fg: (token, text) => {
+          calls.push([token, text]);
+          return `\u001b[35m${text}\u001b[0m`;
+        },
+      },
+    });
+    const usage = totals(19381, 0.0497) as UsageReport;
+    const state = runState({ usage });
+
+    showUsageSummary(harness.ctx, state);
+
+    const themed = harness.renderWidget("materia-usage", 200) ?? [];
+    expect(themed.map(stripAnsi)).toEqual(renderCompactUsageWidget(usage));
+    expect(harness.widgets.get("materia-usage")?.options).toEqual({ placement: "belowEditor" });
+    expect(calls).toEqual([
+      ["muted", "Usage total"],
+      ["accent", "19k"],
+      ["dim", "tokens"],
+    ]);
+
+    const narrow = harness.renderWidget("materia-usage", 8) ?? [];
+    expect(narrow).toHaveLength(1);
+    expect(visibleWidth(narrow[0] ?? "")).toBeLessThanOrEqual(8);
   });
 
   test("truncates long persistent widget values instead of emitting extra lines", () => {

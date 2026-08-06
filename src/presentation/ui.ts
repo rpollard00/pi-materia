@@ -695,13 +695,38 @@ export function showUsageSummary(
   ctx: ExtensionContext,
   state: MateriaRunState,
 ): void {
-  ctx.ui.setWidget("materia-usage", renderCompactUsageWidget(state.usage), {
-    placement: "belowEditor",
-  });
+  const options = { placement: "belowEditor" as const };
+  const lines = renderCompactUsageWidget(state.usage);
+  if (supportsThemedWidgets(ctx)) {
+    ctx.ui.setWidget(
+      "materia-usage",
+      createMateriaThemedWidgetFactory(
+        (theme) => renderCompactUsageWidgetThemed(state.usage, theme),
+        { maxLines: 1 },
+      ),
+      options,
+    );
+    return;
+  }
+  ctx.ui.setWidget("materia-usage", lines, options);
 }
 
 export function renderCompactUsageWidget(usage: UsageReport): string[] {
   return [`Usage total ${formatCompactNumber(usage.tokens.total)} tokens`];
+}
+
+/** Render compact usage with the active Pi theme while preserving its wording. */
+export function renderCompactUsageWidgetThemed(
+  usage: UsageReport,
+  theme: MateriaSemanticTheme,
+): string[] {
+  return [
+    [
+      theme.fg("muted", "Usage total"),
+      theme.fg("accent", formatCompactNumber(usage.tokens.total)),
+      theme.fg("dim", "tokens"),
+    ].join(" "),
+  ];
 }
 
 export function renderUsageSummary(usage: UsageReport): string[] {
