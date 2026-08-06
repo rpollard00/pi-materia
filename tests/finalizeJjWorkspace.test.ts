@@ -110,6 +110,85 @@ describe("Finalize-JJ-Workspace", () => {
     expect(removed).toEqual(new Set(["integration", "source"]));
   });
 
+  test("retries an interrupted retirement without another base working commit", async () => {
+    const value = input(true, true);
+    let published = false;
+    let baseCreated = false;
+    let boundaryVisible = true;
+    let abandonCalls = 0;
+    let newCalls = 0;
+    let throwAfterRetirement = true;
+    const removed = new Set<string>();
+    const runJj = async (args: readonly string[], cwd: string) => {
+      if (args[0] === "status") return "The working copy has no changes.\\n";
+      if (args[0] === "bookmark") { published = true; return ""; }
+      if (args[0] === "new") { baseCreated = true; newCalls += 1; return ""; }
+      if (args[0] === "abandon") { boundaryVisible = false; abandonCalls += 1; return ""; }
+      const revision = String(args[args.indexOf("-r") + 1]);
+      if (revision.includes("conflicts()")) return "";
+      if (revision.includes("ancestors(")) return "";
+      if (revision === "boundary & visible()") return boundaryVisible ? details("boundary", "changeboundary", "base", false, true) : "";
+      if (revision === "base & visible()") return details("base", "changebase", "root", false, false);
+      if (revision === "changebase") return details("base", "changebase", "root", false, false);
+      if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+      if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);
+      if (revision === "blackbelt/test") return published ? details("final", "changefinal", "base", false, false) : details("boundary", "changeboundary", "root", false, true);
+      if (revision === "@" && cwd === repositoryRoot && baseCreated) {
+        if (!boundaryVisible && throwAfterRetirement) {
+          throwAfterRetirement = false;
+          throw new Error("simulated interruption after boundary retirement");
+        }
+        return details("working", "changeworking", "final", false, true);
+      }
+      throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
+    };
+    const backend = {
+      inspect: async (reference: any) => removed.has(reference.workspaceName) ? undefined : record(reference.workspaceName, reference.owner),
+      cleanup: async (reference: any) => { removed.add(reference.workspaceName); return {} as any; },
+    };
+
+    await expect(finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj })).rejects.toThrow("simulated interruption");
+    const retried = await finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj });
+    const repeated = await finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj });
+    expect(retried.cleanedWorkspaceNames).toEqual(["integration", "source"]);
+    expect(repeated.cleanedWorkspaceNames).toEqual(["integration", "source"]);
+    expect(abandonCalls).toBe(1);
+    expect(newCalls).toBe(1);
+  });
+
+  test("preserves a workflow boundary retained by another bookmark", async () => {
+    const value = input(true, true);
+    let published = false;
+    let baseCreated = false;
+    let abandonCalls = 0;
+    const runJj = async (args: readonly string[], cwd: string) => {
+      if (args[0] === "status") return "The working copy has no changes.\\n";
+      if (args[0] === "bookmark") { published = true; return ""; }
+      if (args[0] === "new") { baseCreated = true; return ""; }
+      if (args[0] === "abandon") { abandonCalls += 1; return ""; }
+      const revision = String(args[args.indexOf("-r") + 1]);
+      if (revision.includes("conflicts()")) return "";
+      if (revision === "boundary & visible()") return details("boundary", "changeboundary", "base", false, true);
+      if (revision === "base & visible()") return details("base", "changebase", "root", false, false);
+      if (revision.includes("ancestors(bookmarks())")) return "boundary\\n";
+      if (revision.includes("ancestors(")) return "";
+      if (revision === "changebase") return details("base", "changebase", "root", false, false);
+      if (revision === "changefinal") return details("final", "changefinal", "base", false, false);
+      if (revision === "@" && cwd === integrationPath) return details("review", "changereview", "final", false, true);
+      if (revision === "blackbelt/test") return published ? details("final", "changefinal", "base", false, false) : details("boundary", "changeboundary", "base", false, true);
+      if (revision === "@" && cwd === repositoryRoot && baseCreated) return details("working", "changeworking", "final", false, true);
+      throw new Error(`unexpected fake jj call: ${args.join(" ")}`);
+    };
+    const backend = {
+      inspect: async (reference: any) => record(reference.workspaceName, reference.owner),
+      cleanup: async () => ({} as any),
+    };
+
+    const result = await finalizeJjWorkspace({ ...value, bookmarkName: "blackbelt/test" }, { createBackend: () => backend as any, runJj });
+    expect(result.integrationRevision).toEqual({ commitId: "final", changeId: "changefinal" });
+    expect(abandonCalls).toBe(0);
+  });
+
   test("rejects mismatched duplicate cleanup references before inspection or mutation", async () => {
     const value = input(true);
     const cleanup = value.executionScope.exports[JJ_WORKSPACE_CLEANUP_EXPORT]!.value as any;
@@ -255,6 +334,76 @@ describe("Finalize-JJ-Workspace", () => {
     }
   });
 
+  test("retires an unreferenced consumed workflow boundary with real jj", async () => {
+    if (!(await hasJj())) return;
+    const repositoryRoot = await realRepository("boundary-retirement");
+    const realWorkspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-real-finalize-boundary-workspaces-"));
+    const base = await realIdentity("@", repositoryRoot);
+    await realJj(["new"], repositoryRoot);
+    const boundary = await realIdentity("@", repositoryRoot);
+    await realJj(["bookmark", "create", "blackbelt/test", "-r", boundary.commitId], repositoryRoot);
+    await realJj(["new", boundary.commitId, "-m", "feat: integrated"], repositoryRoot);
+    await writeFile(path.join(repositoryRoot, "integrated.txt"), "integrated\n");
+    const originalTip = await realIdentity("@", repositoryRoot);
+    await realJj(["rebase", "-r", originalTip.commitId, "-d", base.commitId], repositoryRoot);
+    const tip = await realIdentity(originalTip.changeId, repositoryRoot);
+    await realJj(["new", tip.commitId], repositoryRoot);
+
+    const backend = createJjWorkspaceBackend({ workspaceRoot: realWorkspaceRoot, repositoryRoot });
+    const workspace = await backend.createWorkspace({
+      cwd: repositoryRoot,
+      repositoryRoot,
+      workspaceRoot: realWorkspaceRoot,
+      parentCastId: "cast",
+      loopId: "integrate",
+      laneId: "integration-scope",
+      baseline: boundary,
+    });
+    await realJj(["new", tip.commitId], workspace.cwd);
+    const ownedWorkspace = {
+      owner: { ...workspace.owner },
+      workspaceRoot: workspace.workspaceRoot,
+      workspacePath: workspace.workspacePath,
+      workspaceName: workspace.workspaceName,
+      manifestPath: workspace.manifestPath,
+    };
+    const scope = createExecutionScope({ id: "integration-scope", cwd: workspace.cwd, exports: {
+      [JJ_WORKSPACE_INTEGRATION_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: {
+        version: 1,
+        backend: "jj",
+        outcome: "clean",
+        repositoryRoot,
+        integrationRevision: tip,
+        effectiveBase: base,
+        finalTip: tip,
+        orderedChangeIds: [tip.changeId],
+        provenanceTruncated: false,
+        removableWorkflowBoundary: { commitId: boundary.commitId, changeId: boundary.changeId, expectedParent: base },
+        ...ownedWorkspace,
+      } },
+      [JJ_WORKSPACE_CLEANUP_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", integration: ownedWorkspace, sources: [] } },
+    } });
+
+    const result = await finalizeJjWorkspace({
+      cwd: workspace.cwd,
+      executionScope: scope,
+      baseScope: createExecutionScope({ id: "cast:cast:base", cwd: repositoryRoot }),
+      state: { envelope: { satisfied: true } },
+      bookmarkName: "blackbelt/test",
+    });
+
+    expect(result.integrationRevision.changeId).toBe(tip.changeId);
+    expect(result.baseWorkingRevision.changeId).not.toBe(tip.changeId);
+    expect((await realJj(["log", "-r", `${boundary.commitId} & visible()`, "--no-graph", "-T", "commit_id"], repositoryRoot)).stdout.trim()).toBe("");
+    const working = await realIdentity("@", repositoryRoot);
+    const workingDetails = parseDetails((await realJj(["log", "-r", "@", "--no-graph", "-T", TEMPLATE], repositoryRoot)).stdout.trim());
+    expect(workingDetails.empty).toBe(true);
+    expect(workingDetails.parents).toEqual([result.integrationRevision.commitId]);
+    expect(working.commitId).toBe(result.baseWorkingRevision.commitId);
+    expect(await pathExists(workspace.workspacePath)).toBe(false);
+    expect((await realJj(["workspace", "list"], repositoryRoot)).stdout).not.toContain(`${workspace.workspaceName}:`);
+  });
+
   test("rejects stale schedule ordering and conflicted publish ancestry with real jj", async () => {
     if (!(await hasJj())) return;
 
@@ -309,7 +458,7 @@ describe("Finalize-JJ-Workspace", () => {
   });
 });
 
-function input(accepted: boolean) {
+function input(accepted: boolean, removableBoundary = false) {
   const integration = owned("integration", integrationOwner);
   const source = owned("source", sourceOwner);
   return {
@@ -320,6 +469,7 @@ function input(accepted: boolean) {
         integrationRevision: { commitId: "final", changeId: "changefinal" },
         effectiveBase: { commitId: "base", changeId: "changebase" },
         finalTip: { commitId: "final", changeId: "changefinal" }, orderedChangeIds: ["changefinal"], provenanceTruncated: false,
+        ...(removableBoundary ? { removableWorkflowBoundary: { commitId: "boundary", changeId: "changeboundary", expectedParent: { commitId: "base", changeId: "changebase" } } } : {}),
         ...integration,
       } },
       [JJ_WORKSPACE_CLEANUP_EXPORT]: { producer: "Integrate-JJ-Workspaces", value: { version: 1, backend: "jj", integration, sources: [{ laneId: "lane-a", ...source }] } },

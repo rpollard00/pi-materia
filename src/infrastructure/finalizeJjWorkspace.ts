@@ -13,6 +13,7 @@ import { JJ_WORKSPACE_CLEANUP_EXPORT, JJ_WORKSPACE_INTEGRATION_EXPORT } from "./
 
 export const FINALIZE_JJ_WORKSPACE_PRODUCER = "Finalize-JJ-Workspace";
 const REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
+const REVISION_EXISTS_TEMPLATE = 'commit_id ++ "\\n"';
 
 interface OwnedWorkspaceExport {
   owner: JjWorkspaceOwner;
@@ -227,23 +228,23 @@ async function retireWorkflowBoundary(
     throw new Error("Finalize-JJ-Workspace cannot retire the workflow boundary without preserving the verified empty base working commit.");
   }
 
-  // Re-read the recorded revision immediately before abandonment. The
-  // revision identity and its single effective-base parent are the complete
-  // authority for this narrow cleanup; never replace it with a broad revset.
-  const candidate = await readRevision(run, boundary.commitId, cwd);
-  if (!sameRevision(candidate, boundary)
-    || !candidate.empty
-    || candidate.conflict
-    || candidate.parents.length !== 1
-    || candidate.parents[0] !== boundary.expectedParent.commitId) {
-    throw new Error("Finalize-JJ-Workspace recorded workflow boundary no longer matches the verified empty single-parent candidate.");
-  }
-  const candidateParent = await readRevision(run, candidate.parents[0], cwd);
-  if (!sameRevision(candidateParent, boundary.expectedParent)) {
-    throw new Error("Finalize-JJ-Workspace recorded workflow boundary parent drifted before retirement.");
-  }
+  // Fan-in provenance is authority to consider one literal revision, not
+  // permission to rewrite a whole revset. Treat an already hidden revision as
+  // a successful retry, and otherwise fail closed when the exact revision no
+  // longer has the expected safe shape.
+  const preflight = await eligibleWorkflowBoundary(run, boundary, published, cwd);
+  if (!preflight) return;
+  // Workspace cleanup and publication can be interrupted independently. A
+  // second read immediately before abandon prevents a stale preflight from
+  // turning a concurrently retained or rewritten revision into cleanup.
+  const recheck = await eligibleWorkflowBoundary(run, boundary, published, cwd);
+  if (!recheck) return;
 
   await run(["abandon", boundary.commitId], cwd);
+  const remaining = await readRevisionIfPresent(run, `${boundary.commitId} & visible()`, cwd);
+  if (remaining) {
+    throw new Error("Finalize-JJ-Workspace workflow-boundary retirement could not hide the exact recorded revision.");
+  }
   const preservedBaseWorking = await readRevision(run, "@", cwd, false);
   if (!sameRevision(preservedBaseWorking, baseWorking)
     || preservedBaseWorking.empty !== baseWorking.empty
@@ -252,6 +253,43 @@ async function retireWorkflowBoundary(
     || preservedBaseWorking.parents[0] !== published.commitId) {
     throw new Error("Finalize-JJ-Workspace workflow-boundary retirement did not preserve the empty base working commit.");
   }
+}
+
+async function eligibleWorkflowBoundary(
+  run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>,
+  boundary: JjRemovableWorkflowBoundary,
+  published: JjRevisionIdentity,
+  cwd: string,
+): Promise<RevisionDetails | undefined> {
+  // `visible()` is important here: jj keeps an abandoned commit addressable by
+  // its commit id, so a plain literal lookup cannot distinguish an interrupted
+  // retirement from a live candidate.
+  const candidate = await readRevisionIfPresent(run, `${boundary.commitId} & visible()`, cwd);
+  if (!candidate
+    || !sameRevision(candidate, boundary)
+    || !candidate.empty
+    || candidate.conflict
+    || candidate.parents.length !== 1) {
+    return undefined;
+  }
+
+  const candidateParent = await readRevisionIfPresent(run, `${candidate.parents[0]} & visible()`, cwd);
+  if (!candidateParent || !sameRevision(candidateParent, boundary.expectedParent)) return undefined;
+
+  // Protect any externally retained history, not only a ref pointing at the
+  // candidate itself. Abandoning an ancestor would otherwise rewrite another
+  // bookmark, tag, remote bookmark, or working copy.
+  const protectedRevsets = [
+    `${candidate.commitId} & ancestors(${published.commitId})`,
+    `${candidate.commitId} & ancestors(bookmarks())`,
+    `${candidate.commitId} & ancestors(tags())`,
+    `${candidate.commitId} & ancestors(remote_bookmarks())`,
+    `${candidate.commitId} & ancestors(working_copies())`,
+  ];
+  for (const revset of protectedRevsets) {
+    if (await revsetHasRevision(run, revset, cwd)) return undefined;
+  }
+  return candidate;
 }
 
 async function readPublishedRetry(
@@ -372,12 +410,33 @@ function parseOwned(value: unknown, label: string): OwnedWorkspaceExport {
 }
 
 async function readRevision(run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>, revset: string, cwd: string, ignoreWorkingCopy = true): Promise<RevisionDetails> {
+  const revision = await readRevisionIfPresent(run, revset, cwd, ignoreWorkingCopy);
+  if (!revision) throw new Error(`Finalize-JJ-Workspace could not resolve one current revision for ${JSON.stringify(revset)}.`);
+  return revision;
+}
+
+async function readRevisionIfPresent(
+  run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>,
+  revset: string,
+  cwd: string,
+  ignoreWorkingCopy = true,
+): Promise<RevisionDetails | undefined> {
   const output = await run(["log", "-r", revset, "--no-graph", "-T", REVISION_TEMPLATE], cwd, ignoreWorkingCopy);
   const lines = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (!lines.length) return undefined;
   if (lines.length !== 1) throw new Error(`Finalize-JJ-Workspace could not resolve one current revision for ${JSON.stringify(revset)}.`);
   const [commitId, changeId, parents = "", conflict = "false", empty = "false"] = lines[0]!.split("\t");
   if (!commitId || !changeId) throw new Error("Finalize-JJ-Workspace could not read a jj revision identity.");
   return { commitId, changeId, parents: parents ? parents.split(",") : [], conflict: conflict.toLowerCase() === "true", empty: empty.toLowerCase() === "true" };
+}
+
+async function revsetHasRevision(
+  run: NonNullable<FinalizeJjWorkspaceDeps["runJj"]>,
+  revset: string,
+  cwd: string,
+): Promise<boolean> {
+  const output = await run(["log", "-r", revset, "--no-graph", "-T", REVISION_EXISTS_TEMPLATE], cwd);
+  return output.split(/\r?\n/).some((line) => line.trim().length > 0);
 }
 
 function agentAccepted(state: unknown): boolean { return isRecord(state) && isRecord(state.envelope) && state.envelope.satisfied === true; }
