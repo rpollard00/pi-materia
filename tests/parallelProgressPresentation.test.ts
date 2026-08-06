@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { ParallelLaneMonitorSummary } from "../src/application/parallelMonitoring.js";
+import { createMateriaSemanticTheme } from "../src/presentation/theme.js";
 import {
   formatParallelProgress,
   formatParallelProgressRows,
@@ -136,6 +137,48 @@ describe("parallel progress presentation", () => {
       const rows = formatParallelProgressRows([stage], width, { maxConcurrency: 1, style });
       expect(rows.every((row) => visibleWidth(row) <= width)).toBe(true);
       expect(rows.every((row) => row.length > 0)).toBe(true);
+    }
+  });
+
+  test("maps every lane state and bar segment to semantic theme roles", () => {
+    const calls: Array<[string, string]> = [];
+    const theme = createMateriaSemanticTheme({
+      fg: (token, text) => {
+        calls.push([token, text]);
+        return `\u001b[35m${text}\u001b[0m`;
+      },
+    });
+    const states = ["queued", "running", "accepted", "failed", "interrupted"] as const;
+    const rows = formatParallelProgress(
+      states.map((status, streamIndex) => lane({
+        laneId: `lane-${streamIndex}`,
+        name: `日本語 stream ${streamIndex}`,
+        streamIndex,
+        queueIndex: streamIndex,
+        status,
+        progress: { position: 2, total: 5 },
+        activeStage: { socketId: `Socket-${streamIndex}`, label: "Build", transitionedAt: streamIndex },
+      })),
+      80,
+      { maxConcurrency: 3, theme },
+    );
+
+    expect(rows).toHaveLength(6);
+    expect(calls).toContainEqual(["accent", "Parallel slots: 1/3 running"]);
+    expect(calls).toContainEqual(["accent", "||||||||"]);
+    expect(calls).toContainEqual(["dim", "            "]);
+    expect(calls).toContainEqual(["muted", "日本語 stream 0"]);
+    expect(calls).toContainEqual(["success", "Completed"]);
+    expect(calls).toContainEqual(["error", "Failed"]);
+    expect(calls).toContainEqual(["error", "Interrupted"]);
+
+    for (const width of [1, 8, 18, 32]) {
+      const narrowRows = formatParallelProgress(
+        [lane({ name: "日本語 stream with a long label", status: "interrupted", activeStage: { socketId: "Socket-1", label: "Build", transitionedAt: 1 } })],
+        width,
+        { theme, maxConcurrency: 1 },
+      );
+      expect(narrowRows.every((row) => row.length > 0 && visibleWidth(row) <= width)).toBe(true);
     }
   });
 });

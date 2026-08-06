@@ -147,7 +147,7 @@ function renderMateriaWidgetController(controller: MateriaWidgetController): voi
   setMateriaWidgetLines(
     controller.ctx,
     controller.lines,
-    (theme) => renderMateriaWidgetStateThemed(controller.state, theme),
+    (theme, width) => renderMateriaWidgetStateThemed(controller.state, theme, width),
   );
 }
 
@@ -172,6 +172,11 @@ function setMateriaWidgetLines(
 
 function supportsThemedWidgets(ctx: ExtensionContext): boolean {
   return ctx.mode === "tui" && typeof ctx.ui.theme?.fg === "function";
+}
+
+function normalizeThemedWidgetWidth(width: number): number {
+  if (!Number.isFinite(width)) return WIDGET_MAX_LINE_LENGTH;
+  return Math.max(1, Math.floor(width));
 }
 
 function ensureMateriaWidgetControllerTicker(controller: MateriaWidgetController): void {
@@ -309,9 +314,10 @@ export function renderMateriaCastStatusWidget(
 function renderMateriaWidgetStateThemed(
   state: MateriaWidgetState,
   theme: MateriaSemanticTheme,
+  width = WIDGET_MAX_LINE_LENGTH,
 ): string[] {
   return isMateriaCastWidgetState(state)
-    ? renderMateriaCastStatusWidgetThemed(state, theme)
+    ? renderMateriaCastStatusWidgetThemed(state, theme, width)
     : renderMateriaRunWidgetThemed(state, theme);
 }
 
@@ -328,12 +334,18 @@ function renderMateriaRunWidgetThemed(
 function renderMateriaCastStatusWidgetThemed(
   state: MateriaCastState,
   theme: MateriaSemanticTheme,
+  width = WIDGET_MAX_LINE_LENGTH,
 ): string[] {
   const baseLines = renderMateriaStatusWidgetThemed(
     createMateriaCastStatusModel(state, Date.now()),
     theme,
   );
-  return appendParallelProgressRows(baseLines, state);
+  return appendParallelProgressRows(
+    baseLines,
+    state,
+    Math.min(WIDGET_MAX_LINE_LENGTH, normalizeThemedWidgetWidth(width)),
+    theme,
+  );
 }
 
 export type MateriaStatusSegmentKind =
@@ -501,11 +513,14 @@ function activeParallelRun(state: MateriaCastState): ParallelRunMonitorSummary |
 function appendParallelProgressRows(
   baseLines: string[],
   state: MateriaCastState,
+  width = WIDGET_MAX_LINE_LENGTH,
+  theme?: MateriaSemanticTheme,
 ): string[] {
   const summary = activeParallelRun(state);
   if (!summary || !isLiveParallelSummary(state, summary)) return baseLines;
 
-  const progressRows = formatParallelProgressRows(summary, WIDGET_MAX_LINE_LENGTH);
+  const options = theme ? { theme } : undefined;
+  const progressRows = formatParallelProgressRows(summary, width, options);
   const availableRows = MATERIA_WIDGET_MAX_LINES - MATERIA_BASE_WIDGET_LINES;
   if (progressRows.length <= availableRows) return [...baseLines, ...progressRows];
 
@@ -514,7 +529,12 @@ function appendParallelProgressRows(
   const overflowLabel = omittedRows === 1
     ? "… 1 more parallel lane"
     : `… ${omittedRows} more parallel lanes`;
-  return [...baseLines, ...visibleRows, truncateLine(overflowLabel)];
+  const boundedOverflow = truncateLine(overflowLabel);
+  return [
+    ...baseLines,
+    ...visibleRows,
+    theme ? theme.fg("dim", boundedOverflow) : boundedOverflow,
+  ];
 }
 
 function isLiveParallelSummary(

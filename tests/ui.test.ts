@@ -158,6 +158,45 @@ describe("persistent Materia widget formatting", () => {
     }
   });
 
+  test("themes parallel rows through the shared widget while preserving plain rows", () => {
+    const tokens: string[] = [];
+    const harness = new FakePiHarness(process.cwd(), {
+      theme: {
+        fg: (token, text) => {
+          tokens.push(token);
+          return `\u001b[35m${text}\u001b[0m`;
+        },
+      },
+    });
+    const { state, run } = parallelCastState(5);
+    run.phase = "dispatching";
+    const statuses = ["running", "accepted", "queued", "failed", "interrupted"] as const;
+    statuses.forEach((status, index) => {
+      const current = run.lanes[`lane-${index}`]!;
+      current.status = status;
+      current.progress.position = 2;
+      if (status === "running" || status === "failed" || status === "interrupted") {
+        current.activeStage = {
+          socketId: `Socket-${index}`,
+          label: "Build",
+          transitionedAt: index + 1,
+        };
+      }
+    });
+    state.runState.endedAt = 2_000;
+    const plain = renderMateriaCastStatusWidget(state, 2_000);
+
+    try {
+      updateWidget(harness.ctx, state, { replaceOwner: true });
+      const themed = harness.renderWidget("materia", 78) ?? [];
+      expect(themed.map(stripAnsi)).toEqual(plain);
+      expect(themed.every((line) => visibleWidth(line) <= 78)).toBe(true);
+      expect(tokens).toEqual(expect.arrayContaining(["accent", "success", "muted", "dim", "error"]));
+    } finally {
+      clearWidgetTicker(harness.ctx);
+    }
+  });
+
   test("renders configured loadout when no cast widget is active", () => {
     const lines = renderConfiguredLoadoutWidget("Review");
     expect(lines).toHaveLength(3);

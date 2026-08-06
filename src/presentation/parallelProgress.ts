@@ -4,11 +4,26 @@ import type {
   ParallelLaneMonitorSummary,
   ParallelRunMonitorSummary,
 } from "../application/parallelMonitoring.js";
+import type {
+  MateriaSemanticTheme,
+  MateriaThemeRole,
+} from "./theme.js";
 
-export type ParallelProgressPart = "aggregate" | "bar" | "name" | "stage" | "detail" | "status";
+export type ParallelProgressPart =
+  | "aggregate"
+  | "bar"
+  | "border"
+  | "fill"
+  | "track"
+  | "name"
+  | "stage"
+  | "detail"
+  | "status";
 
 export interface ParallelProgressFormatOptions {
-  /** Optional late-bound theming. The formatter remains ANSI-width aware. */
+  /** Optional late-bound semantic theme. Plain formatters stay ANSI-free without it. */
+  theme?: MateriaSemanticTheme;
+  /** Optional styling hook for callers that need presentation-specific output. */
   style?: (
     text: string,
     status: ParallelLaneMonitorSummary["status"],
@@ -121,8 +136,8 @@ function formatLane(
   const nonBarWidth = 1 + visibleWidth(detail) + 1 + visibleWidth(status) + 3;
   const desiredBarWidth = Math.min(maxBarWidth, Math.max(1, Math.floor(width / 4)));
   const barWidth = Math.max(1, Math.min(desiredBarWidth, width - nonBarWidth - 1));
-  const bar = progressBar(position, total, barWidth);
-  const fixedWidth = visibleWidth(bar) + visibleWidth(detail) + visibleWidth(status)
+  const bar = progressBar(position, total, barWidth, lane.status, options);
+  const fixedWidth = barWidth + 2 + visibleWidth(detail) + visibleWidth(status)
     + (stage ? 4 : 3);
   const flexibleWidth = Math.max(0, width - fixedWidth);
   const stageWidth = stage
@@ -131,14 +146,13 @@ function formatLane(
   const nameWidth = Math.max(1, flexibleWidth - stageWidth);
   const boundedName = truncateToWidth(name, nameWidth, "…");
   const boundedStage = stage ? truncateToWidth(stage, stageWidth, "…") : undefined;
-  const style = options.style ?? ((text: string) => text);
 
   const line = [
-    style(bar, lane.status, "bar"),
-    style(boundedName, lane.status, "name"),
-    ...(boundedStage ? [style(boundedStage, lane.status, "stage")] : []),
-    style(detail, lane.status, "detail"),
-    style(status, lane.status, "status"),
+    bar,
+    styleText(boundedName, lane.status, "name", options),
+    ...(boundedStage ? [styleText(boundedStage, lane.status, "stage", options)] : []),
+    styleText(detail, lane.status, "detail", options),
+    styleText(status, lane.status, "status", options),
   ].join(" ");
   return truncateToWidth(line, width, "");
 }
@@ -177,8 +191,7 @@ function formatAggregateRow(
     : visibleWidth(compact) <= width
       ? compact
       : ratio;
-  const style = options.style ?? ((value: string) => value);
-  return truncateToWidth(style(text, "running", "aggregate"), width, "");
+  return truncateToWidth(styleText(text, "running", "aggregate", options), width, "");
 }
 
 function validMaxConcurrency(value: unknown): number | undefined {
@@ -209,9 +222,49 @@ function boundedProgress(progress: ProgressLane["progress"]): { position: number
   return { position: Math.min(total, Math.max(0, rawPosition)), total };
 }
 
-function progressBar(position: number, total: number, width: number): string {
+function progressBar(
+  position: number,
+  total: number,
+  width: number,
+  status: ProgressLane["status"],
+  options: ParallelProgressFormatOptions,
+): string {
   const filled = total === 0 ? 0 : Math.min(width, Math.max(0, Math.floor((position / total) * width)));
-  return `[${"|".repeat(filled)}${" ".repeat(width - filled)}]`;
+  const border = progressRole(status, "border");
+  return [
+    styleText("[", status, "border", options, border),
+    styleText("|".repeat(filled), status, "fill", options),
+    styleText(" ".repeat(width - filled), status, "track", options),
+    styleText("]", status, "border", options, border),
+  ].join("");
+}
+
+function styleText(
+  text: string,
+  status: ProgressLane["status"],
+  part: ParallelProgressPart,
+  options: ParallelProgressFormatOptions,
+  role = progressRole(status, part),
+): string {
+  if (text.length === 0) return "";
+  if (options.style) return options.style(text, status, part);
+  return options.theme ? options.theme.fg(role, text) : text;
+}
+
+function progressRole(
+  status: ProgressLane["status"],
+  part: ParallelProgressPart,
+): MateriaThemeRole {
+  if (part === "aggregate") return "accent";
+  if (part === "track") return "dim";
+  switch (status) {
+    case "running": return "accent";
+    case "accepted": return "success";
+    case "failed":
+    case "interrupted": return "error";
+    case "queued": return "muted";
+    default: return "text";
+  }
 }
 
 function stageLabel(lane: ProgressLane): string | undefined {
