@@ -154,6 +154,7 @@ export interface ChildCastStreamEvent {
 export interface ChildCastRecoveryDescriptor {
   identity: ChildCastIdentity;
   request: string;
+  /** Stable child-process/session cwd; the active execution scope may move to another workspace. */
   cwd: string;
   compiledLoadout: ChildCastCompiledLoadout;
   paths: ChildCastPaths;
@@ -334,8 +335,10 @@ export function validateChildCastRecoveryDescriptor(input: unknown): ChildCastRe
     throw new Error("Child cast recovery descriptor compiledLoadout must contain a loadout and initialData object.");
   }
   if (!isRecord(input.executionScope)) throw new Error("Child cast recovery descriptor executionScope must be an object.");
+  // Recovery retains both the Pi session's process cwd and its current active
+  // execution scope. A utility may have moved that scope to a branch workspace,
+  // so unlike an initial child start these two cwd values need not be equal.
   const scope = cloneExecutionScope(input.executionScope as ExecutionScope);
-  if (scope.cwd !== cwd) throw new Error("Child cast recovery descriptor executionScope.cwd must match cwd.");
   const attempt = input.attempt;
   if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) throw new Error("Child cast recovery descriptor attempt must be a positive safe integer.");
   const usageBaseline = validateUsage(input.usageBaseline, "usageBaseline");

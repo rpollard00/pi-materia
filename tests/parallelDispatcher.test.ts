@@ -1182,6 +1182,40 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(state.runState.usage.cost.total).toBeCloseTo(1.5);
   });
 
+  test("recovers a retained lane after its active execution scope moved away from the child session cwd", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const initial = new ParallelLoopDispatcher({ children: childRunner, state: { saveCastState: () => undefined } });
+    await initial.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    const children = childRunner.listSnapshots();
+    const childFor = (laneId: string) => children.find((child) => child.identity.laneId === laneId)!;
+    const workspaceScope = createExecutionScope({
+      id: state.parallelRuns!.build!.lanes["lane-b"]!.executionScope!.id,
+      cwd: "/tmp/workspaces/lane-b",
+      state: { branch: "lane-b" },
+      exports: { workspace: { producer: "spawn", value: { path: "/tmp/workspaces/lane-b" } } },
+    });
+    childRunner.complete(childFor("lane-a").identity.childCastId);
+    childRunner.complete(childFor("lane-b").identity.childCastId, { accepted: false, executionScope: workspaceScope });
+    childRunner.complete(childFor("lane-c").identity.childCastId);
+    await flush(childRunner);
+
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.executionScope).toEqual(workspaceScope);
+    const recovered = new ParallelLoopDispatcher({ children: childRunner, state: { saveCastState: () => undefined } });
+    await recovered.revive({
+      pi: {} as any,
+      ctx: {} as any,
+      state,
+      loopId: "build",
+      config: { maxConcurrency: 3 },
+      laneIds: ["lane-b"],
+    });
+
+    const revived = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-b")!;
+    expect(revived).toMatchObject({ attempt: 2, operation: "revive", cwd: state.cwd });
+    expect(revived.executionScope).toEqual(workspaceScope);
+  });
+
   test("recovers only selected lanes with the requested operation and preserves the other failed lane", async () => {
     const state = makeState();
     const childRunner = createFakeChildCastRunner({ now: () => 10 });

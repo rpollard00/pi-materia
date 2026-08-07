@@ -126,6 +126,27 @@ describe("application child cast runner port", () => {
     expect(recast.snapshot.executionScope).toEqual(executionScope);
   });
 
+  test("retains the child session cwd when its active execution scope moved to a workspace", async () => {
+    const runner = createFakeChildCastRunner({ now: () => 40 });
+    const input = startInput();
+    await runner.start(input);
+    const workspaceScope = {
+      id: "branch-workspace-scope",
+      cwd: "/tmp/workspaces/lane-1",
+      state: { branch: "lane-1" },
+      exports: { workspace: { producer: "spawn", value: { path: "/tmp/workspaces/lane-1" } } },
+    };
+    runner.complete("child-1", { accepted: false, executionScope: workspaceScope });
+
+    const descriptor = createChildCastRecoveryDescriptor(runner.getSnapshot("child-1")!);
+    expect(descriptor.cwd).toBe(input.cwd);
+    expect(descriptor.executionScope).toEqual(workspaceScope);
+
+    const revived = await runner.revive({ recovery: descriptor });
+    expect(revived.snapshot.cwd).toBe(input.cwd);
+    expect(revived.snapshot.executionScope).toEqual(workspaceScope);
+  });
+
   test("rejects explicit recovery while active and after acceptance", async () => {
     const runner = createFakeChildCastRunner();
     const started = await runner.start(startInput());

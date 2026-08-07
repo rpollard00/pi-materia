@@ -371,7 +371,7 @@ export class ParallelLoopDispatcher {
         if (observation && !lane.childSession) {
           issues.push({ code: "child_session_missing", path: `lanes.${laneId}.childSession`, laneId, message: "a retained child exists but its durable session provenance is missing" });
         } else if (observation && lane.childSession) {
-          try { assertRecoverySnapshot(run, lane, preparedLane, observation.snapshot, input.state.request); }
+          try { assertRecoverySnapshot(run, lane, preparedLane, observation.snapshot, input.state.request, input.state.cwd); }
           catch (error) { issues.push({ code: "child_session_drift", path: `lanes.${laneId}.childSession`, laneId, message: boundedFailureReason(parallelErrorMessage(error)) }); }
         }
       }
@@ -413,7 +413,7 @@ export class ParallelLoopDispatcher {
       const observation = lane.childCastId ? await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined) : undefined;
       if (lane.childSession) {
         if (!lane.childCastId) throw new Error(`Parallel ${operation} lane ${JSON.stringify(lane.laneId)} is missing its child identity.`);
-        if (observation) assertRecoverySnapshot(original, lane, prepared, observation.snapshot, input.state.request);
+        if (observation) assertRecoverySnapshot(original, lane, prepared, observation.snapshot, input.state.request, input.state.cwd);
         prepared.recoveryChildCastId = lane.childCastId;
         prepared.recoveryScope = cloneExecutionScope(observation?.snapshot.executionScope ?? lane.executionScope!);
         // A fresh runner has no in-memory replay tail. Its reconstructed
@@ -435,7 +435,9 @@ export class ParallelLoopDispatcher {
         const observedDescriptor = observation ? createChildCastRecoveryDescriptor(observation.snapshot) : {
           identity: { childCastId: lane.childCastId, parentCastId: original.parentCastId, loopId: original.loopId, laneId: lane.laneId },
           request: input.state.request,
-          cwd: lane.executionScope!.cwd,
+          // The retained Pi session stays rooted at the cast cwd even when a
+          // utility moved its active execution scope into a branch workspace.
+          cwd: input.state.cwd,
           compiledLoadout: expectedChildCompiledLoadout(original, prepared),
           paths: childSessionPaths(lane.childSession),
           executionScope: cloneExecutionScope(lane.executionScope!),
@@ -623,7 +625,7 @@ export class ParallelLoopDispatcher {
           await this.#abortChild(childCastId, "parallel launch superseded");
           return;
         }
-        assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, recovered.snapshot, state.request);
+        assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, recovered.snapshot, state.request, state.cwd);
         // Recovery is owned by the child runner and may intentionally retain
         // its original session. Persist those actual paths instead of
         // speculative paths for the parent's new lane attempt.
@@ -1330,7 +1332,7 @@ function parallelGraphHash(prepared: readonly PreparedLane[]): string {
   }));
   return createHash("sha256").update(JSON.stringify(graph)).digest("hex");
 }
-function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, snapshot: ChildCastSnapshot, request?: string): void {
+function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, snapshot: ChildCastSnapshot, request?: string, childProcessCwd?: string): void {
   if (snapshot.identity.childCastId !== lane.childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId) {
     throw new Error(`Parallel recovery child identity drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
@@ -1345,9 +1347,9 @@ function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParal
   if (!lane.executionScope || !sameJson(snapshot.executionScope, lane.executionScope)) {
     throw new Error(`Parallel recovery execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
-  if (snapshot.cwd !== lane.executionScope.cwd) throw new Error(`Parallel recovery child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (childProcessCwd !== undefined && snapshot.cwd !== childProcessCwd) throw new Error(`Parallel recovery child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
 }
-function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, childCastId: string, attempt: number, scope: NonNullable<MateriaParallelLaneState["executionScope"]>, snapshot: ChildCastSnapshot, request?: string): void {
+function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, childCastId: string, attempt: number, scope: NonNullable<MateriaParallelLaneState["executionScope"]>, snapshot: ChildCastSnapshot, request?: string, childProcessCwd?: string): void {
   if (snapshot.identity.childCastId !== childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId || snapshot.attempt !== attempt) {
     throw new Error(`Parallel recovered child identity or attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
@@ -1359,7 +1361,7 @@ function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParall
     throw new Error(`Parallel recovered child graph or initial-data drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
   if (!sameJson(snapshot.executionScope, scope)) throw new Error(`Parallel recovered child execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
-  if (snapshot.cwd !== scope.cwd) throw new Error(`Parallel recovered child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (childProcessCwd !== undefined && snapshot.cwd !== childProcessCwd) throw new Error(`Parallel recovered child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
 }
 function expectedChildCompiledLoadout(run: MateriaParallelRunState, prepared: PreparedLane): ChildCastSnapshot["compiledLoadout"] {
   return {
