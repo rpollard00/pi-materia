@@ -6,3 +6,4 @@ export * from "./handoff.js";
 export * from "./workflowTransitions.js";
 export * from "./parallelArtifacts.js";
 export * from "./parallelMonitoring.js";
+export * from "../domain/parallelRecovery.js";

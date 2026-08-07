@@ -9,6 +9,12 @@ import { createConfigLinkTargetRegistry, resolveLinkTargets } from "../link/reso
 import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTargetRef, type ResolvedMateriaLinkTarget, type VirtualLoadoutMetadata } from "../link/types.js";
 import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, resumeQuest, startQuest, stopQuestRunner, unfailQuest, updatePendingQuest, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
+import {
+  parseParallelRecoveryTarget,
+  resolveParallelRecoveryTarget as resolveParallelRecoveryTargetFromState,
+  type ParallelRecoveryOperation,
+  type ResolvedParallelRecoveryTarget,
+} from "../domain/parallelRecovery.js";
 
 export interface LoadoutUseCasesDeps {
   configs: ConfigRepository;
@@ -194,6 +200,13 @@ export class ActiveCastConflictError extends Error {
   }
 }
 
+export class ParallelRecoveryTargetError extends Error {
+  readonly code = "parallel_recovery_target";
+  constructor(readonly issues: readonly DomainIssue[]) {
+    super(issues.map((issue) => `${issue.path}: ${issue.message}`).join("; "));
+  }
+}
+
 export interface CastCatalogUseCasesDeps<TSession = unknown> {
   configs: ConfigRepository;
   states: Pick<CastStateRepository<TSession>, "listLatest">;
@@ -295,6 +308,13 @@ function parseCastBudgetTokenText(value: string): number | undefined {
 
 function consumedTokensFor(state: MateriaCastState): number {
   return state.runState.usage.tokens.total;
+}
+
+function isParallelRecoveryTargetInput<TSession>(value: unknown): value is { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string } {
+  return typeof value === "object"
+    && value !== null
+    && "session" in value
+    && "operation" in value;
 }
 
 export class CastBudgetTargetError extends Error {
@@ -479,6 +499,53 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     if (!castId) return undefined;
     await this.deps.lifecycle.revive(pi, session, castId);
     return castId;
+  }
+
+  /**
+   * Parse and resolve a numbered parallel recovery target without dispatching
+   * any lifecycle work. No-argument and cast-only forms resolve to `bulk` so
+   * callers can retain the historical parent-level command behavior.
+   */
+  resolveParallelRecoveryTarget(input: {
+    session: TSession;
+    operation: ParallelRecoveryOperation;
+    argumentsText?: string;
+  }): ResolvedParallelRecoveryTarget;
+  resolveParallelRecoveryTarget(session: TSession, operation: ParallelRecoveryOperation, argumentsText?: string): ResolvedParallelRecoveryTarget;
+  resolveParallelRecoveryTarget(
+    sessionOrInput: TSession | { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string },
+    operation?: ParallelRecoveryOperation,
+    argumentsText = "",
+  ): ResolvedParallelRecoveryTarget {
+    const input = operation === undefined && isParallelRecoveryTargetInput(sessionOrInput)
+      ? sessionOrInput
+      : { session: sessionOrInput as TSession, operation: operation ?? "revive", argumentsText };
+    const parsed = parseParallelRecoveryTarget(input.argumentsText);
+    if (!parsed.ok) throw new ParallelRecoveryTargetError(parsed.issues);
+    const resolved = resolveParallelRecoveryTargetFromState({
+      target: parsed.value,
+      states: this.deps.states.listLatest(input.session),
+      operation: input.operation,
+    });
+    if (!resolved.ok) throw new ParallelRecoveryTargetError(resolved.issues);
+    return resolved.value;
+  }
+
+  /** Explicitly named alias for command adapters that use the full target name. */
+  resolveParallelRecoveryCommandTarget(input: {
+    session: TSession;
+    operation: ParallelRecoveryOperation;
+    argumentsText?: string;
+  }): ResolvedParallelRecoveryTarget;
+  resolveParallelRecoveryCommandTarget(session: TSession, operation: ParallelRecoveryOperation, argumentsText?: string): ResolvedParallelRecoveryTarget;
+  resolveParallelRecoveryCommandTarget(
+    sessionOrInput: TSession | { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string },
+    operation?: ParallelRecoveryOperation,
+    argumentsText = "",
+  ): ResolvedParallelRecoveryTarget {
+    return operation === undefined && isParallelRecoveryTargetInput(sessionOrInput)
+      ? this.resolveParallelRecoveryTarget(sessionOrInput)
+      : this.resolveParallelRecoveryTarget(sessionOrInput as TSession, operation ?? "revive", argumentsText);
   }
 
   async reactivateQueuedCast(pi: TPi, session: TSession, castId: string): Promise<MateriaCastState> {
