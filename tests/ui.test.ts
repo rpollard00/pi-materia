@@ -6,7 +6,7 @@ import { publishActiveLoadoutChange } from "../src/presentation/activeLoadoutEve
 import { createMateriaSemanticTheme } from "../src/presentation/theme.js";
 import { renderLoadoutListThemed, updateMateriaLoadoutWidget } from "../src/presentation/loadoutWidget.js";
 import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, showUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
-import type { ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
+import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
 import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
 
@@ -616,7 +616,8 @@ describe("persistent Materia widget formatting", () => {
       state.runState.endedAt = 3_000;
       updateWidget(ctx, state);
       expect(materiaWidget()).toHaveLength(3);
-      expect(materiaWidget()?.[2]).toContain("Auto-Eval");
+      expect(materiaWidget()?.[2]).toContain("lanes:1,2");
+      expect(materiaWidget()?.[2]).toContain("Auto-E…");
       expect(materiaWidget()?.join("\n")).not.toContain("Parallel slots:");
     } finally {
       clearWidgetTicker(ctx);
@@ -699,6 +700,18 @@ describe("persistent Materia widget formatting", () => {
       updatedAt: 1,
     } satisfies ParallelRunMonitorSummary;
     expect(formatParallelRunCompactStatus(summary)).toBe("parallel build q1 r1 a1 f1 i1 barrier:waiting 3/5");
+  });
+
+  test("includes stable lane numbers in the compact status after acceptance and revival attempts", () => {
+    const { run } = parallelCastState(2);
+    run.lanes["lane-0"]!.status = "accepted";
+    run.lanes["lane-1"]!.status = "failed";
+    run.lanes["lane-1"]!.attempt = 3;
+    const summary = summarizeParallelRun(run);
+
+    expect(formatParallelRunCompactStatus(summary)).toContain("lanes:1,2");
+    expect(formatParallelRunCompactStatus(summary)).not.toContain("lane-0");
+    expect(summary.lanes.map((lane) => [lane.queueIndex, lane.attempt])).toEqual([[0, 1], [1, 3]]);
   });
 
   test("renders compact completion usage without billing disclaimers", () => {

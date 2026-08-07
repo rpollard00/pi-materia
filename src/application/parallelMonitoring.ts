@@ -14,6 +14,7 @@ export interface ParallelLaneMonitorSummary {
   laneId: string;
   name: string;
   streamIndex: number;
+  /** Immutable zero-based queue position; use {@link parallelLaneNumber} for display. */
   queueIndex: number;
   workItemIndexes: number[];
   status: MateriaParallelLaneState["status"];
@@ -71,6 +72,18 @@ export interface ParallelRunMonitorSummary {
   lanes: ParallelLaneMonitorSummary[];
   updatedAt: number;
   endedAt?: number;
+}
+
+/** Convert the persisted zero-based queue position to the operator-facing number. */
+export function parallelLaneNumber(queueIndex: number): number | undefined {
+  return Number.isSafeInteger(queueIndex) && queueIndex >= 0 && queueIndex < Number.MAX_SAFE_INTEGER
+    ? queueIndex + 1
+    : undefined;
+}
+
+export function formatParallelLaneNumber(queueIndex: number): string {
+  const number = parallelLaneNumber(queueIndex);
+  return number === undefined ? "Lane ?" : `Lane ${number}`;
 }
 
 /** Build a bounded monitor DTO without exposing diagnostics or mutable state. */

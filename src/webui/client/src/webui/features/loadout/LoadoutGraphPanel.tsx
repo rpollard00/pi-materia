@@ -610,7 +610,7 @@ function ParallelLoopStatusDetails({ summary, loopId }: { summary: NonNullable<L
         <ul aria-label={`Parallel branches for ${loopId}`}>
           {summary.lanes.map((lane) => (
             <li key={`${lane.laneId}:${lane.attempt}`} aria-label={parallelLaneAccessibleLabel(lane)}>
-              <strong>{lane.laneId}</strong> <span>{formatParallelLaneStatus(lane)}</span>
+              <strong>{formatParallelLaneStatus(lane)}</strong> <span>({lane.laneId})</span>
               <small>Scope: <code>{lane.scope ? `${lane.scope.id} · ${lane.scope.cwd}` : 'pending'}</code>; exports: <code>{lane.scope?.exportNames.join(', ') || 'none'}</code>; artifacts: <code>{lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'pending'}</code></small>
               {lane.output && <small>Output: <code>{lane.output}</code></small>}
               {lane.failureReason && <small>Cancellation/failure: {lane.failureReason}</small>}

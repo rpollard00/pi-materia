@@ -30,6 +30,7 @@ describe("parallel progress presentation", () => {
     ], 80);
 
     expect(lines.map((line) => line.match(/Stream \d/)?.[0])).toEqual(["Stream 1", "Stream 2", "Stream 3"]);
+    expect(lines.map((line) => stripAnsi(line).match(/Lane \d/)?.[0])).toEqual(["Lane 3", "Lane 2", "Lane 1"]);
     expect(lines[0]).toContain("60% (3/5) Running");
     expect(lines[1]).toContain("33% (1/3) Running");
     expect(lines[2]).toContain("20% (2/10) Running");
@@ -49,7 +50,10 @@ describe("parallel progress presentation", () => {
 
     const [moderate] = formatParallelProgress(input, 42);
     expect(moderate).toContain("…");
+    expect(moderate).toContain("Lane 1");
     expect(moderate).toContain("60% (3/5) Failed");
+    const [narrow] = formatParallelProgress(input, 24);
+    expect(stripAnsi(narrow ?? "")).toContain("Lane 1");
   });
 
   test("publishes visible, sanitized string rows for the host widget path", () => {
@@ -75,6 +79,7 @@ describe("parallel progress presentation", () => {
     ], 100);
 
     expect(lines).toHaveLength(5);
+    expect(lines[0]).toContain("Lane 1");
     expect(lines[0]).toContain("100% (5/5) Completed");
     expect(lines[1]).toContain("40% (2/5) Running");
     expect(lines[2]).toContain("0% (0/5) Queued");
@@ -167,7 +172,7 @@ describe("parallel progress presentation", () => {
     expect(calls).toContainEqual(["accent", "Parallel slots: 1/3 running"]);
     expect(calls).toContainEqual(["warning", "||||||||"]);
     expect(calls).toContainEqual(["dim", "            "]);
-    expect(calls).toContainEqual(["muted", "日本語 stream 0"]);
+    expect(calls).toContainEqual(["muted", "Lane 1 · 日本語 stream 0"]);
     expect(calls).toContainEqual(["success", "Completed"]);
     expect(calls).toContainEqual(["error", "Failed"]);
     expect(calls).toContainEqual(["error", "Interrupted"]);

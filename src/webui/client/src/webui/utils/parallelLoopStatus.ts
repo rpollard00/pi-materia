@@ -1,16 +1,25 @@
-import type { ParallelLaneMonitorSummary, ParallelRunMonitorSummary } from '../../../../../application/parallelMonitoring.js';
+import {
+  formatParallelLaneNumber,
+  parallelLaneNumber,
+  type ParallelLaneMonitorSummary,
+  type ParallelRunMonitorSummary,
+} from '../../../../../application/parallelMonitoring.js';
 
 /** Human-readable aggregate status for a symbolic loop header. */
 export function formatParallelLoopStatus(summary: ParallelRunMonitorSummary): string {
   const { counts } = summary;
+  const laneNumbers = summary.lanes
+    .map((lane) => parallelLaneNumber(lane.queueIndex))
+    .filter((number): number is number => number !== undefined);
   return [
+    laneNumbers.length > 0 ? `Lanes ${laneNumbers.join(', ')}` : undefined,
     `Queued ${counts.queued}`,
     `Running ${counts.running}`,
     `Accepted ${counts.accepted}`,
     `Failed ${counts.failed}`,
     `Interrupted ${counts.interrupted}`,
     `Barrier ${summary.barrier.phase} ${counts.barrierReached}/${counts.total}`,
-  ].join(' · ');
+  ].filter((value): value is string => value !== undefined).join(' · ');
 }
 
 /**
@@ -20,9 +29,9 @@ export function formatParallelLoopStatus(summary: ParallelRunMonitorSummary): st
 export function parallelLaneAccessibleLabel(lane: ParallelLaneMonitorSummary): string {
   const artifact = lane.childSession?.artifactRoot ?? lane.childSession?.runDirectory ?? 'artifact pending';
   const scope = lane.scope ? `${lane.scope.id} at ${lane.scope.cwd}` : 'scope pending';
-  return `${lane.laneId} (${lane.status}, attempt ${lane.attempt}), ${scope}, child artifacts ${artifact}`;
+  return `${formatParallelLaneNumber(lane.queueIndex)} (${lane.laneId}, ${lane.status}, attempt ${lane.attempt}), ${scope}, child artifacts ${artifact}`;
 }
 
 export function formatParallelLaneStatus(lane: ParallelLaneMonitorSummary): string {
-  return `${lane.name} · ${lane.status} · attempt ${lane.attempt} · items ${lane.workItemIndexes.join(', ') || 'none'}`;
+  return `${formatParallelLaneNumber(lane.queueIndex)} · ${lane.name} · ${lane.status} · attempt ${lane.attempt} · items ${lane.workItemIndexes.join(', ') || 'none'}`;
 }

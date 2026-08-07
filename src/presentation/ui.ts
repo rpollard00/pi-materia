@@ -11,7 +11,11 @@ import {
   resolvedPipelineSockets,
 } from "../loadout/loadoutAccessors.js";
 import { deriveRetryBudget, type MateriaRetryBudget } from "./retryBudget.js";
-import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../application/parallelMonitoring.js";
+import {
+  parallelLaneNumber,
+  summarizeParallelRun,
+  type ParallelRunMonitorSummary,
+} from "../application/parallelMonitoring.js";
 import {
   formatParallelProgressRows,
 } from "./parallelProgress.js";
@@ -549,7 +553,11 @@ function isLiveParallelSummary(
 /** Compact, bounded aggregate status for the persistent Pi/TUI widget. */
 export function formatParallelRunCompactStatus(summary: ParallelRunMonitorSummary): string {
   const { counts } = summary;
-  return `parallel ${summary.loopId} q${counts.queued} r${counts.running} a${counts.accepted} f${counts.failed} i${counts.interrupted} barrier:${summary.barrier.phase} ${counts.barrierReached}/${counts.total}`;
+  const laneNumbers = summary.lanes
+    .map((lane) => parallelLaneNumber(lane.queueIndex))
+    .filter((number): number is number => number !== undefined);
+  const laneLabel = laneNumbers.length > 0 ? ` lanes:${laneNumbers.join(",")}` : "";
+  return `parallel ${summary.loopId}${laneLabel} q${counts.queued} r${counts.running} a${counts.accepted} f${counts.failed} i${counts.interrupted} barrier:${summary.barrier.phase} ${counts.barrierReached}/${counts.total}`;
 }
 
 function createMateriaStatusRenderModel(

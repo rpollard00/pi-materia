@@ -210,7 +210,8 @@ describe("/materia recast", () => {
 
     const content = harness.widgets.get("materia")?.content?.join("\n") ?? "";
     expect(content).toContain("Parallel slots:");
-    expect(content).toContain("Restore lane");
+    expect(content).toContain("Lane 1");
+    expect(content).toContain("Restore la");
     expect(harness.statuses.get("materia")).toBe("Build");
   });
 

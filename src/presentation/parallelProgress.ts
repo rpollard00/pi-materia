@@ -1,8 +1,9 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type {
-  ParallelLaneMonitorSummary,
-  ParallelRunMonitorSummary,
+import {
+  formatParallelLaneNumber,
+  type ParallelLaneMonitorSummary,
+  type ParallelRunMonitorSummary,
 } from "../application/parallelMonitoring.js";
 import type {
   MateriaSemanticTheme,
@@ -125,7 +126,8 @@ function formatLane(
   const percentage = total === 0 ? 0 : Math.floor((position / total) * 100);
   const status = statusLabel(lane.status);
   const detail = `${percentage}% (${position}/${total})`;
-  const name = safeName(lane.name, lane.laneId);
+  const laneNumber = formatParallelLaneNumber(lane.queueIndex);
+  const name = `${laneNumber} · ${safeName(lane.name, lane.laneId)}`;
   const stage = stageLabel(lane);
   const maxBarWidth = Number.isFinite(options.maxBarWidth)
     ? Math.max(1, Math.floor(options.maxBarWidth ?? DEFAULT_MAX_BAR_WIDTH))
@@ -143,7 +145,10 @@ function formatLane(
   const stageWidth = stage
     ? Math.max(1, Math.min(visibleWidth(stage), Math.floor(flexibleWidth / 2)))
     : 0;
-  const nameWidth = Math.max(1, flexibleWidth - stageWidth);
+  // Keep the operator-facing lane number intact when the row is too narrow to
+  // retain the full name. The final row truncation may drop later detail, but
+  // the number remains discoverable for revive/recast.
+  const nameWidth = Math.max(visibleWidth(laneNumber) + 1, flexibleWidth - stageWidth);
   const boundedName = truncateToWidth(name, nameWidth, "…");
   const boundedStage = stage ? truncateToWidth(stage, stageWidth, "…") : undefined;
 
