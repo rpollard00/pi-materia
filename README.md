@@ -151,19 +151,62 @@ pi-materia provides two ways to restart a failed cast:
 
 | Command | Purpose |
 |---|---|
-| `/materia recast [id]` | **Re-send the same prompt.** Use for ordinary failures — reuses the active prompt or re-starts the socket, dispatching a new materia turn immediately. |
-| `/materia revive [id]` | **Restore without necessarily re-sending.** Passive path normalizes state and awaits a nudge without inference. Exhaustion-extending paths extend the recovery budget then resume. For quest-linked casts with active work, queues the quest for later same-cast resumption. |
+| `/materia recast [id] [lane-number]` | **Re-send the same prompt.** Without a lane number, reuses or restarts the parent socket; with a lane number, re-sends that retained child lane's prompt. |
+| `/materia revive [id] [lane-number]` | **Restore without necessarily re-sending.** With a lane number, repairs one failed/interrupted child; without it, retains bulk revival of all eligible lanes. Passive parent revival awaits a nudge, while child revival nudges the isolated child internally. Exhaustion-extending paths extend recovery allowance then resume. |
 
 See [Resilient Inference and Revival](docs/resilient-inference-and-revival.md) for the full design.
 
 ```bash
-/materia recast          # resume the most recent failed/aborted cast
-/materia recast <id>     # resume a specific cast
-/materia revive <id>     # passive revive if ordinary failure, or extend exhausted recovery allowance
+/materia recast             # resume the most recent failed/aborted parent cast
+/materia recast <id>        # resume a specific parent cast
+/materia recast <lane>      # recast one lane in the newest eligible parent
+/materia recast <id> <lane> # recast one lane in a specific parent
+/materia revive              # bulk-revive the newest eligible parent
+/materia revive <lane>      # revive one lane in the newest eligible parent
+/materia revive <id>        # bulk-revive lanes in a specific parent
+/materia revive <id> <lane> # revive one lane in a specific parent
 /materia casts           # list past casts
 /materia status          # show the current cast state
 /materia abort           # stop the active cast
 ```
+
+For a parallel or subagent-based loadout, a failed parent retains its lane
+records. Lane numbers are the normalized schedule queue positions, not
+completion order, and are always **1-based**. Use a lane number to repair one child without rerunning accepted siblings:
+
+```bash
+/materia revive <lane-number>                  # revive in newest eligible parent
+/materia revive <cast-id> <lane-number>        # revive in explicit parent cast
+/materia recast <lane-number>                 # recast in newest eligible parent
+/materia recast <cast-id> <lane-number>       # recast in explicit parent cast
+/materia revive                                # bulk-revive eligible lanes in newest parent
+/materia revive <cast-id>                      # bulk-revive eligible lanes in explicit parent
+```
+
+Only failed or interrupted lanes are eligible; accepted lanes are never
+restarted. The no-argument and cast-only `revive` forms retain existing bulk
+behavior. A lane-specific `revive` is passive recovery (with an internal child
+nudge), while lane-specific `recast` re-sends the retained child prompt. Either
+operation leaves other failed lanes failed, so you can repair them
+successively and let the parent cross its barrier only after every lane is
+terminal and accepted. `/materia recast [<cast-id>]` without a lane keeps its
+original parent-cast meaning.
+
+A lane revive is a true retained-child recovery, not a fresh cast with copied
+labels. When the child session is retained, pi-materia resumes the same child
+identity, socket/item position, execution scope, cwd, and session/artifact
+paths. Passive child revival is nudged internally because an isolated child
+cannot receive an operator message; it therefore continues without requiring a
+second manual nudge. Each coordinator attempt still gets a new attempt-local
+manifest and terminal record, while the retained child history remains
+continuous. Usage resumes from its durable watermark and cumulative child
+usage is counted once in the parent budget.
+
+Lane recovery validates the immutable plan and graph, queue order, lane and
+child identity, retained initial data, scope/cwd, artifact provenance, and
+usage or replay watermark before launching. Missing data or drift is an integrity
+failure: do not replan, redistribute, or guess; preserve the evidence and
+start a new cast.
 
 #### Automatic resilience
 
@@ -356,8 +399,8 @@ Omit `MATERIA_CENTRAL_AUTH_MODE=development` (production is the default) and set
 | `/materia quest move <id> --first\|--before\|--onto <target>` | Reorder pending quests |
 | `/materia quest requeue <id>` | Return a failed/blocked quest to the queue |
 | `/materia quest default-loadout [name\|--clear]` | Set or clear the quest default loadout |
-| `/materia recast [id]` | Resume a failed/aborted cast — re-sends the prompt on the same socket immediately |
-| `/materia revive [id]` | Passive revival (no prompt) for failed casts; extends recovery allowance and resumes for exhausted casts; queues quest-linked casts for later same-cast resumption |
+| `/materia recast [id] [lane-number]` | Resume a failed/aborted parent cast when the lane is omitted; with a lane number, re-send that retained child lane's prompt. Parent recast behavior is unchanged. |
+| `/materia revive [id] [lane-number]` | Revive one failed/interrupted parallel lane, or bulk-revive eligible lanes when the lane is omitted; passive parent revival waits for a nudge, while child revival nudges the isolated child internally; extends recovery allowance for exhausted casts; queues quest-linked casts for later same-cast resumption |
 | `/materia casts` | List past casts |
 | `/materia status` | Show active cast state |
 | `/materia continue` | Finalize a paused multi-turn planning socket; also used to nudge a reactivated cast forward |

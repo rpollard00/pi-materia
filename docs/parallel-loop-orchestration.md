@@ -155,7 +155,48 @@ Parallel state is checkpointed only at durable boundaries: plan/run creation, ch
 
 Cancellation is idempotent: it stops queued launches, aborts live children, drains available compact telemetry, marks nonterminal branches interrupted, and preserves the state and artifacts needed for recovery. A fresh dispatcher can cancel persisted nonterminal runs.
 
-`/materia revive <cast-id>` does not replan. It validates immutable plan and graph identity, complete child identity, retained initial data, scope and cwd, artifact provenance, usage baselines, and replay watermarks. Accepted branches remain accepted; only failed or interrupted branches restart or resume. Attempts get distinct coordinator artifacts even when a child session retains older paths. Event-tail eviction does not change sequence generation or these recovery identities. Drift or missing scope data is an integrity failure, not a reason to guess.
+Lane recovery uses the normalized schedule's stable **1-based** queue positions;
+status views expose them as `#N`. The parent is selected implicitly as the newest
+parent with an eligible failed or interrupted lane, unless an explicit parent
+cast id is supplied:
+
+```text
+/materia revive                              # bulk-revive newest eligible parent
+/materia revive <parent-cast-id>             # bulk-revive explicit parent
+/materia revive <lane-number>                # one lane in newest eligible parent
+/materia revive <parent-cast-id> <lane-number> # one lane in explicit parent
+/materia recast <lane-number>                # recast one lane in newest eligible parent
+/materia recast <parent-cast-id> <lane-number> # recast one lane in explicit parent
+```
+
+The forms without a lane number preserve bulk revive compatibility. A
+lane-specific command targets exactly one failed/interrupted lane; accepted
+lanes are retained and never rerun. Queue positions do not change when sibling
+lanes finish, and a repaired lane may be targeted again for a successive
+attempt. `/materia recast [<parent-cast-id>]` without a lane remains unchanged
+and re-sends the parent socket prompt. With a lane number, `recast` re-sends
+that retained child prompt.
+
+A lane `revive` or `recast` is true retained-child recovery. When the retained
+snapshot is valid, the same child cast/session, socket and item position,
+execution scope, cwd, and artifact paths resume. Passive child revival
+receives an automatic internal nudge because an isolated child cannot receive
+an operator nudge. Only its coordinator attempt directory is new; the
+retained child paths and cumulative usage remain continuous. A pre-launch
+failure with no child session may start from its immutable initial descriptor;
+missing data for a child that should be retained is an integrity failure, not
+permission to create a silent replacement workflow. The parent barrier still
+waits until every lane is accepted, then performs schedule-ordered fan-in
+automatically.
+
+Lane recovery validates immutable plan and graph identity, complete parent/loop/
+branch/lane/child identity, stable queue order and stream membership, retained
+initial data, scope and cwd, artifact provenance, usage baselines, attempt
+metadata, and replay watermarks before launching or resuming. Event-tail eviction does not change sequence generation or these recovery identities.
+Ambiguous runs and non-parallel parents are also rejected rather than guessed.
+Drift, missing data, stale attempts, or a scope/cwd/path mismatch is an
+integrity failure, not a reason to guess; preserve evidence and start a new
+cast if the original state cannot be restored.
 
 ## 8. Artifacts and observability
 

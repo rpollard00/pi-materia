@@ -169,14 +169,26 @@ The two commands serve different purposes and are not interchangeable.
 | **Purpose** | Re-send the same prompt to the same socket. | Restore a failed/aborted cast to active state without necessarily re-sending a prompt. |
 | **When to use** | The cast failed with no exhaustion metadata (ordinary failure). | The cast has exhaustion metadata (same-socket recovery exhausted, explicit retry edge exhausted) or you want a passive restore. |
 | **Active prompt** | Reuses `state.activeTurnPrompt` when available to re-send the same prompt; otherwise re-starts the socket. | Passive path: does NOT dispatch inference; just normalizes state and waits for a nudge. Exhaustion paths: may advance to a blocked target or resume from exhausted socket. |
-| **Attempt increment** | Does not exist for recast (same prompt, same socket). | Does not increment attempts. |
+| **Attempt increment** | Parent recast reuses the parent socket; a numbered lane recast creates a new lane attempt while retaining the child identity. | Standalone parent revive does not increment native cast attempts; a numbered lane revive creates a new coordinator/child attempt while retaining the child identity. |
 | **Event emitted** | `cast_recast` | `cast_revive` (with kind: "passive", "edge_traversal", or "same_socket_recovery") |
 | **Lifecycle event** | None. | `lifecycle.cast.revived` (mapped to `runtime.accepted` in agent-controller preset) |
 | **Quest linked** | Not applicable (quest runner does not call recast). | Revive handler queues quest-linked casts via unfailQuest + questQueuedResurrection instead of reviving. |
 
+The table describes parent-cast events. Numbered lane operations additionally
+record bounded parent/lane/operation/attempt evidence in the parallel recovery
+artifacts; they do not copy child messages, tool payloads, or terminal output
+into lifecycle telemetry.
+
 **Rule of thumb**: Use `/materia recast` for a normal failed cast you want to
 immediately retry. Use `/materia revive` for a cast that exhausted its
 recovery budget or one you want to restore without dispatching inference.
+
+For parallel children, the numbered forms apply that same distinction to one
+retained lane: `/materia recast N` (or `/materia recast <cast-id> N`) re-sends
+that child's prompt, while `/materia revive N` (or the explicit-parent form)
+passively restores it and nudges the detached child internally. When `N` is
+omitted, `/materia recast [<cast-id>]` remains parent-level and
+`/materia revive [<cast-id>]` retains bulk failed-lane recovery.
 
 ---
 
@@ -386,11 +398,112 @@ fields for observability.
 
 ## 7. Parallel Branch Revival
 
-A failed intrinsic parallel run is revived from durable plan, graph, branch, child-session, attempt, and execution-scope identities. Revival does not invoke the generator again, redistribute work, or rerun accepted branches. Only failed or interrupted branches restart or resume; accepted terminal outputs and scopes remain available for the eventual ordered barrier.
+A failed intrinsic parallel run can be repaired one child lane at a time. The
+parent cast, normalized plan, stream membership, queue order, and accepted
+lane results are retained; revival does not invoke the generator again,
+redistribute work, or rerun an accepted lane.
 
-Before launching anything, runtime validates the immutable plan and graph, stream membership, complete parent/loop/child/lane identity, retained child initial data, execution scope, cwd, and artifact provenance. It revalidates resumed snapshots as well. Missing data or drift is an integrity failure rather than permission to infer a replacement. Intrinsic revival does not require a loop concurrency override; it uses the persisted run bound.
+### 7.1 Commands and lane selection
 
-Each coordinator attempt has distinct artifacts even when a resumed child retains its original session paths. Cancellation is idempotent and can be issued by a fresh dispatcher against every persisted nonterminal run; available telemetry is drained before terminalization. See [Parallel generation and scoped execution](parallel-loop-orchestration.md#7-persistence-cancellation-and-revival) and the [operator guide](parallel-workflow-operation.md#cancel-and-revive).
+Lane numbers refer to the persisted normalized `queueOrder` and are **stable
+1-based positions**. They are not completion order, array indexes, or a list
+that is renumbered after a lane succeeds. For example, if the queue order is
+`["lane-api", "lane-ui", "lane-docs"]`, then lanes 1, 2, and 3 remain those
+lanes even when lane 1 finishes first. A lane number that names an accepted
+lane is not eligible for revival.
+
+The command forms are:
+
+```text
+/materia revive                              # bulk-revive eligible lanes in the newest eligible parent
+/materia revive <parent-cast-id>             # bulk-revive eligible lanes in an explicit parent
+/materia revive <lane-number>                # revive one lane in the newest eligible parent
+/materia revive <parent-cast-id> <lane-number> # revive one lane in an explicit parent
+/materia recast <lane-number>                # recast one lane in the newest eligible parent
+/materia recast <parent-cast-id> <lane-number> # recast one lane in an explicit parent
+```
+
+The no-argument and cast-only `revive` forms keep existing bulk-revive
+behavior. An omitted parent in a numbered form selects the newest failed
+parallel parent with an eligible lane. Supplying a parent cast id is an
+explicit override; it never silently falls back to another parent. The
+lane-specific forms select exactly one failed or interrupted lane. Only those
+two lane states are eligible; `queued`, `running`, and `accepted` lanes are not
+targets. A malformed number, zero, out-of-range position, ambiguous parallel
+run, non-parallel parent, complete parent, or parent without an eligible lane
+is an operator error rather than a request to replan.
+
+`/materia recast [<parent-cast-id>]` without a lane number is unchanged. It is a
+parent-cast operation that re-sends the same parent socket prompt (or restarts
+that socket). With a lane number, `recast` re-sends the selected retained
+child's prompt; it does not reset or rerun accepted lanes. Lane-specific
+`revive` is the passive child-recovery path.
+
+### 7.2 True retained-child recovery
+
+A lane `revive` or `recast` is not a new child cast with copied labels. If a
+failed or interrupted child has a valid retained snapshot, the coordinator
+resumes that same child identity and session at its durable socket/item
+position, compiled child loadout, execution scope, cwd, and child artifact
+paths. `revive` uses an internal nudge for passive recovery because an isolated
+child cannot receive an operator message; thus it continues automatically
+instead of becoming active-but-awaiting an impossible manual nudge. `recast`
+re-sends the retained child's active prompt on that same child. Accepted
+siblings remain untouched. A lane that failed before a child session was ever
+created may start from its immutable retained initial descriptor; that is not a
+replacement for an existing child. If durable state says a child session
+existed, a missing descriptor or session is an integrity failure instead of
+permission to launch a silent fresh workflow.
+
+Recovery is lane-local. After the selected lane reaches a terminal result,
+issue the next numbered `revive` or `recast` command for another failed lane if
+needed. The parent remains at its skipped barrier while any lane is failed or
+interrupted; it crosses the barrier and performs the normal ordered fan-in only
+after every lane is accepted. A later failure of the same lane can be repaired
+again, with another coordinator/child attempt, without reopening already
+accepted lanes. The bulk `revive` form is equivalent to applying passive
+recovery to all currently failed or interrupted lanes while preserving the same
+queue order.
+
+### 7.3 Attempts, artifacts, and usage
+
+Every repair gets a distinct coordinator attempt directory:
+
+```text
+parallel/<loop-id>/lanes/<lane-id>/attempt-<n>/
+  lane.json
+  events.jsonl
+  terminal-result.json
+  diagnostics.json
+  usage.json
+```
+
+A retained child may keep its earlier `sessionPath`, `runDirectory`, and
+`artifactRoot`; the new attempt owns fresh coordinator manifests and records
+those retained paths rather than overwriting earlier evidence. Bounded lane
+lifecycle evidence records the operation, parent/lane identity, and attempt
+without copying child payloads. Child output, execution-scope exports, and
+terminal state remain continuous for the lane.
+Revival resumes from the last durable replay watermark. Cumulative child usage
+is checkpointed from that watermark and counted once in the parent totals, so
+reviving a lane does not double-charge replayed events or reset the parent
+budget. Accepted lane output remains available for the eventual ordered
+barrier.
+
+### 7.4 Integrity failures
+
+Before any selected lane starts, runtime validates the immutable plan and
+graph, parent/loop/branch/lane/child identities, stable queue order and stream
+membership, retained child initial data, attempt metadata, execution scope and
+cwd, child artifact provenance, usage baseline, and replay watermark. It also
+revalidates a retained snapshot after resume. Missing data, changed identities,
+path or cwd drift, altered initial data, an unexpected missing child session,
+stale attempts, or watermark mismatch are hard integrity failures. Do not infer a replacement child, redistribute
+items, reset usage, or bypass the barrier; preserve the evidence and start a
+new cast when the original cast cannot be restored.
+
+Cancellation remains idempotent, and a fresh dispatcher may cancel persisted
+nonterminal runs before recovery. See [Parallel generation and scoped execution](parallel-loop-orchestration.md#7-persistence-cancellation-and-revival) and the [operator guide](parallel-workflow-operation.md#cancel-and-revive).
 
 ---
 

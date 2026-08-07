@@ -165,15 +165,80 @@ A replacement scope's terminal exports must appear in persisted recovery state a
 
 ## Cancel and revive
 
-Cancellation stops queued launches, observes available cumulative usage and a safe replay watermark, terminates running child processes, marks nonterminal branches interrupted, and retains artifacts/scopes. This durable cancellation boundary prevents usage from being counted again when retained events replay. It is safe to repeat.
+Cancellation stops queued launches, observes available cumulative usage and a
+safe replay watermark, terminates running child processes, marks nonterminal
+lanes interrupted, and retains artifacts/scopes. This durable cancellation
+boundary prevents usage from being counted again when retained events replay.
+It is safe to repeat.
 
-Revive with:
+### Select a parent and lane
+
+The lane number is the stable **1-based** position in the normalized schedule
+queue. It remains tied to that lane even when completion order differs or an
+accepted lane is removed from the set of recovery candidates. Status views show
+this position as `#N` so it can be copied into the command. Failed and
+interrupted lanes are eligible; queued, running, and accepted lanes are not.
 
 ```text
-/materia revive <cast-id>
+/materia revive                              # bulk-revive newest eligible parent
+/materia revive <parent-cast-id>             # bulk-revive an explicit parent
+/materia revive <lane-number>                # one lane in newest eligible parent
+/materia revive <parent-cast-id> <lane-number> # one lane in explicit parent
+/materia recast <lane-number>                # recast one lane in newest eligible parent
+/materia recast <parent-cast-id> <lane-number> # recast one lane in explicit parent
 ```
 
-Parallel revival validates the original plan and graph, parent/loop/branch/child identities, child initial data, retained scope and cwd, and artifact paths. It preserves accepted branches and restarts or resumes only failed/interrupted ones. It does not replan, redistribute items, or infer missing workspace state. Identity, scope, cwd, plan, or artifact drift causes a hard integrity failure; preserve evidence and start a new cast if the original state cannot be restored.
+Without a parent id, the runtime chooses the newest parent with an eligible
+failed/interrupted parallel lane. An explicit parent id overrides that choice;
+ambiguous runs and non-parallel parents are rejected rather than guessed.
+The forms without a lane number preserve the existing bulk-revive behavior and
+repair every currently failed or interrupted lane in that parent. A
+lane-specific command repairs only the selected lane; `revive` is passive
+recovery and `recast` re-sends that retained child's prompt. Neither reruns
+accepted siblings. `/materia recast [<parent-cast-id>]` without a lane remains a
+parent operation that re-sends the parent prompt. Numbered lane commands operate
+directly on the parallel run; they do not route through quest resurrection.
+
+### Repair lanes successively
+
+A lane-specific `revive` or `recast` resumes a true retained child when its
+snapshot is valid: the same child cast/session, socket and item position,
+compiled child loadout, execution scope, cwd, and child artifact paths are used.
+Passive child revival receives an automatic internal nudge because the isolated
+child cannot receive an operator nudge. This differs from passive parent
+revival, which intentionally restores an awaiting parent and waits for the
+operator. Lane `recast` instead re-sends the retained child's prompt. A
+pre-launch failure with no child session may start from its immutable initial
+descriptor; if durable state says a child existed, missing recovery data is an
+integrity failure, not permission to create a silent replacement workflow.
+
+After one lane reaches a terminal result, run the numbered command for the next
+failed/interrupted lane. The parent stays at the skipped barrier while any
+lane remains unsuccessful; accepted siblings and their terminal outputs stay
+accepted. When all lanes are accepted, the normal schedule-ordered barrier and
+fan-in continue automatically. If a repaired lane fails again, revive or recast
+that same stable lane number again; each successive repair gets a new
+coordinator attempt without reopening accepted lanes.
+
+### Continuity and integrity
+
+Each repair writes a distinct attempt directory under
+`parallel/<loop-id>/lanes/<lane-id>/attempt-<n>/` with its own `lane.json`,
+`events.jsonl`, `terminal-result.json`, `diagnostics.json`, and `usage.json`.
+A resumed child may retain its earlier `sessionPath`, `runDirectory`, and
+`artifactRoot`; the new coordinator record references those paths and does not
+overwrite prior attempts. Usage resumes at the last durable watermark and
+cumulative child usage is counted once in the parent budget.
+
+Before launching, lane recovery validates the immutable plan and graph, stable queue
+order, stream membership, parent/loop/branch/lane/child identities, retained
+initial data, execution scope and cwd, artifact provenance, attempt metadata,
+and usage/replay watermarks. Drift, missing paths or data, altered child input,
+or a stale/mismatched snapshot is a hard integrity failure. Do not replan,
+redistribute items, reset usage, or bypass the barrier; preserve evidence and
+start a new cast when the original state cannot be restored.
+
+See [Resilient Inference and Revival](resilient-inference-and-revival.md#7-parallel-branch-revival) for the recovery contract and failure examples.
 
 ## Troubleshooting
 
