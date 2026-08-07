@@ -1,5 +1,6 @@
 import type { QuestBoard } from "../domain/questBoard.js";
 import type { ExecutionScope } from "../domain/executionScope.js";
+import type { ParallelRecoveryOperation } from "../domain/parallelRecovery.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 
 export * from "./childCastRunner.js";
@@ -48,6 +49,14 @@ export interface CastAgentTurnPort<TSession = unknown, TPi = unknown, TAgentEven
 
 export type InitialPromptDispatchPolicy = "immediate" | "defer-agent-trigger";
 
+export interface ParallelCastRecoveryRequest {
+  operation: ParallelRecoveryOperation;
+  loopId: string;
+  laneIds: readonly string[];
+  /** Stable 1-based command position, when recovery originated from a lane command. */
+  laneNumber?: number;
+}
+
 export interface CastStartOptions {
   /** Optional shared cast data to seed before the first socket starts. */
   initialData?: Record<string, unknown>;
@@ -64,6 +73,8 @@ export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;
+  /** Recover selected retained lanes without reopening the parent as a new cast. */
+  recoverParallel?(pi: TPi, session: TSession, castId: string, request: ParallelCastRecoveryRequest): Promise<void>;
   /**
    * Reactivate a dormant queued cast (marked with questQueuedResurrection)
    * for same-cast resumption. Restores runtime services and awaiting state

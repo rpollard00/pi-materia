@@ -502,6 +502,45 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   }
 
   /**
+   * Resolve and dispatch one numbered lane recovery. The command handler uses
+   * this boundary before quest resurrection handling so a lane target can
+   * never be mistaken for a quest-linked parent cast.
+   */
+  async recoverParallelLane(input: {
+    pi: TPi;
+    session: TSession;
+    operation: ParallelRecoveryOperation;
+    argumentsText?: string;
+  }): Promise<Extract<ResolvedParallelRecoveryTarget, { kind: "lane" }>> {
+    const active = this.deps.states.loadActive(input.session);
+    if (active?.active) throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before selective parallel ${input.operation}.`);
+    const target = this.resolveParallelRecoveryTarget({ session: input.session, operation: input.operation, argumentsText: input.argumentsText });
+    if (target.kind !== "lane") {
+      throw new ParallelRecoveryTargetError([{ path: "laneNumber", message: "A numbered parallel lane is required for selective recovery." }]);
+    }
+    if (!this.deps.lifecycle.recoverParallel) {
+      throw new Error("Selective parallel lane recovery is unavailable in this runtime.");
+    }
+    await this.deps.lifecycle.recoverParallel(input.pi, input.session, target.castId, {
+      operation: input.operation,
+      loopId: target.loopId,
+      laneIds: [target.laneId],
+      laneNumber: target.laneNumber,
+    });
+    return target;
+  }
+
+  /** Compatibility alias for command adapters that name the resolved target. */
+  recoverParallelTarget(input: {
+    pi: TPi;
+    session: TSession;
+    operation: ParallelRecoveryOperation;
+    argumentsText?: string;
+  }): Promise<Extract<ResolvedParallelRecoveryTarget, { kind: "lane" }>> {
+    return this.recoverParallelLane(input);
+  }
+
+  /**
    * Parse and resolve a numbered parallel recovery target without dispatching
    * any lifecycle work. No-argument and cast-only forms resolve to `bulk` so
    * callers can retain the historical parent-level command behavior.

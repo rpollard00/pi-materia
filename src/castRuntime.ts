@@ -15,6 +15,7 @@ export {
   prepareMultiTurnRefinementTurn,
   persistCastBudget,
   reactivateQueuedNativeCast,
+  recoverParallelNativeCast,
   resumeNativeCast,
   reviveNativeCast,
   startNativeCast,

@@ -361,6 +361,51 @@ describe("application use cases", () => {
     expect(events).toEqual(["resume:resume-me", "revive:explicit", "clear"]);
   });
 
+  test("dispatches a resolved numbered lane through the selective lifecycle port", async () => {
+    const recoveryCalls: unknown[] = [];
+    const failedParent = state({
+      castId: "parallel-parent",
+      active: false,
+      updatedAt: 10,
+      startedAt: 10,
+      parallelRuns: {
+        build: {
+          runId: "build-run",
+          phase: "failed",
+          fanInPhase: "skipped",
+          queueOrder: ["lane-a", "lane-b"],
+          lanes: {
+            "lane-a": { laneId: "lane-a", name: "A", status: "accepted" },
+            "lane-b": { laneId: "lane-b", name: "B", status: "failed" },
+          },
+        },
+      } as any,
+    });
+    const lifecycle: CastLifecyclePort<string, string> = {
+      start: async () => undefined,
+      continue: async () => undefined,
+      resume: async () => undefined,
+      revive: async () => undefined,
+      recoverParallel: async (...args) => { recoveryCalls.push(args); },
+      clear: () => undefined,
+    };
+    const useCases = new CastExecutionUseCases({
+      states: { loadActive: () => undefined, listLatest: () => [failedParent], listResumable: () => [], listRevivable: () => [] },
+      context: { buildIsolatedContext: (messages) => messages },
+      agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
+      lifecycle,
+      statusPresenter: { statusLabel: () => "" },
+      loadouts: {} as any,
+      configs: {} as any,
+      pipeline: {} as any,
+    });
+
+    const resolved = await useCases.recoverParallelLane({ pi: "pi", session: "session", operation: "recast", argumentsText: "2" });
+
+    expect(resolved).toMatchObject({ castId: "parallel-parent", loopId: "build", runId: "build-run", laneId: "lane-b", laneNumber: 2 });
+    expect(recoveryCalls).toEqual([["pi", "session", "parallel-parent", { operation: "recast", loopId: "build", laneIds: ["lane-b"], laneNumber: 2 }]]);
+  });
+
   test("linked cast use case composes a virtual loadout and starts normal lifecycle with metadata", async () => {
     const events: string[] = [];
     let started: { loaded: LoadedConfig; request: string; options?: { initialData?: Record<string, unknown>; startEventDetails?: Record<string, unknown> } } | undefined;

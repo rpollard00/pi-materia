@@ -110,6 +110,8 @@ export type ParallelRecoveryOperation = ParallelLoopRecoveryOperation;
 export interface ParallelLoopRecoveryInput extends Omit<ParallelLoopDispatchInput, "socket"> {
   operation?: ParallelLoopRecoveryOperation;
   laneIds?: readonly string[] | ReadonlySet<string>;
+  /** Stable 1-based command position for lifecycle diagnostics. */
+  laneNumber?: number;
   onPrepared?: () => Promise<void>;
 }
 export type ParallelRecoveryInput = ParallelLoopRecoveryInput;
@@ -477,6 +479,7 @@ export class ParallelLoopDispatcher {
       operation,
       laneCount: selectedLaneIds.length,
       laneIds: selectedLaneIds.slice(0, 64),
+      ...(input.laneNumber !== undefined ? { laneNumber: input.laneNumber } : {}),
     });
     await input.onPrepared?.();
     await this.#pump();

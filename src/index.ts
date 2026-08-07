@@ -200,7 +200,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], link, recast, revive, casts, quest, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], link, recast [cast-id|lane-number], revive [cast-id|lane-number], casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states, getConfiguredConfigPath),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -449,8 +449,14 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "recast") {
         try {
-          const requestedCastId = rest.join(" ").trim();
-          const castId = await castExecutionUseCases.resumeLatestOrRequested(pi, ctx, requestedCastId);
+          const argumentsText = rest.join(" ").trim();
+          const target = castExecutionUseCases.resolveParallelRecoveryTarget({ session: ctx, operation: "recast", argumentsText });
+          if (target.kind === "lane") {
+            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "recast", argumentsText });
+            reportParallelLaneRecovery(pi, ctx, "recast", recovered);
+            return;
+          }
+          const castId = await castExecutionUseCases.resumeLatestOrRequested(pi, ctx, target.castId);
           if (!castId) {
             ctx.ui.notify("No failed or aborted pi-materia casts are available to recast.", "info");
             return;
@@ -463,7 +469,16 @@ export default function piMateria(pi: ExtensionAPI) {
 
       if (subcommand === "revive") {
         try {
-          const requestedCastId = rest.join(" ").trim();
+          const argumentsText = rest.join(" ").trim();
+          const target = castExecutionUseCases.resolveParallelRecoveryTarget({ session: ctx, operation: "revive", argumentsText });
+          if (target.kind === "lane") {
+            // Numbered lane commands intentionally bypass quest resurrection:
+            // they repair retained child state, not the parent quest record.
+            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "revive", argumentsText });
+            reportParallelLaneRecovery(pi, ctx, "revive", recovered);
+            return;
+          }
+          const requestedCastId = target.castId;
 
           // Check for quest-linked revival: if there's a different active cast
           // and the target is a quest-linked failed cast, queue the quest instead.
@@ -502,7 +517,7 @@ export default function piMateria(pi: ExtensionAPI) {
       }
 
       if (subcommand !== "cast") {
-        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id], /materia revive [cast-id] (passive revive if ordinary failure; extends recovery allowance then recasts if exhaustion metadata present), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
+        ctx.ui.notify("Usage: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], /materia link [--from <castId>] <target> [<target> ...] -- <prompt>, /materia recast [cast-id|lane-number] or /materia recast <cast-id> <lane-number>, /materia revive [cast-id|lane-number] or /materia revive <cast-id> <lane-number> (passive revive if ordinary failure; extends recovery allowance then recasts if exhaustion metadata is present), /materia casts, /materia grid, /materia loadout [name], /materia ui, /materia status, /materia continue, or /materia abort", "error");
         return;
       }
 
@@ -1007,6 +1022,31 @@ function findCastForRevival(states: CastStateRepository<ExtensionContext>, ctx: 
     return states.listLatest(ctx).find((state) => state.castId === requestedCastId);
   }
   return states.listRevivable(ctx)[0];
+}
+
+function reportParallelLaneRecovery(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  operation: "revive" | "recast",
+  target: { castId: string; loopId: string; runId: string; laneId: string; laneNumber: number },
+): void {
+  const message = `pi-materia ${operation} dispatched for parallel cast ${target.castId}, lane #${target.laneNumber} (${target.laneId}).`;
+  ctx.ui.notify(message, "info");
+  appendMateriaPresentation(pi, {
+    content: message,
+    details: {
+      prefix: operation,
+      materiaName: "orchestrator",
+      eventType: "parallel_lane_recovery",
+      operation,
+      parentCastId: target.castId,
+      castId: target.castId,
+      loopId: target.loopId,
+      runId: target.runId,
+      laneNumber: target.laneNumber,
+      laneId: target.laneId,
+    },
+  });
 }
 
 /**
