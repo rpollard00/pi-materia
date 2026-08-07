@@ -41,8 +41,13 @@ export type {
   NormalizedParallelStream,
   ParallelLoopCancellationInput,
   ParallelLoopDispatchInput,
+  ParallelLoopRecoveryInput,
+  ParallelLoopRecoveryOperation,
+  ParallelLoopRecoveryResult,
   ParallelLoopReviveInput,
   ParallelLoopReviveResult,
+  ParallelRecoveryInput,
+  ParallelRecoveryOperation,
   ParallelLoopDispatcherDependencies,
 } from "./runtime/parallelDispatcher.js";
 

@@ -4,12 +4,17 @@ import path from "node:path";
 import { collectAcceptedParallelBranches, type IntrinsicParallelFanInResult } from "../domain/parallelFanIn.js";
 import { deriveNominalParallelLaneProgress } from "../domain/parallelProgress.js";
 import { parallelBranchRegionForEntry } from "../graph/parallelRegions.js";
-import type {
-  ChildCastRunnerPort,
-  ChildCastSnapshot,
-  ChildCastStreamEvent,
-  ChildCastTerminalResult,
-  StartChildCastInput,
+import {
+  createChildCastRecoveryDescriptor,
+  EMPTY_CHILD_CAST_USAGE,
+  validateChildCastRecoveryDescriptor,
+  type ChildCastRecoveryDescriptor,
+  type ChildCastRecoveryOperation,
+  type ChildCastRunnerPort,
+  type ChildCastSnapshot,
+  type ChildCastStreamEvent,
+  type ChildCastTerminalResult,
+  type StartChildCastInput,
 } from "../application/childCastRunner.js";
 import type {
   ParallelLaneArtifactIdentity,
@@ -95,14 +100,28 @@ export interface ParallelLoopCancellationInput {
   reason?: string;
 }
 
-export interface ParallelLoopReviveInput extends Omit<ParallelLoopDispatchInput, "socket"> {
+export type ParallelLoopRecoveryOperation = ChildCastRecoveryOperation;
+export type ParallelRecoveryOperation = ParallelLoopRecoveryOperation;
+
+/**
+ * An operation-aware recovery request. Omitting laneIds retains the historical
+ * bulk behavior and selects every failed/interrupted lane in queue order.
+ */
+export interface ParallelLoopRecoveryInput extends Omit<ParallelLoopDispatchInput, "socket"> {
+  operation?: ParallelLoopRecoveryOperation;
+  laneIds?: readonly string[] | ReadonlySet<string>;
   onPrepared?: () => Promise<void>;
 }
+export type ParallelRecoveryInput = ParallelLoopRecoveryInput;
+
+/** Compatibility name retained for callers of the original bulk revival API. */
+export type ParallelLoopReviveInput = ParallelLoopRecoveryInput;
 
 export interface ParallelLoopReviveResult {
   ok: boolean;
   issues: readonly { code: string; path: string; message: string; laneId?: string }[];
 }
+export type ParallelLoopRecoveryResult = ParallelLoopReviveResult;
 
 export interface ParallelLoopDispatcherDependencies {
   children: ChildCastRunnerPort;
@@ -128,6 +147,8 @@ interface PreparedLane {
   recoveryChildCastId?: string;
   recoveryAfterSequence?: number;
   recoveryScope?: MateriaParallelLaneState["executionScope"];
+  recoveryDescriptor?: ChildCastRecoveryDescriptor;
+  recoveryOperation?: ParallelLoopRecoveryOperation;
   resumeChild?: boolean;
 }
 
@@ -269,8 +290,12 @@ export class ParallelLoopDispatcher {
     return true;
   }
 
-  async validateRevival(input: ParallelLoopReviveInput): Promise<ParallelLoopReviveResult> {
+  async validateRecovery(input: ParallelLoopRecoveryInput): Promise<ParallelLoopReviveResult> {
     const issues: Array<{ code: string; path: string; message: string; laneId?: string }> = [];
+    const operation = input.operation ?? "revive";
+    if (operation !== "revive" && operation !== "recast") {
+      issues.push({ code: "operation_invalid", path: "operation", message: `unsupported parallel recovery operation ${JSON.stringify(operation)}` });
+    }
     try { validateDispatchConfig(input.config); } catch (error) {
       issues.push({ code: "config_unsupported", path: `loops.${input.loopId}.parallel`, message: boundedFailureReason(parallelErrorMessage(error)) });
     }
@@ -281,7 +306,7 @@ export class ParallelLoopDispatcher {
     catch (error) { issues.push({ code: "plan_invalid", path: "state.parallelPlan", message: boundedFailureReason(parallelErrorMessage(error)) }); }
     if (run.parentCastId !== input.state.castId) issues.push({ code: "cast_mismatch", path: "run.parentCastId", message: "persisted run belongs to another cast" });
     if (run.loopId !== input.loopId || run.configIdentity.loopId !== input.loopId) issues.push({ code: "loop_mismatch", path: "run.loopId", message: "persisted run belongs to another loop" });
-    if (run.phase !== "failed" || run.fanInPhase !== "skipped") issues.push({ code: "run_not_revivable", path: "run.phase", message: "only failed branch work whose barrier was skipped can be revived" });
+    if (run.phase !== "failed" || run.fanInPhase !== "skipped") issues.push({ code: "run_not_revivable", path: "run.phase", message: "only failed branch work whose barrier was skipped can be recovered" });
     if (run.configIdentity.configHash !== input.state.configHash || run.maxConcurrency !== input.config.maxConcurrency) issues.push({ code: "config_mismatch", path: "run.configIdentity", message: "parallel configuration changed" });
     if (plan && (run.planIdentity.planId !== plan.planId || run.planIdentity.version !== plan.version || run.planIdentity.workItemCount !== plan.workItemCount)) issues.push({ code: "plan_mismatch", path: "run.planIdentity", message: "normalized parallel plan changed" });
     let prepared: PreparedLane[] | undefined;
@@ -297,6 +322,29 @@ export class ParallelLoopDispatcher {
     }
     const plannedLaneIds = plan?.streams.map((stream) => stream.laneId) ?? [];
     if (!sameStrings(run.queueOrder, plannedLaneIds)) issues.push({ code: "branch_order_drift", path: "run.queueOrder", message: "persisted branches no longer exactly match normalized stream order" });
+
+    const requestedLaneIds = normalizeRecoveryLaneIds(input.laneIds);
+    const selectedLaneIds = input.laneIds === undefined
+      ? run.queueOrder.filter((laneId) => run.lanes[laneId]?.status === "failed" || run.lanes[laneId]?.status === "interrupted")
+      : requestedLaneIds ?? [];
+    if (input.laneIds !== undefined && (!requestedLaneIds || requestedLaneIds.length === 0)) {
+      issues.push({ code: "lane_selection_invalid", path: "laneIds", message: "laneIds must be a non-empty set of lane IDs" });
+    }
+    const seenLaneIds = new Set<string>();
+    for (const laneId of selectedLaneIds) {
+      if (typeof laneId !== "string" || laneId.trim().length === 0) {
+        issues.push({ code: "lane_selection_invalid", path: "laneIds", message: "lane IDs must be non-empty strings" });
+        continue;
+      }
+      if (seenLaneIds.has(laneId)) issues.push({ code: "lane_selection_duplicate", path: `laneIds.${laneId}`, laneId, message: "lane ID was selected more than once" });
+      seenLaneIds.add(laneId);
+      const lane = run.lanes[laneId];
+      if (!lane) issues.push({ code: "lane_missing", path: `lanes.${laneId}`, laneId, message: "selected lane is not part of the persisted parallel queue" });
+      else if (lane.status === "accepted") issues.push({ code: "lane_accepted", path: `lanes.${laneId}.status`, laneId, message: "accepted lanes are immutable and cannot be recovered" });
+      else if (lane.status !== "failed" && lane.status !== "interrupted") issues.push({ code: "lane_not_terminal", path: `lanes.${laneId}.status`, laneId, message: "only failed or interrupted lanes can be recovered" });
+    }
+    if (selectedLaneIds.length === 0) issues.push({ code: "lanes_missing", path: "laneIds", message: "no failed or interrupted lanes are available for recovery" });
+
     for (const [queueIndex, laneId] of run.queueOrder.entries()) {
       const lane = run.lanes[laneId];
       const stream = plan?.streams[queueIndex];
@@ -306,66 +354,111 @@ export class ParallelLoopDispatcher {
       }
       const expectedBranchId = `${run.runId}:branch:${encodeURIComponent(laneId)}`;
       if (lane.branchId !== expectedBranchId) issues.push({ code: "branch_identity_drift", path: `lanes.${laneId}.branchId`, laneId, message: "persisted branch identity changed" });
-      if (lane.status !== "accepted" && lane.status !== "failed" && lane.status !== "interrupted") issues.push({ code: "lane_not_terminal", path: `lanes.${laneId}.status`, laneId, message: "revival only restarts failed or interrupted terminal branches" });
+      if (lane.status !== "accepted" && lane.status !== "failed" && lane.status !== "interrupted") issues.push({ code: "lane_not_terminal", path: `lanes.${laneId}.status`, laneId, message: "parallel recovery requires every persisted branch to be terminal" });
       if (!lane.executionScope) issues.push({ code: "scope_missing", path: `lanes.${laneId}.executionScope`, laneId, message: "branch has no persisted execution scope" });
       else {
         const persistedScope = input.state.branchScopes?.[lane.executionScope.id];
         if (!persistedScope || !sameJson(persistedScope, lane.executionScope)) issues.push({ code: "scope_drift", path: `lanes.${laneId}.executionScope`, laneId, message: "persisted execution scope differs from the cast branch scope snapshot" });
       }
+      if (lane.childSession && (!lane.childCastId || lane.childSession.childCastId !== lane.childCastId)) {
+        issues.push({ code: "child_session_drift", path: `lanes.${laneId}.childSession`, laneId, message: "persisted child session identity does not match the lane child identity" });
+      }
       const preparedLane = prepared?.find((candidate) => candidate.stream.laneId === laneId);
-      if ((lane.status === "failed" || lane.status === "interrupted") && lane.childCastId && lane.childSession && preparedLane) {
+      if (lane.childCastId && preparedLane) {
         const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
-        if (observation) {
-          try { assertRecoverySnapshot(run, lane, preparedLane, observation.snapshot); }
+        if (observation && !lane.childSession) {
+          issues.push({ code: "child_session_missing", path: `lanes.${laneId}.childSession`, laneId, message: "a retained child exists but its durable session provenance is missing" });
+        } else if (observation && lane.childSession) {
+          try { assertRecoverySnapshot(run, lane, preparedLane, observation.snapshot, input.state.request); }
           catch (error) { issues.push({ code: "child_session_drift", path: `lanes.${laneId}.childSession`, laneId, message: boundedFailureReason(parallelErrorMessage(error)) }); }
         }
+      }
+      // A lane that never acquired a child session has no retained artifact
+      // provenance to validate. This is the safe pre-launch failure case: the
+      // next attempt may start a child from the immutable plan. Once a child
+      // session exists, however, its coordinator manifest is part of the
+      // retained recovery identity and missing/drifted evidence must remain a
+      // hard validation failure.
+      if (preparedLane && lane.childSession) {
+        try { await this.#deps.artifacts?.lane?.validateProvenance?.(recoveryArtifactIdentity(input.state, input.loopId, run, lane)); }
+        catch (error) { issues.push({ code: "artifact_provenance_drift", path: `lanes.${laneId}.artifacts`, laneId, message: boundedFailureReason(parallelErrorMessage(error)) }); }
       }
     }
     for (const laneId of Object.keys(run.lanes)) if (!run.queueOrder.includes(laneId)) issues.push({ code: "unexpected_branch", path: `lanes.${laneId}`, laneId, message: "persisted run contains a branch outside the immutable plan" });
     return { ok: issues.length === 0, issues };
   }
 
-  async revive(input: ParallelLoopReviveInput): Promise<boolean> {
-    const validation = await this.validateRevival(input);
-    if (!validation.ok) throw new Error(`Parallel revival validation failed: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
+  async validateRevival(input: ParallelLoopReviveInput): Promise<ParallelLoopReviveResult> {
+    return this.validateRecovery({ ...input, operation: input.operation ?? "revive" });
+  }
+
+  async recover(input: ParallelLoopRecoveryInput): Promise<boolean> {
+    const operation = input.operation ?? "revive";
+    const validation = await this.validateRecovery({ ...input, operation });
+    if (!validation.ok) throw new Error(`Parallel ${operation} validation failed: ${validation.issues.map((issue) => `${issue.path}: ${issue.message}`).join("; ")}`);
     const original = input.state.parallelRuns?.[input.loopId]!;
     const plan = readNormalizedParallelPlan(input.state, "state.parallelPlan");
     const workItems = readParallelWorkItems(input.state);
-    const failed = plan.streams.filter((stream) => {
-      const status = original.lanes[stream.laneId]?.status;
-      return status === "failed" || status === "interrupted";
-    });
-    const allCompiled = compileStreams(input as ParallelLoopDispatchInput, { ...plan, streams: failed }, workItems);
+    const requestedLaneIds = normalizeRecoveryLaneIds(input.laneIds);
+    const selectedLaneIds = input.laneIds === undefined
+      ? plan.streams.map((stream) => stream.laneId).filter((laneId) => original.lanes[laneId]?.status === "failed" || original.lanes[laneId]?.status === "interrupted")
+      : plan.streams.map((stream) => stream.laneId).filter((laneId) => requestedLaneIds!.includes(laneId));
+    const selected = plan.streams.filter((stream) => selectedLaneIds.includes(stream.laneId));
+    const preparedLanes = compileStreams(input as ParallelLoopDispatchInput, { ...plan, streams: selected }, workItems);
     let next = original;
-    for (const prepared of allCompiled) {
-      const lane = next.lanes[prepared.stream.laneId]!;
-      if (lane.childCastId && lane.childSession) {
-        const observation = await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined);
-        if (observation) {
-          assertRecoverySnapshot(original, lane, prepared, observation.snapshot);
-          prepared.recoveryChildCastId = lane.childCastId;
-          prepared.recoveryScope = cloneExecutionScope(observation.snapshot.executionScope);
-          prepared.resumeChild = true;
-          // Resume from the last *durable* watermark. A newer observed tail may
-          // have existed only in the crashed coordinator's memory and must not
-          // cause retained usage checkpoints to be skipped.
-          prepared.recoveryAfterSequence = lane.lastEvent?.sequence ?? 0;
-          if (lane.usage) this.#latestUsage.set(lane.childCastId, lane.usage);
-        }
+    for (const prepared of preparedLanes) {
+      const lane = original.lanes[prepared.stream.laneId]!;
+      const observation = lane.childCastId ? await this.#deps.children.observe({ childCastId: lane.childCastId }).catch(() => undefined) : undefined;
+      if (lane.childSession) {
+        if (!lane.childCastId) throw new Error(`Parallel ${operation} lane ${JSON.stringify(lane.laneId)} is missing its child identity.`);
+        if (observation) assertRecoverySnapshot(original, lane, prepared, observation.snapshot, input.state.request);
+        prepared.recoveryChildCastId = lane.childCastId;
+        prepared.recoveryScope = cloneExecutionScope(observation?.snapshot.executionScope ?? lane.executionScope!);
+        // A fresh runner has no in-memory replay tail. Its reconstructed
+        // child starts sequence numbering from one, so the parent's prior
+        // watermark is not comparable and would skip the new attempt's
+        // events. Pi retirement has the same observable shape: observe() can
+        // return a retained snapshot whose replay tail was deliberately
+        // cleared. Start from zero whenever no tail is available; an observed
+        // non-empty tail continues the original sequence and can safely resume
+        // after the durable watermark.
+        prepared.recoveryAfterSequence = observation?.snapshot.events.length
+          ? lane.lastEvent?.sequence ?? 0
+          : 0;
+        prepared.recoveryOperation = operation;
+        prepared.resumeChild = true;
+        const observedUsage = observation && isParallelUsage(observation.snapshot.usage) ? observation.snapshot.usage : undefined;
+        const baseline = cumulativeUsage([lane.usage, observedUsage]) ?? EMPTY_CHILD_CAST_USAGE;
+        const descriptorBaseline = observedUsage ?? lane.usage ?? EMPTY_CHILD_CAST_USAGE;
+        const observedDescriptor = observation ? createChildCastRecoveryDescriptor(observation.snapshot) : {
+          identity: { childCastId: lane.childCastId, parentCastId: original.parentCastId, loopId: original.loopId, laneId: lane.laneId },
+          request: input.state.request,
+          cwd: lane.executionScope!.cwd,
+          compiledLoadout: expectedChildCompiledLoadout(original, prepared),
+          paths: childSessionPaths(lane.childSession),
+          executionScope: cloneExecutionScope(lane.executionScope!),
+          attempt: lane.attempt,
+          usageBaseline: descriptorBaseline,
+        };
+        // The descriptor must match the runner's retained snapshot exactly;
+        // the parent watermark may be newer and remains in the coordinator's
+        // cumulative baseline used for replay accounting.
+        prepared.recoveryDescriptor = validateChildCastRecoveryDescriptor({ ...observedDescriptor, usageBaseline: descriptorBaseline });
+        this.#latestUsage.set(lane.childCastId, baseline);
       }
       const restarted = restartParallelLaneAttempt(next, {
         parentCastId: input.state.castId, loopId: input.loopId, runId: next.runId, laneId: lane.laneId, attempt: lane.attempt,
         ...(lane.childCastId ? { childCastId: lane.childCastId } : {}), preserveChildSession: prepared.resumeChild === true,
         timestamp: this.#now(),
       });
-      if (!restarted.applied) throw new Error(`Unable to revive lane ${JSON.stringify(lane.laneId)}.`);
+      if (!restarted.applied) throw new Error(`Unable to ${operation} lane ${JSON.stringify(lane.laneId)}.`);
       next = restarted.state;
     }
     this.#state = input.state;
     this.#input = { ...input, socket: {} as ResolvedMateriaSocket };
     this.#generation += 1;
     this.#run = next;
-    this.#prepared = allCompiled;
+    this.#prepared = preparedLanes;
     this.#nextQueueIndex = 0;
     this.#active.clear();
     this.#reserved.clear();
@@ -377,10 +470,26 @@ export class ParallelLoopDispatcher {
     replaceParallelState(input.state, { ...input.state, active: true, awaitingResponse: false, socketState: "running_parallel", failedReason: undefined, parallelRuns: { ...(input.state.parallelRuns ?? {}), [input.loopId]: next } });
     this.#deps.state.saveCastState(input.pi, input.state);
     this.#notifyProgress(this.#input, input.state, "revival", true);
+    await this.#appendEvent(input.state, "parallel_lanes_recovery", {
+      parentCastId: input.state.castId,
+      loopId: input.loopId,
+      runId: next.runId,
+      operation,
+      laneCount: selectedLaneIds.length,
+      laneIds: selectedLaneIds.slice(0, 64),
+    });
     await input.onPrepared?.();
     await this.#pump();
     await this.#maybeAllTerminal(this.#input, input.state);
     return true;
+  }
+
+  async revive(input: ParallelLoopReviveInput): Promise<boolean> {
+    return this.recover({ ...input, operation: "revive" });
+  }
+
+  async recast(input: ParallelLoopRecoveryInput): Promise<boolean> {
+    return this.recover({ ...input, operation: "recast" });
   }
 
   async cancel(input: ParallelLoopCancellationInput): Promise<void> {
@@ -499,16 +608,23 @@ export class ParallelLoopDispatcher {
         paths,
       };
       if (prepared.resumeChild) {
-        const resumed = await this.#deps.children.resume({ childCastId, mode: "resume" });
+        const recoveryOperation = prepared.recoveryOperation ?? "revive";
+        const descriptor = prepared.recoveryDescriptor;
+        if (!descriptor) throw new Error(`Parallel ${recoveryOperation} lane ${JSON.stringify(lane.laneId)} is missing its durable recovery descriptor.`);
+        const legacyMode = recoveryOperation === "recast" ? "restart" : "resume";
+        const children = this.#deps.children as ChildCastRunnerPort & { [key: string]: unknown };
+        const recovered = typeof children[recoveryOperation] === "function"
+          ? await (children[recoveryOperation] as (input: unknown) => Promise<{ snapshot: ChildCastSnapshot }>)({ childCastId, operation: recoveryOperation, recovery: descriptor })
+          : await this.#deps.children.resume({ childCastId, mode: legacyMode, recovery: descriptor });
         if (!ownsLaunch()) {
           await this.#abortChild(childCastId, "parallel launch superseded");
           return;
         }
-        assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, resumed.snapshot);
-        // Resume is owned by the child runner and may intentionally retain its
-        // original session. Persist those actual paths instead of speculative
-        // paths for the parent's new lane attempt.
-        paths = { ...resumed.snapshot.paths };
+        assertResumedSnapshot(this.#run!, lane, prepared, childCastId, attempt, scope, recovered.snapshot, state.request);
+        // Recovery is owned by the child runner and may intentionally retain
+        // its original session. Persist those actual paths instead of
+        // speculative paths for the parent's new lane attempt.
+        paths = { ...recovered.snapshot.paths };
         identity = { ...identity, paths };
       }
       if (!ownsLaunch()) {
@@ -570,13 +686,14 @@ export class ParallelLoopDispatcher {
         },
       });
       const lifecycleType = prepared.resumeChild ? "parallel_lane_resumed" : "parallel_lane_started";
+      const operation = prepared.recoveryOperation;
       // Lifecycle writes are intentionally outside slot acquisition. They are
       // guarded between awaits so a retired generation cannot write into a
       // replacement run.
       if (!this.#ownsActiveLane(input, state, prepared.stream, active)) return;
-      await this.#appendLaneLifecycle(active, state, input.loopId, prepared.stream, lifecycleType, this.#now(), { status: "running" });
+      await this.#appendLaneLifecycle(active, state, input.loopId, prepared.stream, lifecycleType, this.#now(), { status: "running", ...(operation ? { operation } : {}) });
       if (!this.#ownsActiveLane(input, state, prepared.stream, active)) return;
-      await this.#appendEvent(state, lifecycleType, { ...this.#eventProvenance(state, input.loopId, prepared.stream, active), status: "running" });
+      await this.#appendEvent(state, lifecycleType, { ...this.#eventProvenance(state, input.loopId, prepared.stream, active), status: "running", ...(operation ? { operation } : {}) });
       if (this.#ownsActiveLane(input, state, prepared.stream, active)) notifyParallelUser(input.ctx, `pi-materia spawned parallel lane "${prepared.stream.name}" for loop "${input.loopId}".`, "info");
     } catch (error) {
       if (active && this.#active.get(lane.laneId) === active) {
@@ -1065,10 +1182,11 @@ export class ParallelLoopDispatcher {
   }
   async #appendLaneLifecycle(active: ActiveLane, state: MateriaCastState, loopId: string, stream: NormalizedParallelStream, type: ParallelLaneEventArtifact["event"]["type"], occurredAt: number, details: Omit<ParallelLaneEventArtifact["event"], "type" | "occurredAt"> = {}): Promise<void> {
     const event: ParallelLaneEventArtifact = {
-      provenance: this.#eventProvenance(state, loopId, stream, active),
+      provenance: { ...this.#eventProvenance(state, loopId, stream, active), ...(details.operation ? { operation: details.operation } : {}) },
       event: {
         type,
         occurredAt,
+        ...(details.operation ? { operation: details.operation } : {}),
         ...(details.status ? { status: details.status } : {}),
         ...(details.usage && isParallelUsage(details.usage) ? { usage: compactParallelUsage(details.usage) } : {}),
         ...(details.error ? { error: boundedFailureReason(details.error) } : {}),
@@ -1209,34 +1327,36 @@ function parallelGraphHash(prepared: readonly PreparedLane[]): string {
   }));
   return createHash("sha256").update(JSON.stringify(graph)).digest("hex");
 }
-function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, snapshot: ChildCastSnapshot): void {
+function assertRecoverySnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, snapshot: ChildCastSnapshot, request?: string): void {
   if (snapshot.identity.childCastId !== lane.childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId) {
-    throw new Error(`Parallel revival child identity drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovery child identity drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
-  if (snapshot.attempt !== lane.attempt) throw new Error(`Parallel revival child attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (request !== undefined && snapshot.request !== request) throw new Error(`Parallel recovery child request drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (snapshot.attempt !== lane.attempt) throw new Error(`Parallel recovery child attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
   if (!lane.childSession || lane.childSession.childCastId !== snapshot.identity.childCastId || !sameJson(childSessionPaths(lane.childSession), snapshot.paths)) {
-    throw new Error(`Parallel revival child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovery child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
   if (!sameJson(snapshot.compiledLoadout, expectedChildCompiledLoadout(run, prepared))) {
-    throw new Error(`Parallel revival graph or initial-data drift for child ${JSON.stringify(snapshot.identity.childCastId)}.`);
+    throw new Error(`Parallel recovery graph or initial-data drift for child ${JSON.stringify(snapshot.identity.childCastId)}.`);
   }
   if (!lane.executionScope || !sameJson(snapshot.executionScope, lane.executionScope)) {
-    throw new Error(`Parallel revival execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovery execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
-  if (snapshot.cwd !== lane.executionScope.cwd) throw new Error(`Parallel revival child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (snapshot.cwd !== lane.executionScope.cwd) throw new Error(`Parallel recovery child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
 }
-function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, childCastId: string, attempt: number, scope: NonNullable<MateriaParallelLaneState["executionScope"]>, snapshot: ChildCastSnapshot): void {
+function assertResumedSnapshot(run: MateriaParallelRunState, lane: MateriaParallelLaneState, prepared: PreparedLane, childCastId: string, attempt: number, scope: NonNullable<MateriaParallelLaneState["executionScope"]>, snapshot: ChildCastSnapshot, request?: string): void {
   if (snapshot.identity.childCastId !== childCastId || snapshot.identity.parentCastId !== run.parentCastId || snapshot.identity.loopId !== run.loopId || snapshot.identity.laneId !== lane.laneId || snapshot.attempt !== attempt) {
-    throw new Error(`Parallel resumed child identity or attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovered child identity or attempt drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
+  if (request !== undefined && snapshot.request !== request) throw new Error(`Parallel recovered child request drift for lane ${JSON.stringify(lane.laneId)}.`);
   if (!lane.childSession || !sameJson(childSessionPaths(lane.childSession), snapshot.paths)) {
-    throw new Error(`Parallel resumed child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovered child session path drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
   if (!sameJson(snapshot.compiledLoadout, expectedChildCompiledLoadout(run, prepared))) {
-    throw new Error(`Parallel resumed child graph or initial-data drift for lane ${JSON.stringify(lane.laneId)}.`);
+    throw new Error(`Parallel recovered child graph or initial-data drift for lane ${JSON.stringify(lane.laneId)}.`);
   }
-  if (!sameJson(snapshot.executionScope, scope)) throw new Error(`Parallel resumed child execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
-  if (snapshot.cwd !== scope.cwd) throw new Error(`Parallel resumed child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (!sameJson(snapshot.executionScope, scope)) throw new Error(`Parallel recovered child execution scope drift for lane ${JSON.stringify(lane.laneId)}.`);
+  if (snapshot.cwd !== scope.cwd) throw new Error(`Parallel recovered child cwd drift for lane ${JSON.stringify(lane.laneId)}.`);
 }
 function expectedChildCompiledLoadout(run: MateriaParallelRunState, prepared: PreparedLane): ChildCastSnapshot["compiledLoadout"] {
   return {
@@ -1250,6 +1370,30 @@ function expectedChildCompiledLoadout(run: MateriaParallelRunState, prepared: Pr
 }
 function childSessionPaths(session: NonNullable<MateriaParallelLaneState["childSession"]>): ChildCastSnapshot["paths"] {
   return { sessionPath: session.sessionPath, artifactRoot: session.artifactRoot, runDirectory: session.runDirectory };
+}
+function recoveryArtifactIdentity(state: MateriaCastState, loopId: string, run: MateriaParallelRunState, lane: MateriaParallelLaneState): ParallelLaneArtifactIdentity {
+  const paths = lane.childSession ? childSessionPaths(lane.childSession) : lanePaths(state, loopId, lane.laneId, lane.attempt);
+  return {
+    parentCastId: state.castId,
+    runId: run.runId,
+    loopId,
+    laneId: lane.laneId,
+    childCastId: lane.childCastId ?? childCastIdentity(state.castId, loopId, lane.laneId, lane.attempt),
+    planId: run.planIdentity.planId,
+    graphHash: run.graphIdentity.graphHash,
+    branchId: lane.branchId,
+    executionScopeId: lane.executionScope?.id ?? "missing-scope",
+    attempt: lane.attempt,
+    streamIndex: lane.streamIndex,
+    workItemIndexes: [...lane.workItemIndexes],
+    coordinatorArtifactRoot: path.dirname(lanePaths(state, loopId, lane.laneId, lane.attempt).runDirectory),
+    paths,
+  };
+}
+function normalizeRecoveryLaneIds(value: ParallelLoopRecoveryInput["laneIds"]): string[] | undefined {
+  if (Array.isArray(value)) return [...value];
+  if (value && typeof value === "object" && typeof (value as ReadonlySet<string>).values === "function") return [...(value as ReadonlySet<string>)];
+  return undefined;
 }
 function sameStrings(left: readonly string[], right: readonly string[]): boolean { return left.length === right.length && left.every((value, index) => value === right[index]); }
 function sameNumbers(left: readonly number[], right: readonly number[]): boolean { return left.length === right.length && left.every((value, index) => value === right[index]); }

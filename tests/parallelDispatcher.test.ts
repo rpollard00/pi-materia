@@ -910,7 +910,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     expect(budgetChecks).toBe(budgetChecksAfterLaunch + 2);
   });
 
-  test("replays from a stale durable watermark when reviving a child", async () => {
+  test("resets replay watermark when a retired child has no retained event tail", async () => {
     const state = makeState();
     const initial = dispatcher();
     await initial.dispatcher.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
@@ -920,8 +920,10 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     for (const child of initial.childRunner.listSnapshots()) initial.childRunner.fail(child.identity.childCastId, { error: "retry" });
     await flush(initial.childRunner);
 
-    // Model a crash whose last observational watermark never reached disk.
-    state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent = undefined;
+    // A retired child remains observable for recovery, but its replay tail is
+    // intentionally cleared. The durable lane watermark is therefore from a
+    // sequence space that the replacement child will restart from one.
+    expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBeGreaterThan(0);
     let resumedAfterSequence: number | undefined;
     const children = {
       start: initial.childRunner.start.bind(initial.childRunner),
@@ -1178,5 +1180,38 @@ describe("workspace-neutral parallel loop dispatcher", () => {
 
     expect(state.runState.usage.tokens.total).toBe(15);
     expect(state.runState.usage.cost.total).toBeCloseTo(1.5);
+  });
+
+  test("recovers only selected lanes with the requested operation and preserves the other failed lane", async () => {
+    const state = makeState();
+    const childRunner = createFakeChildCastRunner({ now: () => 10 });
+    const subject = new ParallelLoopDispatcher({ children: childRunner, state: { saveCastState: () => undefined } });
+    await subject.dispatch({ pi: {} as any, ctx: {} as any, state, socket: {} as any, loopId: "build", config: { maxConcurrency: 3 } });
+    const initial = childRunner.listSnapshots();
+    const byLane = (laneId: string) => initial.find((child) => child.identity.laneId === laneId)!;
+    childRunner.complete(byLane("lane-a").identity.childCastId, { output: { result: "a" } });
+    childRunner.fail(byLane("lane-b").identity.childCastId, { error: "b failed" });
+    childRunner.fail(byLane("lane-c").identity.childCastId, { error: "c failed" });
+    await flush(childRunner);
+
+    const laneCBefore = structuredClone(state.parallelRuns!.build!.lanes["lane-c"]);
+    const events: Array<{ type: string; data: any }> = [];
+    const recovered = new ParallelLoopDispatcher({
+      children: childRunner,
+      state: { saveCastState: () => undefined },
+      artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => events.push({ type, data }) },
+    });
+    await recovered.recast({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, laneIds: new Set(["lane-b"]) });
+
+    const recastChild = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-b")!;
+    expect(recastChild.operation).toBe("recast");
+    expect(recastChild.attempt).toBe(2);
+    expect(state.parallelRuns!.build!.lanes["lane-c"]).toEqual(laneCBefore);
+    expect(events.find((event) => event.type === "parallel_lanes_recovery")?.data).toMatchObject({ operation: "recast", laneIds: ["lane-b"] });
+
+    childRunner.complete(recastChild.identity.childCastId, { output: { result: "b2" } });
+    await flush(childRunner);
+    expect(state.parallelRuns!.build!.lanes["lane-b"]!.status).toBe("accepted");
+    expect(state.parallelRuns!.build!.lanes["lane-c"]!.status).toBe("failed");
   });
 });

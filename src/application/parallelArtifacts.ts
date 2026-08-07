@@ -44,6 +44,8 @@ export interface ParallelLaneEventArtifact {
   event: {
     type: "parallel_lane_started" | "parallel_lane_resumed" | "usage_checkpoint" | "parallel_lane_terminal" | "parallel_lane_cancelled" | "parallel_lane_budget_exceeded";
     occurredAt: number;
+    /** Recovery verb, present on recovery lifecycle evidence. */
+    operation?: "revive" | "recast";
     status?: string;
     usage?: ChildCastUsage;
     error?: string;
@@ -61,6 +63,8 @@ export interface ParallelLaneDiagnosticArtifact {
 /** Parent-owned lane telemetry, independent of repository or workspace state. */
 export interface ParallelLaneArtifactPort {
   initialize(input: ParallelLaneArtifactIdentity): Promise<ParallelLaneArtifactPaths>;
+  /** Validate the durable manifest before a retained lane is reopened. */
+  validateProvenance?(input: ParallelLaneArtifactIdentity): Promise<void>;
   appendEvent(input: ParallelLaneArtifactIdentity & { event: ParallelLaneEventArtifact }): Promise<void>;
   writeTerminalResult(input: ParallelLaneArtifactIdentity & { result: ChildCastTerminalResult; usage?: ChildCastUsage }): Promise<void>;
   writeDiagnostics(input: ParallelLaneArtifactIdentity & { diagnostics: readonly ParallelLaneDiagnosticArtifact[] }): Promise<void>;

@@ -1,4 +1,4 @@
-import { appendFile, mkdir } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type {
   ParallelLaneArtifactIdentity,
@@ -28,23 +28,28 @@ export class FileParallelLaneArtifactStore implements ParallelLaneArtifactPort {
     await mkdir(path.dirname(paths.laneManifestPath), { recursive: true });
     await writeJsonAtomically(paths.laneManifestPath, {
       version: 1,
-      identity: {
-        parentCastId: input.parentCastId,
-        runId: input.runId,
-        loopId: input.loopId,
-        laneId: input.laneId,
-        childCastId: input.childCastId,
-        planId: input.planId,
-        graphHash: input.graphHash,
-        branchId: input.branchId,
-        executionScopeId: input.executionScopeId,
-        attempt: input.attempt,
-        streamIndex: input.streamIndex,
-        workItemIndexes: [...input.workItemIndexes],
-      },
+      identity: identityForArtifact(input),
       paths,
     });
     return paths;
+  }
+
+  async validateProvenance(input: ParallelLaneArtifactIdentity): Promise<void> {
+    const paths = artifactPaths(input.paths, input.attempt, input.coordinatorArtifactRoot);
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(await readFile(paths.laneManifestPath, "utf8"));
+    } catch (error) {
+      throw new Error(`parallel lane artifact manifest is missing or unreadable at ${paths.laneManifestPath}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!isRecord(manifest) || manifest.version !== 1 || !isRecord(manifest.identity)) {
+      throw new Error("parallel lane artifact manifest provenance is malformed");
+    }
+    const expected = identityForArtifact(input);
+    for (const [key, value] of Object.entries(expected)) {
+      if (!sameJson(manifest.identity[key], value)) throw new Error(`parallel lane artifact provenance drift at identity.${key}`);
+    }
+    if (!sameJson(manifest.paths, paths)) throw new Error("parallel lane artifact path provenance drifted");
   }
 
   async appendEvent(input: ParallelLaneArtifactIdentity & { event: ParallelLaneEventArtifact }): Promise<void> {
@@ -134,7 +139,17 @@ function identityForArtifact(input: ParallelLaneArtifactIdentity): Record<string
     branchId: input.branchId,
     executionScopeId: input.executionScopeId,
     attempt: input.attempt,
+    streamIndex: input.streamIndex,
+    workItemIndexes: [...input.workItemIndexes],
   };
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sameJson(left: unknown, right: unknown): boolean {
+  try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; }
 }
 
 function boundDiagnostic(diagnostic: ParallelLaneDiagnosticArtifact): ParallelLaneDiagnosticArtifact {
