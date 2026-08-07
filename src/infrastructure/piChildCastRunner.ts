@@ -257,19 +257,22 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     const existing = this.#records.get(childCastId);
     const retained = this.#resumable.get(childCastId);
     const snapshot = existing?.snapshot ?? retained;
-    if (!snapshot) throw new Error(`Unknown child cast ${JSON.stringify(childCastId)}.`);
-    if (existing && (existing.snapshot.status === "running" || existing.snapshot.status === "starting" || existing.snapshot.status === "queued") && !existing.terminalResult) {
-      throw new Error(`Child cast ${JSON.stringify(childCastId)} is already active.`);
+    // A coordinator can outlive this runner. In that case the descriptor is
+    // the complete source of truth needed to reconstruct the retained lane;
+    // do not turn a process restart into a silent fresh child cast.
+    const descriptor = supplied ?? (snapshot ? createChildCastRecoveryDescriptor(snapshot) : undefined);
+    if (!descriptor) throw new Error(`Unknown child cast ${JSON.stringify(childCastId)}.`);
+    if (descriptor.identity.childCastId !== childCastId) {
+      throw new Error(`Child cast recovery descriptor identity does not match ${JSON.stringify(childCastId)}.`);
     }
-    if (snapshot.status === "succeeded" && snapshot.accepted) {
-      throw new Error(`Child cast ${JSON.stringify(childCastId)} was accepted and cannot be resumed.`);
-    }
-    const descriptor = supplied ?? createChildCastRecoveryDescriptor(snapshot);
-    if (descriptor.identity.childCastId !== childCastId || !sameIdentity(descriptor.identity, snapshot.identity)) {
-      throw new Error(`Child cast recovery descriptor identity drifted for ${JSON.stringify(childCastId)}.`);
-    }
-    if (descriptor.attempt !== snapshot.attempt) {
-      throw new Error(`Child cast recovery descriptor attempt ${descriptor.attempt} does not match retained attempt ${snapshot.attempt}.`);
+    if (snapshot) {
+      if (existing && (existing.snapshot.status === "running" || existing.snapshot.status === "starting" || existing.snapshot.status === "queued") && !existing.terminalResult) {
+        throw new Error(`Child cast ${JSON.stringify(childCastId)} is already active.`);
+      }
+      if (snapshot.status === "succeeded" && snapshot.accepted) {
+        throw new Error(`Child cast ${JSON.stringify(childCastId)} was accepted and cannot be resumed.`);
+      }
+      assertRecoveryDescriptorMatchesSnapshot(descriptor, snapshot, childCastId);
     }
 
     if (existing) await existing.close.catch(() => undefined);
@@ -283,10 +286,10 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
       attempt: descriptor.attempt + 1,
     };
     const replacement = await this.#prepareRecord(inputForLaunch, inputForLaunch.attempt!, operation);
-    replacement.snapshot.events = [...snapshot.events];
-    replacement.snapshot.diagnostics = [...snapshot.diagnostics];
-    replacement.snapshot.usage = mergeChildCastUsage(snapshot.usage, descriptor.usageBaseline);
-    replacement.nextSequence = existing?.nextSequence ?? ((snapshot.events.at(-1)?.sequence ?? 0) + 1);
+    replacement.snapshot.events = snapshot ? [...snapshot.events] : [];
+    replacement.snapshot.diagnostics = snapshot ? [...snapshot.diagnostics] : [];
+    replacement.snapshot.usage = mergeChildCastUsage(snapshot?.usage ?? EMPTY_CHILD_CAST_USAGE, descriptor.usageBaseline);
+    replacement.nextSequence = existing?.nextSequence ?? ((snapshot?.events.at(-1)?.sequence ?? 0) + 1);
     if (existing) {
       replacement.observers = existing.observers;
       replacement.nextObserverId = existing.nextObserverId;
@@ -294,10 +297,12 @@ export class PiChildCastRunner implements ChildCastRunnerPort {
     replacement.snapshot.updatedAt = this.#now();
     this.#resumable.delete(childCastId);
     this.#records.set(childCastId, replacement);
+    this.#emit(replacement, { type: "recovery", payload: { operation, attempt: replacement.snapshot.attempt } });
     try {
       await this.#launch(replacement, inputForLaunch);
     } catch (error) {
       this.#records.delete(childCastId);
+      await this.#cleanupLaunchFiles(replacement);
       if (retained) this.#resumable.set(childCastId, retained);
       else if (existing) this.#records.set(childCastId, existing);
       throw error;
@@ -809,6 +814,46 @@ function sameIdentity(left: ChildCastSnapshot["identity"], right: ChildCastSnaps
     && left.parentCastId === right.parentCastId
     && left.loopId === right.loopId
     && left.laneId === right.laneId;
+}
+
+function assertRecoveryDescriptorMatchesSnapshot(
+  descriptor: ChildCastRecoveryDescriptor,
+  snapshot: ChildCastSnapshot,
+  childCastId: string,
+): void {
+  if (!sameIdentity(descriptor.identity, snapshot.identity)) {
+    throw new Error(`Child cast recovery descriptor identity drifted for ${JSON.stringify(childCastId)}.`);
+  }
+  if (descriptor.attempt !== snapshot.attempt) {
+    throw new Error(`Child cast recovery descriptor attempt ${descriptor.attempt} does not match retained attempt ${snapshot.attempt}.`);
+  }
+  const immutableFields: Array<[string, unknown, unknown]> = [
+    ["request", descriptor.request, snapshot.request],
+    ["cwd", descriptor.cwd, snapshot.cwd],
+    ["compiledLoadout", descriptor.compiledLoadout, snapshot.compiledLoadout],
+    ["paths", descriptor.paths, snapshot.paths],
+    ["executionScope", descriptor.executionScope, snapshot.executionScope],
+    ["usageBaseline", descriptor.usageBaseline, snapshot.usage],
+  ];
+  const mismatch = immutableFields.find(([, supplied, retained]) => !sameValue(supplied, retained));
+  if (mismatch) {
+    throw new Error(`Child cast recovery descriptor ${mismatch[0]} drifted for ${JSON.stringify(childCastId)}.`);
+  }
+}
+
+function sameValue(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => sameValue(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right)) return false;
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length
+    && leftKeys.every((key, index) => key === rightKeys[index] && sameValue(left[key], right[key]));
 }
 
 function legacyChildScope(input: StartChildCastInput) {

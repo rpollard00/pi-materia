@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { describe, expect, test } from "bun:test";
 import { createPiChildCastRunner, progressCheckpointFromEvent, usageCheckpointFromEvent, type PiChildProcessSpawner } from "../src/infrastructure/index.js";
-import type { StartChildCastInput } from "../src/application/index.js";
+import { createChildCastRecoveryDescriptor, type StartChildCastInput } from "../src/application/index.js";
 
 class FakeChild extends EventEmitter {
   readonly stdin = new PassThrough();
@@ -128,6 +128,92 @@ describe("Pi child cast runner", () => {
     await runner.retire({ childCastId: "child-1", retainForResume: false });
     expect(await runner.observe({ childCastId: "child-1" })).toBeUndefined();
     expect(children[1]!.listenerCount("close")).toBe(0);
+  });
+
+  test("recovers a retained live record with operation-specific evidence and attempt captures", async () => {
+    const children: FakeChild[] = [];
+    const runner = createPiChildCastRunner({
+      spawnProcess: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 115,
+    });
+
+    await runner.start(input());
+    children[0]!.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: {
+      status: "failed",
+      accepted: false,
+      endedAt: 116,
+      error: "retry",
+      usage: {
+        tokens: { input: 2, output: 3, cacheRead: 0, cacheWrite: 0, total: 5 },
+        cost: { input: 0.2, output: 0.3, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+      },
+    } })}\n`);
+    children[0]!.finish(1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const descriptor = createChildCastRecoveryDescriptor(runner.getSnapshot("child-1")!);
+    const recovered = await runner.recast({ recovery: descriptor });
+    expect(recovered.snapshot).toMatchObject({
+      operation: "recast",
+      attempt: 2,
+      identity: input().identity,
+      paths: input().paths,
+      usage: descriptor.usageBaseline,
+    });
+    expect(recovered.snapshot.events.at(-1)).toMatchObject({ type: "recovery", payload: { operation: "recast", attempt: 2 } });
+
+    const spec = await runner.readLaunchSpec("child-1");
+    expect(spec).toMatchObject({ operation: "recast", attempt: 2, identity: input().identity, paths: input().paths });
+    const launch = runner.getLaunchInvocation("child-1")!;
+    expect(launch.specPath).toContain("child-launch-attempt-2.json");
+
+    children[1]!.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: { status: "succeeded", accepted: true, endedAt: 117 } })}\n`);
+    children[1]!.finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  test("rehydrates a retained descriptor in a fresh runner and rejects retained-field drift", async () => {
+    let firstChild!: FakeChild;
+    const firstRunner = createPiChildCastRunner({
+      spawnProcess: () => {
+        firstChild = new FakeChild();
+        return firstChild as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 120,
+    });
+    await firstRunner.start(input());
+    firstChild.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: { status: "failed", accepted: false, endedAt: 121 } })}\n`);
+    firstChild.finish(1);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const descriptor = createChildCastRecoveryDescriptor(firstRunner.getSnapshot("child-1")!);
+
+    const children: FakeChild[] = [];
+    const secondRunner = createPiChildCastRunner({
+      spawnProcess: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child as never;
+      },
+      extensionPath: "/extension/index.js",
+      now: () => 122,
+    });
+    const revived = await secondRunner.revive({ recovery: descriptor });
+    expect(revived.snapshot).toMatchObject({ operation: "revive", attempt: 2, paths: descriptor.paths, usage: descriptor.usageBaseline });
+    expect(await secondRunner.readLaunchSpec("child-1")).toMatchObject({ operation: "revive", attempt: 2 });
+    expect(secondRunner.getLaunchInvocation("child-1")?.specPath).toContain("child-launch-attempt-2.json");
+
+    const drifted = { ...descriptor, request: "a different retained request" };
+    await expect(firstRunner.revive({ recovery: drifted })).rejects.toThrow(/request drifted/);
+
+    children[0]!.stdout.write(`${JSON.stringify({ type: "pi_materia_child_terminal", result: { status: "succeeded", accepted: true, endedAt: 123 } })}\n`);
+    children[0]!.finish();
+    await new Promise((resolve) => setTimeout(resolve, 10));
   });
 
   test("discards generic event usage and accepts only canonical usage checkpoints", async () => {
