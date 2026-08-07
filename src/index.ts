@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { ActiveCastConflictError, ActiveQuestConflictError, AutoCastCommandValidationError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type CastStartOptions, type CastStateRepository, type QuestStartResult } from "./application/index.js";
 import type { MateriaCastState } from "./types.js";
+import { isParallelLaneRevivalCandidate } from "./domain/parallelRecovery.js";
 import { currentCastSocketId } from "./runtime/castStateAccessors.js";
 import { routeAgentToolCallToActiveScope } from "./runtime/activeScopeToolRouting.js";
 import { publishActiveLoadoutChange } from "./presentation/activeLoadoutEvents.js";
@@ -200,7 +201,7 @@ export default function piMateria(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("materia", {
-    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], link, recast [cast-id|lane-number], revive [cast-id|lane-number], casts, quest, grid, loadout, ui, status, continue, abort.",
+    description: "Run pi-materia commands: /materia cast <task>, /materia autocast <loadout|materia:name> <prompt>, /materia budget [<tokens>], link, recast [cast-id|lane-number] or recast <cast-id> <lane-number>, revive [cast-id|lane-number] or revive <cast-id> <lane-number>, casts, quest, grid, loadout, ui, status, continue, abort.",
     getArgumentCompletions: (prefix) => getMateriaArgumentCompletions(prefix, activeContext, adapters.states, getConfiguredConfigPath),
     handler: async (args, ctx) => {
       activeContext = ctx;
@@ -934,16 +935,88 @@ function getMateriaArgumentCompletions(prefix: string, ctx: ExtensionContext | u
 
   if ((tokens[0] !== "recast" && tokens[0] !== "revive") || !ctx) return null;
   const command = tokens[0];
-  const castIdPrefix = endsWithWhitespace ? "" : (tokens[1] ?? "");
   const states = command === "revive" ? statesRepository.listRevivable(ctx) : statesRepository.listResumable(ctx);
-  const completions = states
+  const castIdPrefix = endsWithWhitespace ? "" : (tokens[1] ?? "");
+  const castCompletions = states
     .filter((state) => state.castId.startsWith(castIdPrefix))
     .map((state) => ({
       value: `${command} ${state.castId}`,
       label: `${state.castId}  ${command === "revive" ? revivableStatusLabel(state) : recastStatusLabel(state)}  socket:${command === "revive" ? (revivableStatusSocketId(state) ?? currentCastSocketId(state) ?? "-") : (currentCastSocketId(state) ?? "-")}`,
       description: truncateLine(state.request ?? state.failedReason ?? state.runState?.lastMessage ?? "", 72),
     }));
-  return completions.length ? completions : null;
+
+  // A lone positive integer selects a stable queue position in the newest
+  // failed parallel parent. Keep ordinary cast-id completion behavior for all
+  // other prefixes (including timestamp-shaped cast ids).
+  if (tokens.length === 2 && !endsWithWhitespace && /^\d+$/.test(tokens[1] ?? "")) {
+    const laneCompletions = parallelLaneCompletions(command, newestFailedParallelParent(states), false, tokens[1] ?? "");
+    return laneCompletions.length ? laneCompletions : null;
+  }
+
+  // Once an exact cast id has been entered, complete only that parent's lane
+  // numbers. This also prevents accepted lanes from becoming recovery targets.
+  if (tokens.length === 2 && endsWithWhitespace) {
+    const explicitParent = states.find((state) => state.castId === tokens[1]);
+    if (explicitParent) {
+      const laneCompletions = parallelLaneCompletions(command, explicitParent, true, "");
+      return laneCompletions.length ? laneCompletions : null;
+    }
+    // Preserve the historical cast-id list when the token is still a prefix.
+    return castCompletions.length ? castCompletions : null;
+  }
+
+  if (tokens.length === 3 && !endsWithWhitespace) {
+    const explicitParent = states.find((state) => state.castId === tokens[1]);
+    if (!explicitParent || !/^\d*$/.test(tokens[2] ?? "")) return null;
+    const laneCompletions = parallelLaneCompletions(command, explicitParent, true, tokens[2] ?? "");
+    return laneCompletions.length ? laneCompletions : null;
+  }
+
+  if (tokens.length === 1 && endsWithWhitespace) {
+    const laneCompletions = parallelLaneCompletions(command, newestFailedParallelParent(states), false, "");
+    const combined = [...castCompletions, ...laneCompletions];
+    return combined.length ? combined : null;
+  }
+
+  return castCompletions.length ? castCompletions : null;
+}
+
+const RECOVERY_LANE_NAME_MAX_LENGTH = 36;
+
+type RecoveryLaneCompletion = { value: string; label: string; description?: string };
+
+function newestFailedParallelParent(states: readonly MateriaCastState[]): MateriaCastState | undefined {
+  return states.find((state) => Object.values(state.parallelRuns ?? {}).some(isParallelLaneRevivalCandidate));
+}
+
+function recoveryRunForAutocomplete(state: MateriaCastState | undefined) {
+  if (!state) return undefined;
+  const candidates = Object.entries(state.parallelRuns ?? {}).filter(([, run]) => isParallelLaneRevivalCandidate(run));
+  return candidates.length === 1 ? candidates[0]![1] : undefined;
+}
+
+function parallelLaneCompletions(
+  command: "revive" | "recast",
+  state: MateriaCastState | undefined,
+  explicitCastId: boolean,
+  lanePrefix: string,
+): RecoveryLaneCompletion[] {
+  const run = recoveryRunForAutocomplete(state);
+  if (!run) return [];
+
+  return run.queueOrder.flatMap((laneId, index) => {
+    const lane = run.lanes[laneId];
+    const laneNumber = index + 1;
+    if (!lane || (lane.status !== "failed" && lane.status !== "interrupted") || !String(laneNumber).startsWith(lanePrefix)) return [];
+    const streamName = truncateLine(lane.name || lane.laneId, RECOVERY_LANE_NAME_MAX_LENGTH);
+    const attempt = Number.isSafeInteger(lane.attempt) ? lane.attempt : "?";
+    const value = explicitCastId ? `${command} ${state!.castId} ${laneNumber}` : `${command} ${laneNumber}`;
+    return [{
+      value,
+      label: `#${laneNumber} ${streamName} ${lane.status} attempt ${attempt}`,
+      description: truncateLine([lane.laneId, lane.failureReason].filter(Boolean).join(" · "), 72),
+    }];
+  });
 }
 
 function questListCompletions(tokens: string[], endsWithWhitespace: boolean): Array<{ value: string; label: string; description?: string }> | null {
