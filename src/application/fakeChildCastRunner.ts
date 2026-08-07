@@ -7,6 +7,9 @@ import {
   type ChildCastAbortInput,
   type ChildCastDiagnostic,
   type ChildCastObserver,
+  type ChildCastOperation,
+  type ChildCastRecoveryDescriptor,
+  type ChildCastRecoveryInput,
   type ChildCastRunnerPort,
   type ChildCastSnapshot,
   type ChildCastStartResult,
@@ -15,9 +18,14 @@ import {
   type ChildCastTerminalResult,
   type ChildCastUsage,
   type ChildCastObserveInput,
+  type RecastChildCastInput,
   type ResumeChildCastInput,
+  type ReviveChildCastInput,
   type StartChildCastInput,
   type ChildCastSubscription,
+  createChildCastRecoveryDescriptor,
+  normalizeChildCastRecoveryOperation,
+  validateChildCastRecoveryDescriptor,
 } from "./childCastRunner.js";
 
 export interface FakeChildCastRunnerOptions {
@@ -97,6 +105,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       status: this.initialStatus,
       accepted: false,
       attempt: input.attempt ?? 1,
+      operation: "start",
       startedAt: timestamp,
       updatedAt: timestamp,
       usage: clone(EMPTY_CHILD_CAST_USAGE),
@@ -145,31 +154,70 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     };
   }
 
+  async revive(input: ReviveChildCastInput | ChildCastRecoveryDescriptor): Promise<ChildCastStartResult> {
+    return this.recover("revive", input);
+  }
+
+  async recast(input: RecastChildCastInput | ChildCastRecoveryDescriptor): Promise<ChildCastStartResult> {
+    return this.recover("recast", input);
+  }
+
+  /** @deprecated Use revive or recast; legacy modes are normalized here. */
   async resume(input: ResumeChildCastInput): Promise<ChildCastStartResult> {
-    const existing = this.records.get(input.childCastId);
-    if (!existing) throw new Error(`Unknown child cast ${JSON.stringify(input.childCastId)}.`);
+    return this.recover(normalizeChildCastRecoveryOperation(input.mode), input);
+  }
+
+  private async recover(operation: Exclude<ChildCastOperation, "start">, input: ChildCastRecoveryInput | ChildCastRecoveryDescriptor | ResumeChildCastInput): Promise<ChildCastStartResult> {
+    const suppliedDescriptor = recoveryFromInput(input);
+    const requestedOperation = "operation" in input ? input.operation : undefined;
+    if (requestedOperation !== undefined && requestedOperation !== operation) {
+      throw new Error(`Child cast recovery operation ${JSON.stringify(requestedOperation)} does not match ${operation}.`);
+    }
+    const requestedChildCastId = "childCastId" in input ? input.childCastId : undefined;
+    const childCastId = requestedChildCastId ?? suppliedDescriptor?.identity.childCastId;
+    if (!childCastId) throw new Error("Child cast recovery requires a childCastId or durable recovery descriptor.");
+    const existing = this.records.get(childCastId);
+    if (!existing) throw new Error(`Unknown child cast ${JSON.stringify(childCastId)}.`);
+    const descriptor = suppliedDescriptor ?? createChildCastRecoveryDescriptor(existing);
     if (existing.status === "running" || existing.status === "starting" || existing.status === "queued") {
-      throw new Error(`Child cast ${JSON.stringify(input.childCastId)} is already active.`);
+      throw new Error(`Child cast ${JSON.stringify(childCastId)} is already active.`);
     }
     if (existing.status === "succeeded" && existing.accepted) {
-      throw new Error(`Child cast ${JSON.stringify(input.childCastId)} was accepted and cannot be resumed.`);
+      throw new Error(`Child cast ${JSON.stringify(childCastId)} was accepted and cannot be resumed.`);
+    }
+    if (descriptor.identity.childCastId !== childCastId) {
+      throw new Error(`Child cast recovery descriptor identity does not match ${JSON.stringify(childCastId)}.`);
+    }
+    if (!sameIdentity(existing.identity, descriptor.identity)) {
+      throw new Error(`Child cast recovery descriptor identity drifted for ${JSON.stringify(childCastId)}.`);
+    }
+    if (descriptor.attempt !== existing.attempt) {
+      throw new Error(`Child cast recovery descriptor attempt ${descriptor.attempt} does not match retained attempt ${existing.attempt}.`);
     }
 
     const timestamp = this.now();
     const next: ChildCastSnapshot = {
       ...existing,
+      identity: clone(descriptor.identity),
+      request: descriptor.request,
+      cwd: descriptor.cwd,
+      compiledLoadout: clone(descriptor.compiledLoadout),
+      paths: clone(descriptor.paths),
+      executionScope: cloneExecutionScope(descriptor.executionScope),
       status: this.initialStatus,
       accepted: false,
-      attempt: existing.attempt + 1,
+      attempt: descriptor.attempt + 1,
+      operation,
       updatedAt: timestamp,
+      usage: mergeChildCastUsage(existing.usage, descriptor.usageBaseline),
       terminalResult: undefined,
       abort: undefined,
       events: [...existing.events],
       diagnostics: [...existing.diagnostics],
     };
-    this.records.set(input.childCastId, next);
-    this.emit(input.childCastId, { type: "resumed", payload: { mode: input.mode ?? "resume" }, occurredAt: timestamp });
-    return { childCastId: input.childCastId, snapshot: this.requireSnapshot(input.childCastId) };
+    this.records.set(childCastId, next);
+    this.emit(childCastId, { type: "recovery", payload: { operation, attempt: next.attempt }, occurredAt: timestamp });
+    return { childCastId, snapshot: this.requireSnapshot(childCastId) };
   }
 
   async retire(input: { childCastId: string; retainForResume: boolean }): Promise<void> {
@@ -314,6 +362,7 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
     const timestamp = result.endedAt;
     const { usage, ...terminalResult } = result;
     const snapshotUsage = usage ? mergeChildCastUsage(existing.usage, usage) : existing.usage;
+    const cumulativeResult = usage ? { ...terminalResult, usage: snapshotUsage } : terminalResult;
     this.records.set(childCastId, {
       ...existing,
       status: result.status,
@@ -321,10 +370,10 @@ export class FakeChildCastRunner implements ChildCastRunnerPort {
       updatedAt: timestamp,
       usage: snapshotUsage,
       ...(result.executionScope ? { executionScope: cloneExecutionScope(result.executionScope) } : {}),
-      terminalResult: clone({ ...terminalResult, ...(usage ? { usage } : {}) }),
+      terminalResult: clone(cumulativeResult),
     });
-    this.emit(childCastId, { type: "terminal", payload: terminalResult, ...(usage ? { usage } : {}), occurredAt: timestamp });
-    this.notifyTerminal(childCastId, { ...terminalResult, ...(usage ? { usage } : {}) });
+    this.emit(childCastId, { type: "terminal", payload: terminalResult, ...(usage ? { usage: snapshotUsage } : {}), occurredAt: timestamp });
+    this.notifyTerminal(childCastId, clone(cumulativeResult));
     return this.requireSnapshot(childCastId);
   }
 
@@ -356,6 +405,18 @@ export type FakeChildCastRunnerPort = FakeChildCastRunner;
 
 export function createFakeChildCastRunner(options: FakeChildCastRunnerOptions = {}): FakeChildCastRunner {
   return new FakeChildCastRunner(options);
+}
+
+function recoveryFromInput(input: ChildCastRecoveryInput | ChildCastRecoveryDescriptor | ResumeChildCastInput): ChildCastRecoveryDescriptor | undefined {
+  const candidate = "identity" in input ? input : input.recovery ?? input.descriptor ?? input.recoveryDescriptor;
+  return candidate ? validateChildCastRecoveryDescriptor(candidate) : undefined;
+}
+
+function sameIdentity(left: ChildCastSnapshot["identity"], right: ChildCastSnapshot["identity"]): boolean {
+  return left.childCastId === right.childCastId
+    && left.parentCastId === right.parentCastId
+    && left.loopId === right.loopId
+    && left.laneId === right.laneId;
 }
 
 function validateStartInput(input: StartChildCastInput): void {

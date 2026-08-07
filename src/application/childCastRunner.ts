@@ -1,4 +1,4 @@
-import type { ExecutionScope } from "../domain/executionScope.js";
+import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import type { NominalParallelLaneProgressDefinition } from "../domain/parallelProgress.js";
 import type {
   MateriaPipelineConfig,
@@ -50,6 +50,11 @@ export interface ChildCastPaths {
 
 export type ChildCastStatus = "queued" | "starting" | "running" | "succeeded" | "failed" | "interrupted";
 export type ChildCastTerminalStatus = Extract<ChildCastStatus, "succeeded" | "failed" | "interrupted">;
+
+/** The lifecycle operation represented by a child launch. */
+export type ChildCastOperation = "start" | "revive" | "recast";
+export type ChildCastRecoveryOperation = Exclude<ChildCastOperation, "start">;
+export type LegacyChildCastRecoveryOperation = "resume" | "restart";
 
 export interface ChildCastUsage {
   tokens: UsageTokens;
@@ -139,7 +144,27 @@ export interface ChildCastStreamEvent {
   total?: number;
 }
 
-/** Durable state returned by start, observe, and resume. */
+/**
+ * Process-independent information needed to recover a retained child cast.
+ *
+ * This descriptor intentionally excludes process state, replay tails, and
+ * terminal output. It is safe for coordinators to persist and pass to a new
+ * runner instance after the original process has been retired.
+ */
+export interface ChildCastRecoveryDescriptor {
+  identity: ChildCastIdentity;
+  request: string;
+  cwd: string;
+  compiledLoadout: ChildCastCompiledLoadout;
+  paths: ChildCastPaths;
+  executionScope: ExecutionScope;
+  /** Attempt most recently completed (or currently retained) by the child. */
+  attempt: number;
+  /** Monotonic usage already accounted for before the next attempt starts. */
+  usageBaseline: ChildCastUsage;
+}
+
+/** Durable state returned by start, observe, and recovery operations. */
 export interface ChildCastSnapshot {
   identity: ChildCastIdentity;
   request: string;
@@ -151,6 +176,8 @@ export interface ChildCastSnapshot {
   /** False until a terminal result explicitly accepts the child output. */
   accepted: boolean;
   attempt: number;
+  /** The operation that created this attempt. Initial starts report `start`. */
+  operation: ChildCastOperation;
   startedAt: number;
   updatedAt: number;
   usage: ChildCastUsage;
@@ -189,6 +216,8 @@ export interface ChildCastLaunchSpec {
   paths: ChildCastPaths;
   executionScope: ExecutionScope;
   attempt: number;
+  /** Operation represented by this launch. Legacy files normalize to `start`. */
+  operation: ChildCastOperation;
   /** Explicit config generated for the child, when one is required. */
   configPath?: string;
 }
@@ -221,10 +250,34 @@ export interface ChildCastSubscription {
   unsubscribe(): void;
 }
 
+/** Input accepted by explicit revive and recast operations. */
+export interface ChildCastRecoveryInput {
+  /** Optional when the descriptor identity is the source of truth. */
+  childCastId?: string;
+  /** Durable retained state. The other names are compatibility aliases. */
+  recovery?: ChildCastRecoveryDescriptor;
+  descriptor?: ChildCastRecoveryDescriptor;
+  recoveryDescriptor?: ChildCastRecoveryDescriptor;
+  /** Optional for unified callers; explicit methods validate this value. */
+  operation?: ChildCastRecoveryOperation;
+}
+
+export interface ReviveChildCastInput extends ChildCastRecoveryInput {
+  operation?: "revive";
+}
+
+export interface RecastChildCastInput extends ChildCastRecoveryInput {
+  operation?: "recast";
+}
+
+/** Legacy input retained for callers that have not migrated to explicit verbs. */
 export interface ResumeChildCastInput {
   childCastId: string;
-  /** Resume keeps the same lane identity and increments its attempt. */
-  mode?: "resume" | "restart";
+  /** `resume` normalizes to revive; `restart` normalizes to recast. */
+  mode?: LegacyChildCastRecoveryOperation;
+  recovery?: ChildCastRecoveryDescriptor;
+  descriptor?: ChildCastRecoveryDescriptor;
+  recoveryDescriptor?: ChildCastRecoveryDescriptor;
 }
 
 export interface ChildCastAbortInput {
@@ -258,15 +311,128 @@ export interface ChildCastRunnerPort {
   start(input: StartChildCastInput): Promise<ChildCastStartResult>;
   observe(input: ChildCastObserveInput): Promise<ChildCastObservation | undefined>;
   subscribe(input: ChildCastObserveInput, observer: ChildCastObserver): ChildCastSubscription;
+  revive(input: ReviveChildCastInput | ChildCastRecoveryDescriptor): Promise<ChildCastStartResult>;
+  recast(input: RecastChildCastInput | ChildCastRecoveryDescriptor): Promise<ChildCastStartResult>;
+  /** @deprecated Use revive or recast. Legacy modes are normalized. */
   resume(input: ResumeChildCastInput): Promise<ChildCastStartResult>;
   abort(input: ChildCastAbortInput): Promise<ChildCastAbortResult>;
   /** Release terminal process, parser, capture, observer, and replay resources. */
   retire(input: RetireChildCastInput): Promise<void>;
 }
 
+/**
+ * Validate and clone a durable recovery descriptor before it crosses an
+ * application/infrastructure boundary.
+ */
+export function validateChildCastRecoveryDescriptor(input: unknown): ChildCastRecoveryDescriptor {
+  if (!isRecord(input)) throw new Error("Child cast recovery descriptor must be an object.");
+  const identity = validateIdentity(input.identity);
+  const request = requiredString(input.request, "request");
+  const cwd = requiredString(input.cwd, "cwd");
+  const paths = validatePaths(input.paths);
+  if (!isRecord(input.compiledLoadout) || !input.compiledLoadout.loadout || !isRecord(input.compiledLoadout.initialData)) {
+    throw new Error("Child cast recovery descriptor compiledLoadout must contain a loadout and initialData object.");
+  }
+  if (!isRecord(input.executionScope)) throw new Error("Child cast recovery descriptor executionScope must be an object.");
+  const scope = cloneExecutionScope(input.executionScope as ExecutionScope);
+  if (scope.cwd !== cwd) throw new Error("Child cast recovery descriptor executionScope.cwd must match cwd.");
+  const attempt = input.attempt;
+  if (!Number.isSafeInteger(attempt) || (attempt as number) < 1) throw new Error("Child cast recovery descriptor attempt must be a positive safe integer.");
+  const usageBaseline = validateUsage(input.usageBaseline, "usageBaseline");
+  return {
+    identity,
+    request,
+    cwd,
+    compiledLoadout: cloneValue(input.compiledLoadout) as ChildCastCompiledLoadout,
+    paths,
+    executionScope: scope,
+    attempt: attempt as number,
+    usageBaseline,
+  };
+}
+
+/** Build a recovery descriptor from a child snapshot without retaining replay data. */
+export function createChildCastRecoveryDescriptor(snapshot: ChildCastSnapshot): ChildCastRecoveryDescriptor {
+  return validateChildCastRecoveryDescriptor({
+    identity: snapshot.identity,
+    request: snapshot.request,
+    cwd: snapshot.cwd,
+    compiledLoadout: snapshot.compiledLoadout,
+    paths: snapshot.paths,
+    executionScope: snapshot.executionScope,
+    attempt: snapshot.attempt,
+    usageBaseline: snapshot.usage,
+  });
+}
+
+/** Compatibility spelling for code that treats the descriptor as a projection. */
+export const childCastRecoveryDescriptorFromSnapshot = createChildCastRecoveryDescriptor;
+
+/** Normalize old resume/restart names at the contract boundary. */
+export function normalizeChildCastRecoveryOperation(operation: ChildCastRecoveryOperation | LegacyChildCastRecoveryOperation | undefined): ChildCastRecoveryOperation {
+  if (operation === undefined || operation === "resume" || operation === "revive") return "revive";
+  if (operation === "restart" || operation === "recast") return "recast";
+  throw new Error(`Unknown child cast recovery operation ${JSON.stringify(operation)}.`);
+}
+
 /** Short aliases for callers that prefer the port-oriented names. */
 export type ChildCastRunner = ChildCastRunnerPort;
 export type ChildCastStartInput = StartChildCastInput;
 export type ChildCastResumeInput = ResumeChildCastInput;
+export type ChildCastReviveInput = ReviveChildCastInput;
+export type ChildCastRecastInput = RecastChildCastInput;
+export type ChildCastRecoveryRequest = ChildCastRecoveryInput;
 export type ChildCastObserveRequest = ChildCastObserveInput;
 export type ChildCastAbortRequest = ChildCastAbortInput;
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requiredString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) throw new Error(`Child cast recovery descriptor ${label} must be a non-empty string.`);
+  return value;
+}
+
+function validateIdentity(value: unknown): ChildCastIdentity {
+  if (!isRecord(value)) throw new Error("Child cast recovery descriptor identity must be an object.");
+  return {
+    childCastId: requiredString(value.childCastId, "identity.childCastId"),
+    parentCastId: requiredString(value.parentCastId, "identity.parentCastId"),
+    loopId: requiredString(value.loopId, "identity.loopId"),
+    laneId: requiredString(value.laneId, "identity.laneId"),
+  };
+}
+
+function validatePaths(value: unknown): ChildCastPaths {
+  if (!isRecord(value)) throw new Error("Child cast recovery descriptor paths must be an object.");
+  return {
+    sessionPath: requiredString(value.sessionPath, "paths.sessionPath"),
+    artifactRoot: requiredString(value.artifactRoot, "paths.artifactRoot"),
+    runDirectory: requiredString(value.runDirectory, "paths.runDirectory"),
+  };
+}
+
+function validateUsage(value: unknown, label: string): ChildCastUsage {
+  if (!isRecord(value) || !isRecord(value.tokens) || !isRecord(value.cost)) throw new Error(`Child cast recovery descriptor ${label} must contain tokens and cost.`);
+  const tokens = validateUsageNumbers(value.tokens, `${label}.tokens`);
+  const cost = validateUsageNumbers(value.cost, `${label}.cost`);
+  return { tokens, cost };
+}
+
+function validateUsageNumbers(value: Record<string, any>, label: string): UsageTokens {
+  const fields = ["input", "output", "cacheRead", "cacheWrite", "total"] as const;
+  const result = {} as UsageTokens;
+  for (const field of fields) {
+    const number = value[field];
+    if (typeof number !== "number" || !Number.isFinite(number) || number < 0) throw new Error(`Child cast recovery descriptor ${label}.${field} must be a finite non-negative number.`);
+    result[field] = number;
+  }
+  return result;
+}
+
+function cloneValue<T>(value: T): T {
+  if (value === null || value === undefined || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((item) => cloneValue(item)) as T;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, cloneValue(child)])) as T;
+}

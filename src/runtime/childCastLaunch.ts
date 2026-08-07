@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import type { ChildCastLaunchSpec } from "../application/childCastRunner.js";
+import type { ChildCastLaunchSpec, ChildCastOperation } from "../application/childCastRunner.js";
 import { cloneExecutionScope, type ExecutionScope } from "../domain/executionScope.js";
 import type { NominalParallelLaneProgressDefinition } from "../domain/parallelProgress.js";
 import type { MateriaCastState, ResolvedMateriaPipeline } from "../types.js";
@@ -50,6 +50,7 @@ export async function runChildCastLaunch(
             loopId: spec.identity.loopId,
             laneId: spec.identity.laneId,
             attempt: spec.attempt,
+            operation: spec.operation,
           },
         },
       },
@@ -92,10 +93,10 @@ export async function waitForChildCastTerminal(
 
 export async function readChildLaunchSpec(file: string): Promise<ChildCastLaunchSpec> {
   const parsed: unknown = JSON.parse(await readFile(file, "utf8"));
-  if (!isRecord(parsed) || parsed.version !== 1 || !validIdentity(parsed.identity) || typeof parsed.request !== "string" || typeof parsed.cwd !== "string" || !isRecord(parsed.compiledLoadout) || !validPaths(parsed.paths) || !validExecutionScope(parsed.executionScope) || typeof parsed.attempt !== "number" || !Number.isSafeInteger(parsed.attempt) || parsed.attempt < 1 || (parsed.configPath !== undefined && typeof parsed.configPath !== "string")) {
+  if (!isRecord(parsed) || parsed.version !== 1 || !validIdentity(parsed.identity) || typeof parsed.request !== "string" || typeof parsed.cwd !== "string" || !isRecord(parsed.compiledLoadout) || !validPaths(parsed.paths) || !validExecutionScope(parsed.executionScope) || typeof parsed.attempt !== "number" || !Number.isSafeInteger(parsed.attempt) || parsed.attempt < 1 || (parsed.configPath !== undefined && typeof parsed.configPath !== "string") || (parsed.operation !== undefined && !validChildCastOperation(parsed.operation))) {
     throw new Error(`Invalid child launch specification: ${file}`);
   }
-  return parsed as unknown as ChildCastLaunchSpec;
+  return { ...parsed, operation: parsed.operation ?? "start" } as unknown as ChildCastLaunchSpec;
 }
 
 interface ChildTerminalPayload {
@@ -194,5 +195,9 @@ function childLoopCursor(pipeline: ResolvedMateriaPipeline, loopId: string | und
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validChildCastOperation(value: unknown): value is ChildCastOperation {
+  return value === "start" || value === "revive" || value === "recast";
 }
 
