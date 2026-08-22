@@ -1,15 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
-import type { CastStartOptions, ParallelCastRecoveryRequest } from "../application/ports.js";
+import type { CastStartOptions } from "../application/ports.js";
 import {
   extendEdgeTraversalAllowanceForRevive,
   extendSameSocketRecoveryAllowanceForRevive,
 } from "../application/recoveryPolicy.js";
 import { resolveArtifactRoot } from "../config/config.js";
 import { cloneExecutionScope, createBaseExecutionScope } from "../domain/executionScope.js";
-import { intrinsicParallelFanInHandoff } from "../domain/parallelFanIn.js";
 import { isParallelLaneRevivalCandidate } from "../domain/parallelRecovery.js";
-import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import type {
   LoadedConfig,
@@ -24,7 +22,7 @@ import { createRunState } from "../telemetry/usage.js";
 import { safeTimestamp } from "../utilities/artifacts.js";
 import type { AgentControllerValidationResult, PipelineSocketDetail } from "./agentControllerCompatibility.js";
 import type { AdvancementLifecycleDiagnostics } from "./agentPromptDispatch.js";
-import type { ParallelLoopDispatcher } from "./parallelDispatcher.js";
+import type { ParallelLaneRecoveryRequest } from "./parallelLaneRecovery.js";
 import type { CastStartFailure } from "./castTermination.js";
 import type { EventBus } from "./eventBus.js";
 import type { LifecycleEventOverrides } from "./nativeEventing.js";
@@ -129,8 +127,10 @@ export interface CastLifecycleDependencies {
       entryId?: string,
     ): Promise<void>;
   };
-  /** Optional experimental parallel lane recovery boundary. */
-  parallel?: Pick<ParallelLoopDispatcher, "revive"> & Partial<Pick<ParallelLoopDispatcher, "recast">>;
+  /** Optional lane recovery boundary for parallel runs. */
+  parallelRecovery?: {
+    recover(input: ParallelLaneRecoveryRequest): Promise<MateriaCastState>;
+  };
   ui: {
     updateWidget(
       ctx: ExtensionContext,
@@ -285,110 +285,24 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     pi: ExtensionAPI,
     ctx: ExtensionContext,
     castId: string,
-    parallelRecovery?: ParallelCastRecoveryRequest,
   ): Promise<MateriaCastState> {
     const state = deps.state.loadCastStateById(ctx, castId);
     if (!state) throw new Error(`Unknown pi-materia cast id "${castId}" in this session.`);
-    assertNoActiveNativeCast(ctx, state, parallelRecovery?.operation === "recast" ? "recasting" : "reviving");
+    assertNoActiveNativeCast(ctx, state, "reviving");
 
-    const requestedParallelRun = parallelRecovery ? state.parallelRuns?.[parallelRecovery.loopId] : undefined;
-    if (parallelRecovery && !requestedParallelRun) {
-      throw new Error(`Cast ${state.castId} has no persisted parallel run for loop "${parallelRecovery.loopId}".`);
-    }
-    const parallelCandidates = parallelRecovery && requestedParallelRun
-      ? [[parallelRecovery.loopId, requestedParallelRun] as [string, NonNullable<typeof requestedParallelRun>]]
-      : Object.entries(state.parallelRuns ?? {})
-        .filter(([, run]) => isParallelLaneRevivalCandidate(run));
+    // The cast lifecycle decides *whether* this cast has recoverable parallel
+    // work; the lane recovery module owns the recovery itself.
+    const parallelCandidates = Object.entries(state.parallelRuns ?? {})
+      .filter(([, run]) => isParallelLaneRevivalCandidate(run));
     if (parallelCandidates.length > 0) {
       if (parallelCandidates.length > 1) {
         throw new Error(`Cast ${state.castId} has multiple failed parallel lane runs; revive one run at a time is required.`);
       }
       const [loopId] = parallelCandidates[0]!;
-      if (!deps.parallel) throw new Error("Parallel lane revival is unavailable in this runtime.");
-
-      const socket = currentSocketOrThrow(state);
-      const operation = parallelRecovery?.operation ?? "revive";
-      const operationPast = operation === "recast" ? "recast" : "revived";
-      const recover = operation === "recast" ? deps.parallel.recast : deps.parallel.revive;
-      if (!recover) throw new Error("Parallel recast is unavailable in this runtime.");
-      await recover({
-        pi,
-        ctx,
-        state,
-        loopId,
-        config: { maxConcurrency: parallelCandidates[0]![1].maxConcurrency },
-        ...(parallelRecovery ? { operation, laneIds: parallelRecovery.laneIds, ...(parallelRecovery.laneNumber !== undefined ? { laneNumber: parallelRecovery.laneNumber } : {}) } : {}),
-        onPrepared: async () => {
-          const persistedLoadoutIdentity = await deps.state.resolvePersistedCastLoadoutIdentity(state);
-          state.runState.loadoutId ||= persistedLoadoutIdentity?.loadoutId;
-          state.runState.loadoutName ||= persistedLoadoutIdentity?.loadoutName;
-          state.runState.currentSocketId = socket.id;
-          state.runState.currentMateria = socketMateriaName(socket);
-          state.runState.lastMessage = `${operationPast === "recast" ? "Recast" : "Revived"} parallel lanes for cast ${state.castId}.`;
-          try {
-            const configFromState = await deps.state.loadConfigFromState(state);
-            const eventBus = await deps.eventing.initializeCastEventBus(configFromState, state);
-            if (eventBus) deps.eventing.startHeartbeat(state, configFromState);
-          } catch {
-            // Event-bus restoration is best effort; lane/session state is durable.
-          }
-          await deps.artifacts.writeUsage(state.runState);
-          deps.state.saveCastState(pi, state);
-          ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-          deps.ui.updateWidget(ctx, state, { replaceOwner: true });
-          await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.revived", {
-            severity: "info",
-            message: `Cast ${state.castId} ${operationPast} failed parallel lanes.`,
-            payload: {
-              kind: "parallel_lanes",
-              operation,
-              castId: state.castId,
-              loopId,
-              runId: state.parallelRuns?.[loopId]?.runId,
-              ...(parallelRecovery ? { laneIds: [...parallelRecovery.laneIds] } : {}),
-              ...(parallelRecovery?.laneNumber !== undefined ? { laneNumber: parallelRecovery.laneNumber } : {}),
-              preservedLaneIds: Object.values(state.parallelRuns?.[loopId]?.lanes ?? {}).filter((lane) => lane.status === "accepted").map((lane) => lane.laneId),
-            },
-          });
-        },
-        onFanIn: async ({ loopId: completedLoopId, result }) => {
-          const completedLoop = state.pipeline.loops?.[completedLoopId];
-          const routeSource = completedLoop?.exit?.from ?? completedLoop?.exits?.[0]?.from;
-          const route = resolveLoopExitRoute(completedLoop, { from: routeSource, satisfied: result.satisfied });
-          if (!route) throw new Error(`Parallel loop ${JSON.stringify(completedLoopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
-          const handoff = intrinsicParallelFanInHandoff(result);
-          const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
-            ? state.data.envelope as Record<string, unknown>
-            : {};
-          state.data = {
-            ...state.data,
-            envelope: { ...existingEnvelope, satisfied: handoff.satisfied, context: handoff.context },
-            parallelFanIn: handoff.parallelFanIn,
-          };
-          delete state.data.item;
-          delete state.data.currentWorkItem;
-          delete state.data.workItem;
-          state.lastJson = handoff;
-          state.lastOutput = JSON.stringify(handoff);
-          state.lastAssistantText = state.lastOutput;
-          state.currentItemKey = undefined;
-          state.currentItemLabel = undefined;
-          deps.state.saveCastState(pi, state);
-          const target = getResolvedPipelineSocket(state.pipeline, route.targetSocketId);
-          if (!target) throw new Error(`Parallel fan-in route targets unknown socket ${JSON.stringify(route.targetSocketId)}.`);
-          await deps.execution.startSocket(pi, ctx, state, target);
-        },
-        onFailure: async ({ loopId: failedLoopId, reason }) => {
-          await deps.termination.failCast(pi, ctx, state, new Error(reason), `parallel:${failedLoopId}`);
-        },
-      });
-      ctx.ui.notify(`pi-materia cast ${state.castId} ${operationPast} failed parallel lanes${parallelRecovery ? ` (${parallelRecovery.laneIds.join(", ")})` : ""} without rerunning accepted lanes.`, "info");
-      return state;
+      if (!deps.parallelRecovery) throw new Error("Parallel lane revival is unavailable in this runtime.");
+      return deps.parallelRecovery.recover({ pi, ctx, operation: "revive", castId: state.castId, loopId });
     }
 
-    if (parallelRecovery) {
-      throw new Error(`Cast ${state.castId} has no failed parallel lane available for selective ${parallelRecovery.operation}.`);
-    }
 
     const exhaustion = state.recoveryExhaustion;
 
@@ -548,15 +462,6 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
 
     deps.state.saveCastState(pi, state);
     return resumeValidatedNativeCast(pi, ctx, state);
-  }
-
-  async function recoverParallelNativeCast(
-    pi: ExtensionAPI,
-    ctx: ExtensionContext,
-    castId: string,
-    request: ParallelCastRecoveryRequest,
-  ): Promise<MateriaCastState> {
-    return reviveNativeCast(pi, ctx, castId, request);
   }
 
   async function resumeNativeCast(
@@ -725,7 +630,6 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
   return {
     continueNativeCast,
     reactivateQueuedNativeCast,
-    recoverParallelNativeCast,
     resumeNativeCast,
     reviveNativeCast,
     startNativeCast,

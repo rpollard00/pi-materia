@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ArtifactCatalog, CastAgentTurnPort, CastBudgetPersistencePort, CastContextPort, CastLifecyclePort, CastStateRepository, CastStatusPort, ConfigRepository, EnvironmentLookup, Logger, PipelinePresenter } from "../application/index.js";
-import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, persistCastBudget, prepareAgentStartSystemPrompt, reactivateQueuedNativeCast, recoverParallelNativeCast, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
+import { buildIsolatedMateriaContext, cancelNativeCast, continueNativeCast, handleAgentEnd, handleAgentHandoffToolExecutionEnd, materiaStatusLabel, parallelLaneRecovery, persistCastBudget, prepareAgentStartSystemPrompt, reactivateQueuedNativeCast, resumeNativeCast, reviveNativeCast, startNativeCast } from "../castRuntime.js";
 import { loadConfigFromState } from "./configPersistence.js";
 import { createArtifactCatalog, createCastStateRepository, createCentralConnectedModelPolicyResolver, createCentralConnectedTelemetrySinkResolver, createConfigRepository, createConsoleLogger, createPipelinePresenter, createProcessEnvironmentLookup } from "../infrastructure/index.js";
 import type { CentralTelemetrySinkResolver } from "./nativeEventing.js";
@@ -24,7 +24,18 @@ export function createCastLifecyclePort(): CastLifecyclePort<ExtensionContext, E
     continue: continueNativeCast,
     resume: async (api, ctx, castId) => { await resumeNativeCast(api, ctx, castId); },
     revive: async (api, ctx, castId) => { await reviveNativeCast(api, ctx, castId); },
-    recoverParallel: async (api, ctx, castId, request) => { await recoverParallelNativeCast(api, ctx, castId, request); },
+    resolveParallelRecoveryTarget: (ctx, operation, argumentsText) => parallelLaneRecovery.resolveTarget({ session: ctx, operation, argumentsText }),
+    recoverParallel: async (api, ctx, castId, request) => {
+      await parallelLaneRecovery.recover({
+        pi: api,
+        ctx,
+        operation: request.operation,
+        castId,
+        loopId: request.loopId,
+        laneIds: request.laneIds,
+        ...(request.laneNumber !== undefined ? { laneNumber: request.laneNumber } : {}),
+      });
+    },
     reactivateQueuedCast: (api, ctx, castId) => reactivateQueuedNativeCast(api, ctx, castId),
     clear: async (pi, state, reason) => { await cancelNativeCast(pi, state, reason); },
   };

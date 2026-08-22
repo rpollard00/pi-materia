@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createCastLifecycle } from "../src/runtime/castLifecycle.js";
 
-describe("cast lifecycle parallel revival", () => {
+describe("cast lifecycle parallel revival delegation", () => {
   function makeParallelState() {
     const socket = {
       id: "Socket-2",
@@ -41,52 +41,48 @@ describe("cast lifecycle parallel revival", () => {
     };
   }
 
-  test("revives an intrinsic parallel region without a loop concurrency override", async () => {
+  test("delegates bulk parallel revival to the lane recovery module with the single candidate run", async () => {
     const state = makeParallelState();
-    const reviveCalls: any[] = [];
+    const recoverCalls: any[] = [];
     const lifecycle = createCastLifecycle({
       state: {
         loadActiveCastState: () => undefined,
         loadCastStateById: () => state,
       },
-      parallel: {
-        revive: async (input: any) => {
-          reviveCalls.push(input);
+      parallelRecovery: {
+        recover: async (input: any) => {
+          recoverCalls.push(input);
+          return state;
         },
       },
     } as any);
-    const notifications: string[] = [];
-    const ctx = { ui: { notify: (message: string) => notifications.push(message) } };
+    const ctx = { ui: { notify: () => {} } };
 
     await lifecycle.reviveNativeCast({} as any, ctx as any, state.castId);
 
-    expect(reviveCalls).toHaveLength(1);
-    expect(reviveCalls[0]).toMatchObject({ state, loopId: "work", config: { maxConcurrency: 3 } });
-    expect(notifications.at(-1)).toContain("revived failed parallel lanes");
+    expect(recoverCalls).toHaveLength(1);
+    expect(recoverCalls[0]).toMatchObject({ operation: "revive", castId: "cast-1", loopId: "work" });
   });
 
-  test("dispatches selected lane recast through the native parallel recovery boundary", async () => {
+  test("rejects a cast with multiple recoverable parallel runs before delegating", async () => {
     const state = makeParallelState();
-    const recastCalls: any[] = [];
+    state.parallelRuns.extra = { ...state.parallelRuns.work, runId: "parallel-2" };
+    let recovered = false;
     const lifecycle = createCastLifecycle({
       state: {
         loadActiveCastState: () => undefined,
         loadCastStateById: () => state,
       },
-      parallel: {
-        revive: async () => undefined,
-        recast: async (input: any) => {
-          recastCalls.push(input);
+      parallelRecovery: {
+        recover: async () => {
+          recovered = true;
+          return state;
         },
       },
     } as any);
-    const notifications: string[] = [];
-    const ctx = { ui: { notify: (message: string) => notifications.push(message) } };
+    const ctx = { ui: { notify: () => {} } };
 
-    await lifecycle.recoverParallelNativeCast({} as any, ctx as any, state.castId, { operation: "recast", loopId: "work", laneIds: ["lane-b"], laneNumber: 2 });
-
-    expect(recastCalls).toHaveLength(1);
-    expect(recastCalls[0]).toMatchObject({ state, loopId: "work", config: { maxConcurrency: 3 }, operation: "recast", laneIds: ["lane-b"], laneNumber: 2 });
-    expect(notifications.at(-1)).toContain("recast failed parallel lanes (lane-b)");
+    await expect(lifecycle.reviveNativeCast({} as any, ctx as any, state.castId)).rejects.toThrow("multiple failed parallel lane runs");
+    expect(recovered).toBe(false);
   });
 });

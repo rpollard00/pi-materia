@@ -39,6 +39,7 @@ import { createSocketEventProcessing } from "./socketEventProcessing.js";
 import { createSocketExecution } from "./socketExecution.js";
 import { createSocketOutputCommit } from "./socketOutputCommit.js";
 import { createParallelLoopDispatcher } from "./parallelDispatcher.js";
+import { createParallelLaneRecovery } from "./parallelLaneRecovery.js";
 import { currentMateria, currentSocketId, currentSocketOrThrow, currentSocketVisit, setCurrentSocketState } from "./sessionState.js";
 import { createTurnRecovery } from "./turnRecovery.js";
 
@@ -276,6 +277,35 @@ const { completeSocket, startSocket } = createSocketExecution({
   parallel: parallelLoopDispatcher,
 });
 
+const parallelLaneRecovery = createParallelLaneRecovery({
+  state: {
+    listLatest: listLatestCastStates,
+    loadActiveCastState,
+    loadCastStateById,
+    saveCastState,
+    loadConfigFromState,
+    resolvePersistedCastLoadoutIdentity,
+  },
+  parallel: parallelLoopDispatcher,
+  eventing: {
+    initializeCastEventBus,
+    startHeartbeat,
+    emitLifecycleEvent,
+  },
+  artifacts: {
+    writeUsage,
+  },
+  ui: {
+    updateWidget,
+  },
+  execution: {
+    startSocket,
+  },
+  termination: {
+    failCast,
+  },
+});
+
 const agentLifecycle = createAgentLifecycle({
   artifacts: {
     appendEvent,
@@ -364,7 +394,7 @@ const castLifecycle = createCastLifecycle({
     failCastAtStart,
     failCast,
   },
-  parallel: parallelLoopDispatcher,
+  parallelRecovery: parallelLaneRecovery,
   ui: {
     updateWidget,
   },
@@ -387,10 +417,10 @@ export async function handleAgentHandoffToolExecutionEnd(
 }
 export const prepareMultiTurnRefinementTurn = agentLifecycle.prepareMultiTurnRefinementTurn;
 export const reactivateQueuedNativeCast = castLifecycle.reactivateQueuedNativeCast;
-export const recoverParallelNativeCast = castLifecycle.recoverParallelNativeCast;
 export const resumeNativeCast = castLifecycle.resumeNativeCast;
 export const reviveNativeCast = castLifecycle.reviveNativeCast;
 export const startNativeCast = castLifecycle.startNativeCast;
+export { parallelLaneRecovery };
 export { persistCastBudget };
 
 /**

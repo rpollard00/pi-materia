@@ -10,8 +10,6 @@ import { PREVIOUS_CAST_CONTEXT_STATE_KEY, type LinkCastStateData, type LinkTarge
 import { addQuest, completeQuest, createShortRandomQuestId, enableQuestRunner, failRunningQuest, findNextPendingQuest, generateUniqueQuestId, movePendingQuest, requeueQuest, resolveQuestRef, resumeQuest, startQuest, stopQuestRunner, unfailQuest, updatePendingQuest, type Quest, type QuestBoard, type QuestMovePlacement, type QuestRunResult, type QuestTerminalStatus } from "../domain/questBoard.js";
 import type { DomainIssue } from "../domain/result.js";
 import {
-  parseParallelRecoveryTarget,
-  resolveParallelRecoveryTarget as resolveParallelRecoveryTargetFromState,
   type ParallelRecoveryOperation,
   type ResolvedParallelRecoveryTarget,
 } from "../domain/parallelRecovery.js";
@@ -310,13 +308,6 @@ function consumedTokensFor(state: MateriaCastState): number {
   return state.runState.usage.tokens.total;
 }
 
-function isParallelRecoveryTargetInput<TSession>(value: unknown): value is { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string } {
-  return typeof value === "object"
-    && value !== null
-    && "session" in value
-    && "operation" in value;
-}
-
 export class CastBudgetTargetError extends Error {
   readonly code = "cast_budget_target_not_found";
   constructor() {
@@ -502,42 +493,27 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
   }
 
   /**
-   * Resolve and dispatch one numbered lane recovery. The command handler uses
-   * this boundary before quest resurrection handling so a lane target can
-   * never be mistaken for a quest-linked parent cast.
+   * Dispatch an already-resolved numbered lane recovery. The command handler
+   * resolves the target first so a lane target can never be mistaken for a
+   * quest-linked parent cast; active-cast guarding lives in the runtime
+   * lane recovery module.
    */
   async recoverParallelLane(input: {
     pi: TPi;
     session: TSession;
     operation: ParallelRecoveryOperation;
-    argumentsText?: string;
+    target: Extract<ResolvedParallelRecoveryTarget, { kind: "lane" }>;
   }): Promise<Extract<ResolvedParallelRecoveryTarget, { kind: "lane" }>> {
-    const active = this.deps.states.loadActive(input.session);
-    if (active?.active) throw new Error(`A pi-materia cast is already active (${active.castId}). Abort it before selective parallel ${input.operation}.`);
-    const target = this.resolveParallelRecoveryTarget({ session: input.session, operation: input.operation, argumentsText: input.argumentsText });
-    if (target.kind !== "lane") {
-      throw new ParallelRecoveryTargetError([{ path: "laneNumber", message: "A numbered parallel lane is required for selective recovery." }]);
-    }
     if (!this.deps.lifecycle.recoverParallel) {
       throw new Error("Selective parallel lane recovery is unavailable in this runtime.");
     }
-    await this.deps.lifecycle.recoverParallel(input.pi, input.session, target.castId, {
+    await this.deps.lifecycle.recoverParallel(input.pi, input.session, input.target.castId, {
       operation: input.operation,
-      loopId: target.loopId,
-      laneIds: [target.laneId],
-      laneNumber: target.laneNumber,
+      loopId: input.target.loopId,
+      laneIds: [input.target.laneId],
+      laneNumber: input.target.laneNumber,
     });
-    return target;
-  }
-
-  /** Compatibility alias for command adapters that name the resolved target. */
-  recoverParallelTarget(input: {
-    pi: TPi;
-    session: TSession;
-    operation: ParallelRecoveryOperation;
-    argumentsText?: string;
-  }): Promise<Extract<ResolvedParallelRecoveryTarget, { kind: "lane" }>> {
-    return this.recoverParallelLane(input);
+    return input.target;
   }
 
   /**
@@ -549,42 +525,12 @@ export class CastExecutionUseCases<TSession = unknown, TPi = unknown, TAgentEven
     session: TSession;
     operation: ParallelRecoveryOperation;
     argumentsText?: string;
-  }): ResolvedParallelRecoveryTarget;
-  resolveParallelRecoveryTarget(session: TSession, operation: ParallelRecoveryOperation, argumentsText?: string): ResolvedParallelRecoveryTarget;
-  resolveParallelRecoveryTarget(
-    sessionOrInput: TSession | { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string },
-    operation?: ParallelRecoveryOperation,
-    argumentsText = "",
-  ): ResolvedParallelRecoveryTarget {
-    const input = operation === undefined && isParallelRecoveryTargetInput(sessionOrInput)
-      ? sessionOrInput
-      : { session: sessionOrInput as TSession, operation: operation ?? "revive", argumentsText };
-    const parsed = parseParallelRecoveryTarget(input.argumentsText);
-    if (!parsed.ok) throw new ParallelRecoveryTargetError(parsed.issues);
-    const resolved = resolveParallelRecoveryTargetFromState({
-      target: parsed.value,
-      states: this.deps.states.listLatest(input.session),
-      operation: input.operation,
-    });
-    if (!resolved.ok) throw new ParallelRecoveryTargetError(resolved.issues);
-    return resolved.value;
-  }
-
-  /** Explicitly named alias for command adapters that use the full target name. */
-  resolveParallelRecoveryCommandTarget(input: {
-    session: TSession;
-    operation: ParallelRecoveryOperation;
-    argumentsText?: string;
-  }): ResolvedParallelRecoveryTarget;
-  resolveParallelRecoveryCommandTarget(session: TSession, operation: ParallelRecoveryOperation, argumentsText?: string): ResolvedParallelRecoveryTarget;
-  resolveParallelRecoveryCommandTarget(
-    sessionOrInput: TSession | { session: TSession; operation: ParallelRecoveryOperation; argumentsText?: string },
-    operation?: ParallelRecoveryOperation,
-    argumentsText = "",
-  ): ResolvedParallelRecoveryTarget {
-    return operation === undefined && isParallelRecoveryTargetInput(sessionOrInput)
-      ? this.resolveParallelRecoveryTarget(sessionOrInput)
-      : this.resolveParallelRecoveryTarget(sessionOrInput as TSession, operation ?? "revive", argumentsText);
+  }): ResolvedParallelRecoveryTarget {
+    const resolve = this.deps.lifecycle.resolveParallelRecoveryTarget;
+    if (!resolve) {
+      throw new Error("Parallel lane recovery is unavailable in this runtime.");
+    }
+    return resolve(input.session, input.operation, input.argumentsText);
   }
 
   async reactivateQueuedCast(pi: TPi, session: TSession, castId: string): Promise<MateriaCastState> {

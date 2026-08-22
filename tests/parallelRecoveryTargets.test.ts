@@ -105,7 +105,7 @@ describe("numbered parallel recovery targets", () => {
   });
 
   test("use case resolves a target without dispatching lifecycle work", () => {
-    const calls: string[] = [];
+    const states = { loadActive: () => undefined, listLatest: () => [state("cast-1", { build: run() })], listResumable: () => [], listRevivable: () => [] };
     const lifecycle = {
       start: async () => undefined,
       continue: async () => undefined,
@@ -113,9 +113,16 @@ describe("numbered parallel recovery targets", () => {
       revive: async () => undefined,
       reactivateQueuedCast: async () => state("queued", {}),
       clear: () => undefined,
+      resolveParallelRecoveryTarget: (_session: string, operation: "revive" | "recast", argumentsText?: string) => {
+        const parsed = parseParallelRecoveryTarget(argumentsText);
+        if (!parsed.ok) throw new ParallelRecoveryTargetError(parsed.issues);
+        const resolved = resolveParallelRecoveryTarget({ target: parsed.value, states: states.listLatest(), operation });
+        if (!resolved.ok) throw new ParallelRecoveryTargetError(resolved.issues);
+        return resolved.value;
+      },
     } satisfies CastLifecyclePort<string, string>;
     const useCases = new CastExecutionUseCases({
-      states: { loadActive: () => undefined, listLatest: () => [state("cast-1", { build: run() })], listResumable: () => [], listRevivable: () => [] },
+      states,
       context: { buildIsolatedContext: (messages) => messages },
       agentTurns: { prepareAgentStartSystemPrompt: async () => undefined, handleAgentEnd: async () => undefined },
       lifecycle,
@@ -125,9 +132,8 @@ describe("numbered parallel recovery targets", () => {
       pipeline: {} as any,
     });
 
-    const resolved = useCases.resolveParallelRecoveryTarget("session", "revive", "2");
+    const resolved = useCases.resolveParallelRecoveryTarget({ session: "session", operation: "revive", argumentsText: "2" });
     expect(resolved).toMatchObject({ kind: "lane", castId: "cast-1", loopId: "build", laneId: "lane-two", laneNumber: 2 });
-    expect(calls).toEqual([]);
-    expect(() => useCases.resolveParallelRecoveryTarget("session", "revive", "cast-1 0")).toThrow(ParallelRecoveryTargetError);
+    expect(() => useCases.resolveParallelRecoveryTarget({ session: "session", operation: "revive", argumentsText: "cast-1 0" })).toThrow(ParallelRecoveryTargetError);
   });
 });

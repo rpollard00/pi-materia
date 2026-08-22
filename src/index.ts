@@ -453,7 +453,7 @@ export default function piMateria(pi: ExtensionAPI) {
           const argumentsText = rest.join(" ").trim();
           const target = castExecutionUseCases.resolveParallelRecoveryTarget({ session: ctx, operation: "recast", argumentsText });
           if (target.kind === "lane") {
-            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "recast", argumentsText });
+            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "recast", target });
             reportParallelLaneRecovery(pi, ctx, "recast", recovered);
             return;
           }
@@ -475,7 +475,7 @@ export default function piMateria(pi: ExtensionAPI) {
           if (target.kind === "lane") {
             // Numbered lane commands intentionally bypass quest resurrection:
             // they repair retained child state, not the parent quest record.
-            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "revive", argumentsText });
+            const recovered = await castExecutionUseCases.recoverParallelLane({ pi, session: ctx, operation: "revive", target });
             reportParallelLaneRecovery(pi, ctx, "revive", recovered);
             return;
           }

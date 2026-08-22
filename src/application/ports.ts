@@ -1,6 +1,6 @@
 import type { QuestBoard } from "../domain/questBoard.js";
 import type { ExecutionScope } from "../domain/executionScope.js";
-import type { ParallelRecoveryOperation } from "../domain/parallelRecovery.js";
+import type { ParallelRecoveryOperation, ResolvedParallelRecoveryTarget } from "../domain/parallelRecovery.js";
 import type { LoadedConfig, MateriaCastState, PiMateriaConfig, ResolvedMateriaPipeline } from "../types.js";
 
 export * from "./childCastRunner.js";
@@ -73,6 +73,8 @@ export interface CastLifecyclePort<TSession = unknown, TPi = unknown> {
   continue(pi: TPi, session: TSession, state: MateriaCastState): Promise<void>;
   resume(pi: TPi, session: TSession, castId: string): Promise<void>;
   revive(pi: TPi, session: TSession, castId: string): Promise<void>;
+  /** Resolve a numbered or bulk parallel recovery target without dispatching lifecycle work. */
+  resolveParallelRecoveryTarget?(session: TSession, operation: ParallelRecoveryOperation, argumentsText?: string): ResolvedParallelRecoveryTarget;
   /** Recover selected retained lanes without reopening the parent as a new cast. */
   recoverParallel?(pi: TPi, session: TSession, castId: string, request: ParallelCastRecoveryRequest): Promise<void>;
   /**

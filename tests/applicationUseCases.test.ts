@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { ActiveCastConflictError, ActiveQuestConflictError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
+import { ActiveCastConflictError, ActiveQuestConflictError, CastBudgetTargetError, CastBudgetUseCases, CastBudgetValidationError, CastCatalogUseCases, CastExecutionUseCases, LoadoutUseCases, ParallelRecoveryTargetError, QuestRunnerUseCases, configuredConfigPath, type ArtifactCatalog, type CastAgentTurnPort, type CastContextPort, type CastLifecyclePort, type CastStateRepository, type CastStatusPort, type ConfigRepository, type PipelinePresenter, type QuestBoardRepository } from "../src/application/index.js";
+import { parseParallelRecoveryTarget, resolveParallelRecoveryTarget } from "../src/application/index.js";
 import { createEmptyQuestBoard, enableQuestRunner, type QuestBoard } from "../src/domain/questBoard.js";
 import type { LoadedConfig, MateriaCastState, ResolvedMateriaPipeline } from "../src/types.js";
 
@@ -387,6 +388,13 @@ describe("application use cases", () => {
       resume: async () => undefined,
       revive: async () => undefined,
       recoverParallel: async (...args) => { recoveryCalls.push(args); },
+      resolveParallelRecoveryTarget: (_session, operation, argumentsText) => {
+        const parsed = parseParallelRecoveryTarget(argumentsText);
+        if (!parsed.ok) throw new ParallelRecoveryTargetError(parsed.issues);
+        const resolved = resolveParallelRecoveryTarget({ target: parsed.value, states: [failedParent], operation });
+        if (!resolved.ok) throw new ParallelRecoveryTargetError(resolved.issues);
+        return resolved.value;
+      },
       clear: () => undefined,
     };
     const useCases = new CastExecutionUseCases({
@@ -400,7 +408,8 @@ describe("application use cases", () => {
       pipeline: {} as any,
     });
 
-    const resolved = await useCases.recoverParallelLane({ pi: "pi", session: "session", operation: "recast", argumentsText: "2" });
+    const target = useCases.resolveParallelRecoveryTarget({ session: "session", operation: "recast", argumentsText: "2" });
+    const resolved = await useCases.recoverParallelLane({ pi: "pi", session: "session", operation: "recast", target });
 
     expect(resolved).toMatchObject({ castId: "parallel-parent", loopId: "build", runId: "build-run", laneId: "lane-b", laneNumber: 2 });
     expect(recoveryCalls).toEqual([["pi", "session", "parallel-parent", { operation: "recast", loopId: "build", laneIds: ["lane-b"], laneNumber: 2 }]]);
