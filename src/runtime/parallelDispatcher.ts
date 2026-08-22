@@ -100,30 +100,21 @@ export interface ParallelLoopCancellationInput {
   reason?: string;
 }
 
-export type ParallelLoopRecoveryOperation = ChildCastRecoveryOperation;
-export type ParallelRecoveryOperation = ParallelLoopRecoveryOperation;
-
 /**
  * An operation-aware recovery request. Omitting laneIds retains the historical
  * bulk behavior and selects every failed/interrupted lane in queue order.
  */
 export interface ParallelLoopRecoveryInput extends Omit<ParallelLoopDispatchInput, "socket"> {
-  operation?: ParallelLoopRecoveryOperation;
+  operation?: ChildCastRecoveryOperation;
   laneIds?: readonly string[] | ReadonlySet<string>;
   /** Stable 1-based command position for lifecycle diagnostics. */
   laneNumber?: number;
   onPrepared?: () => Promise<void>;
 }
-export type ParallelRecoveryInput = ParallelLoopRecoveryInput;
-
-/** Compatibility name retained for callers of the original bulk revival API. */
-export type ParallelLoopReviveInput = ParallelLoopRecoveryInput;
-
 export interface ParallelLoopReviveResult {
   ok: boolean;
   issues: readonly { code: string; path: string; message: string; laneId?: string }[];
 }
-export type ParallelLoopRecoveryResult = ParallelLoopReviveResult;
 
 export interface ParallelLoopDispatcherDependencies {
   children: ChildCastRunnerPort;
@@ -150,7 +141,7 @@ interface PreparedLane {
   recoveryAfterSequence?: number;
   recoveryScope?: MateriaParallelLaneState["executionScope"];
   recoveryDescriptor?: ChildCastRecoveryDescriptor;
-  recoveryOperation?: ParallelLoopRecoveryOperation;
+  recoveryOperation?: ChildCastRecoveryOperation;
   resumeChild?: boolean;
 }
 
@@ -390,10 +381,6 @@ export class ParallelLoopDispatcher {
     return { ok: issues.length === 0, issues };
   }
 
-  async validateRevival(input: ParallelLoopReviveInput): Promise<ParallelLoopReviveResult> {
-    return this.validateRecovery({ ...input, operation: input.operation ?? "revive" });
-  }
-
   async recover(input: ParallelLoopRecoveryInput): Promise<boolean> {
     const operation = input.operation ?? "revive";
     const validation = await this.validateRecovery({ ...input, operation });
@@ -489,14 +476,6 @@ export class ParallelLoopDispatcher {
     return true;
   }
 
-  async revive(input: ParallelLoopReviveInput): Promise<boolean> {
-    return this.recover({ ...input, operation: "revive" });
-  }
-
-  async recast(input: ParallelLoopRecoveryInput): Promise<boolean> {
-    return this.recover({ ...input, operation: "recast" });
-  }
-
   async cancel(input: ParallelLoopCancellationInput): Promise<void> {
     if (!this.#hasCancellationTarget(input)) return;
     if (this.#cancelPromise && this.#cancelCastId === input.state.castId) return this.#cancelPromise;
@@ -510,9 +489,6 @@ export class ParallelLoopDispatcher {
     })();
     return this.#cancelPromise;
   }
-  async abort(input: ParallelLoopCancellationInput): Promise<void> { return this.cancel(input); }
-  async shutdown(input: ParallelLoopCancellationInput): Promise<void> { return this.cancel(input); }
-
   #resetForDifferentCast(castId: string): void {
     const previous = this.#input?.state.castId ?? this.#run?.parentCastId;
     if (previous === undefined || previous === castId || this.#initialization || this.#active.size > 0 || this.#reserved.size > 0 || this.#launching.size > 0) return;
@@ -616,11 +592,9 @@ export class ParallelLoopDispatcher {
         const recoveryOperation = prepared.recoveryOperation ?? "revive";
         const descriptor = prepared.recoveryDescriptor;
         if (!descriptor) throw new Error(`Parallel ${recoveryOperation} lane ${JSON.stringify(lane.laneId)} is missing its durable recovery descriptor.`);
-        const legacyMode = recoveryOperation === "recast" ? "restart" : "resume";
-        const children = this.#deps.children as ChildCastRunnerPort & { [key: string]: unknown };
-        const recovered = typeof children[recoveryOperation] === "function"
-          ? await (children[recoveryOperation] as (input: unknown) => Promise<{ snapshot: ChildCastSnapshot }>)({ childCastId, operation: recoveryOperation, recovery: descriptor })
-          : await this.#deps.children.resume({ childCastId, mode: legacyMode, recovery: descriptor });
+        const recovered = recoveryOperation === "recast"
+          ? await this.#deps.children.recast({ childCastId, recovery: descriptor })
+          : await this.#deps.children.revive({ childCastId, recovery: descriptor });
         if (!ownsLaunch()) {
           await this.#abortChild(childCastId, "parallel launch superseded");
           return;

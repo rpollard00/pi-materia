@@ -664,8 +664,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const fanIns: any[] = [];
     const revivalStates: MateriaCastState[] = [];
     const revived = dispatcher(initial.childRunner, { artifacts, onProgressStart: (_ctx: any, nextState: MateriaCastState) => revivalStates.push(nextState) }).dispatcher;
-    expect(await revived.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
-    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
+    expect(await revived.validateRecovery({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
+    await revived.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "revive", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
 
     expect(revivalStates).toHaveLength(1);
     expect(revivalStates[0]).toBe(state);
@@ -680,8 +680,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     initial.childRunner.fail(attempt2.identity.childCastId, { error: "retry me again" });
     await flush(initial.childRunner);
     const revivedAgain = dispatcher(initial.childRunner, { artifacts }).dispatcher;
-    expect(await revivedAgain.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
-    await revivedAgain.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
+    expect(await revivedAgain.validateRecovery({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } })).toEqual({ ok: true, issues: [] });
+    await revivedAgain.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "revive", config: { maxConcurrency: 3 }, onFanIn: async (value) => { fanIns.push(value); } });
     const attempt3 = initial.childRunner.listSnapshots().find((child) => child.attempt === 3)!;
     expect(attempt3.paths).toEqual(attempt2.paths);
     expect(state.parallelRuns!.build!.lanes["lane-b"]!.childSession).toEqual({ childCastId: attempt3.identity.childCastId, ...attempt3.paths });
@@ -731,27 +731,27 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const input = { pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } };
 
     state.data.parallelPlan = { ...(state.data.parallelPlan as any), planId: "drifted" };
-    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "plan_mismatch")).toBe(true);
+    expect((await subject.validateRecovery(input)).issues.some((issue) => issue.code === "plan_mismatch")).toBe(true);
     state.data.parallelPlan = { ...(state.data.parallelPlan as any), planId: "plan-1" };
     const graphHash = state.parallelRuns!.build!.graphIdentity.graphHash;
     state.parallelRuns!.build!.graphIdentity.graphHash = "drifted";
-    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "graph_drift")).toBe(true);
+    expect((await subject.validateRecovery(input)).issues.some((issue) => issue.code === "graph_drift")).toBe(true);
     state.parallelRuns!.build!.graphIdentity.graphHash = graphHash;
     state.parallelRuns!.build!.lanes["lane-a"]!.branchId = "drifted";
-    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "branch_identity_drift")).toBe(true);
+    expect((await subject.validateRecovery(input)).issues.some((issue) => issue.code === "branch_identity_drift")).toBe(true);
     state.parallelRuns!.build!.lanes["lane-a"]!.branchId = `${state.parallelRuns!.build!.runId}:branch:lane-a`;
     const lane = state.parallelRuns!.build!.lanes["lane-a"]!;
     const scope = lane.executionScope!;
     state.branchScopes[scope.id] = { ...scope, cwd: "/drifted" };
-    expect((await subject.validateRevival(input)).issues.some((issue) => issue.code === "scope_drift")).toBe(true);
+    expect((await subject.validateRecovery(input)).issues.some((issue) => issue.code === "scope_drift")).toBe(true);
 
     state.branchScopes[scope.id] = structuredClone(scope);
     const sessionPath = lane.childSession!.sessionPath;
     lane.childSession!.sessionPath = "/drifted/session.jsonl";
-    await expect(subject.revive(input)).rejects.toThrow(/session path drift/);
+    await expect(subject.recover({ ...input, operation: "revive" })).rejects.toThrow(/session path drift/);
     lane.childSession!.sessionPath = sessionPath;
     lane.attempt += 1;
-    await expect(subject.revive(input)).rejects.toThrow(/attempt drift/);
+    await expect(subject.recover({ ...input, operation: "revive" })).rejects.toThrow(/attempt drift/);
   });
 
   test("rejects retained child initial-data drift before revival and after resume", async () => {
@@ -769,7 +769,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       start: childRunner.start.bind(childRunner),
       observe: childRunner.observe.bind(childRunner),
       subscribe: childRunner.subscribe.bind(childRunner),
-      resume: childRunner.resume.bind(childRunner),
+      revive: childRunner.revive.bind(childRunner),
+      recast: childRunner.recast.bind(childRunner),
       abort: childRunner.abort.bind(childRunner),
     });
 
@@ -783,20 +784,20 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       return drifted;
     };
     const beforeSubject = dispatcher(beforePort as any).dispatcher;
-    const beforeValidation = await beforeSubject.validateRevival({ pi: {} as any, ctx: {} as any, state: before.state, loopId: "build", config: { maxConcurrency: 3 } });
+    const beforeValidation = await beforeSubject.validateRecovery({ pi: {} as any, ctx: {} as any, state: before.state, loopId: "build", config: { maxConcurrency: 3 } });
     expect(beforeValidation.ok).toBe(false);
     expect(beforeValidation.issues).toContainEqual(expect.objectContaining({ code: "child_session_drift", laneId: "lane-a" }));
 
     const after = await setupFailedRun();
     const afterPort = delegate(after.childRunner);
-    afterPort.resume = async (input) => {
-      const resumed = await after.childRunner.resume(input);
+    afterPort.revive = async (input) => {
+      const resumed = await after.childRunner.revive(input);
       const drifted = structuredClone(resumed);
       (drifted.snapshot.compiledLoadout.initialData as any).workItems = [{ title: "corrupted", context: "corrupted" }];
       return drifted;
     };
     const afterSubject = dispatcher(afterPort as any).dispatcher;
-    await afterSubject.revive({ pi: {} as any, ctx: {} as any, state: after.state, loopId: "build", config: { maxConcurrency: 3 } });
+    await afterSubject.recover({ pi: {} as any, ctx: {} as any, state: after.state, loopId: "build", operation: "revive", config: { maxConcurrency: 3 } });
     expect(after.state.parallelRuns!.build!.lanes["lane-a"]!.status).toBe("failed");
     expect(after.state.parallelRuns!.build!.lanes["lane-a"]!.failureReason).toContain("initial-data drift");
   });
@@ -813,8 +814,9 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       observe: initial.childRunner.observe.bind(initial.childRunner),
       subscribe: initial.childRunner.subscribe.bind(initial.childRunner),
       abort: initial.childRunner.abort.bind(initial.childRunner),
-      resume: async (input: any) => {
-        const resumed = structuredClone(await initial.childRunner.resume(input));
+      recast: initial.childRunner.recast.bind(initial.childRunner),
+      revive: async (input: any) => {
+        const resumed = structuredClone(await initial.childRunner.revive(input));
         if (resumed.snapshot.identity.laneId === "lane-a") resumed.snapshot.identity.parentCastId = "other-parent";
         if (resumed.snapshot.identity.laneId === "lane-b") resumed.snapshot.identity.loopId = "other-loop";
         if (resumed.snapshot.identity.laneId === "lane-c") resumed.snapshot.cwd = "/other/cwd";
@@ -822,7 +824,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       },
     };
     const subject = dispatcher(children as any).dispatcher;
-    await subject.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } });
+    await subject.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "revive", config: { maxConcurrency: 3 } });
 
     expect(state.parallelRuns!.build!.lanes["lane-a"]!.failureReason).toContain("identity or attempt drift");
     expect(state.parallelRuns!.build!.lanes["lane-b"]!.failureReason).toContain("identity or attempt drift");
@@ -928,7 +930,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     const children = {
       start: initial.childRunner.start.bind(initial.childRunner),
       observe: initial.childRunner.observe.bind(initial.childRunner),
-      resume: initial.childRunner.resume.bind(initial.childRunner),
+      revive: initial.childRunner.revive.bind(initial.childRunner),
+      recast: initial.childRunner.recast.bind(initial.childRunner),
       abort: initial.childRunner.abort.bind(initial.childRunner),
       subscribe: (input: any, observer: any) => {
         if (input.childCastId === laneA.identity.childCastId) resumedAfterSequence = input.afterSequence;
@@ -936,7 +939,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       },
     };
     const revived = dispatcher(children as any).dispatcher;
-    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 } });
+    await revived.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "revive", config: { maxConcurrency: 3 } });
 
     expect(resumedAfterSequence).toBe(0);
     expect(state.parallelRuns!.build!.lanes["lane-a"]!.lastEvent?.sequence).toBeGreaterThan(0);
@@ -1025,7 +1028,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       "parallel_lane_started", "parallel_lane_started", "parallel_lane_cancelled", "parallel_lane_cancelled",
     ]);
     const fresh = dispatcher(childRunner).dispatcher;
-    expect(await fresh.validateRevival({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
+    expect(await fresh.validateRecovery({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 2 } })).toEqual({ ok: true, issues: [] });
   });
 
   test("reuses the same dispatcher for a later cast after cancellation", async () => {
@@ -1139,7 +1142,8 @@ describe("workspace-neutral parallel loop dispatcher", () => {
     let shutdownCheckpoint: { sequence: number } | undefined;
     const children = {
       start: childRunner.start.bind(childRunner),
-      resume: childRunner.resume.bind(childRunner),
+      revive: childRunner.revive.bind(childRunner),
+      recast: childRunner.recast.bind(childRunner),
       abort: async (input: any) => {
         // Simulate parser output flushed while process termination is pending.
         childRunner.emit(input.childCastId, { type: "message_end", usage: { tokens: { ...shutdownUsage.tokens, total: 999 }, cost: { ...shutdownUsage.cost, total: 99 } } });
@@ -1171,7 +1175,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
 
     coordinatorAlive = true;
     const revived = new ParallelLoopDispatcher({ children, state: statePort } as any);
-    await revived.revive({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 1 } });
+    await revived.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "revive", config: { maxConcurrency: 1 } });
     await flush(childRunner);
     const advancedUsage = { tokens: { input: 7, output: 8, cacheRead: 0, cacheWrite: 0, total: 15 }, cost: { input: 0.7, output: 0.8, cacheRead: 0, cacheWrite: 0, total: 1.5 } };
     childRunner.emit(child.identity.childCastId, { type: "usage_checkpoint", usage });
@@ -1202,11 +1206,12 @@ describe("workspace-neutral parallel loop dispatcher", () => {
 
     expect(state.parallelRuns!.build!.lanes["lane-b"]!.executionScope).toEqual(workspaceScope);
     const recovered = new ParallelLoopDispatcher({ children: childRunner, state: { saveCastState: () => undefined } });
-    await recovered.revive({
+    await recovered.recover({
       pi: {} as any,
       ctx: {} as any,
       state,
       loopId: "build",
+      operation: "revive",
       config: { maxConcurrency: 3 },
       laneIds: ["lane-b"],
     });
@@ -1235,7 +1240,7 @@ describe("workspace-neutral parallel loop dispatcher", () => {
       state: { saveCastState: () => undefined },
       artifacts: { appendEvent: async (_run: unknown, type: string, data: unknown) => events.push({ type, data }) },
     });
-    await recovered.recast({ pi: {} as any, ctx: {} as any, state, loopId: "build", config: { maxConcurrency: 3 }, laneIds: new Set(["lane-b"]) });
+    await recovered.recover({ pi: {} as any, ctx: {} as any, state, loopId: "build", operation: "recast", config: { maxConcurrency: 3 }, laneIds: new Set(["lane-b"]) });
 
     const recastChild = childRunner.listSnapshots().find((child) => child.identity.laneId === "lane-b")!;
     expect(recastChild.operation).toBe("recast");

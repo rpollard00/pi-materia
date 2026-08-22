@@ -13,9 +13,9 @@ export {
   nativeTestInternals,
   prepareAgentStartSystemPrompt,
   prepareMultiTurnRefinementTurn,
-  parallelLaneRecovery,
   persistCastBudget,
   reactivateQueuedNativeCast,
+  parallelLaneRecovery,
   resumeNativeCast,
   reviveNativeCast,
   startNativeCast,
@@ -43,12 +43,7 @@ export type {
   ParallelLoopCancellationInput,
   ParallelLoopDispatchInput,
   ParallelLoopRecoveryInput,
-  ParallelLoopRecoveryOperation,
-  ParallelLoopRecoveryResult,
-  ParallelLoopReviveInput,
   ParallelLoopReviveResult,
-  ParallelRecoveryInput,
-  ParallelRecoveryOperation,
   ParallelLoopDispatcherDependencies,
 } from "./runtime/parallelDispatcher.js";
 

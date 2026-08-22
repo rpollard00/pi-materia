@@ -145,9 +145,6 @@ export function resolveParallelRecoveryTarget<TState extends ParallelRecoveryCas
   });
 }
 
-/** Compatibility spelling for callers that include `Command` in the name. */
-export const resolveParallelRecoveryCommandTarget = resolveParallelRecoveryTarget;
-
 /**
  * A failed run is recoverable only at the branch boundary. Accepted branches
  * are immutable results; only failed or interrupted branches may be reopened.
