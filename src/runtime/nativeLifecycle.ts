@@ -12,7 +12,8 @@ import { createPiChildCastRunner } from "../infrastructure/piChildCastRunner.js"
 import { clearCastState, listLatestCastStates, listResumableCastStates, listRevivableCastStates, loadActiveCastState, loadCastStateById, saveCastState } from "../infrastructure/castStateRepository.js";
 import { assertBudget, writeUsage } from "../infrastructure/castUsage.js";
 import { executeCommandUtility } from "../infrastructure/utilityCommandExecutor.js";
-import { formatUsage, showUsageSummary, updateWidget } from "../presentation/ui.js";
+import { formatUsage, showUsageSummary } from "../presentation/ui.js";
+import { updateWidget } from "../presentation/materiaWidget.js";
 import { recordUsageModelSelection } from "../telemetry/usage.js";
 import type { MateriaCastState } from "../types.js";
 import { executeBuiltInUtility, hasBuiltInUtility } from "../utilities/utilityRegistry.js";

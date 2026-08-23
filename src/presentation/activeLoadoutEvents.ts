@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { LoadedConfig } from "../types.js";
 import { renderLoadoutList } from "../loadout/loadouts.js";
-import { syncConfiguredLoadoutWidget } from "./ui.js";
+import { syncConfiguredLoadoutWidget } from "./materiaWidget.js";
 import { updateMateriaLoadoutWidget } from "./loadoutWidget.js";
 import { appendMateriaPresentation } from "./materiaPresentation.js";
 

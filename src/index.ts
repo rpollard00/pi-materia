@@ -13,7 +13,8 @@ import { saveQuestDefaultLoadoutPreference } from "./config/config.js";
 import { loadoutPickerCandidates } from "./loadout/loadoutPickerCandidates.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
-import { clearMateriaAuxiliaryWidgets, clearWidgetTicker, updateMateriaWebUiStatusWidget, updateWidget } from "./presentation/ui.js";
+import { clearMateriaAuxiliaryWidgets, updateMateriaWebUiStatusWidget } from "./presentation/ui.js";
+import { clearWidgetTicker, updateWidget } from "./presentation/materiaWidget.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { runChildCastLaunch } from "./runtime/childCastLaunch.js";
 import { emitChildUsageCheckpoint } from "./runtime/childUsageCheckpoints.js";
@@ -178,7 +179,7 @@ export default function piMateria(pi: ExtensionAPI) {
     }
     const state = adapters.states.loadActive(ctx);
     if (!state?.active) return;
-    updateWidget(ctx, state, { replaceOwner: true });
+    updateWidget(ctx, state);
     ctx.ui.setStatus("materia", adapters.statusPresenter.statusLabel(state));
     ctx.ui.notify(`pi-materia cast ${state.castId} restored in ${state.phase}. Use /materia status for details.`, "info");
   });
@@ -412,7 +413,7 @@ export default function piMateria(pi: ExtensionAPI) {
           ctx.ui.notify("No pi-materia cast state in this session.", "info");
           return;
         }
-        const lines = updateWidget(ctx, state, { replaceOwner: true }) ?? [];
+        const lines = updateWidget(ctx, state) ?? [];
         appendMateriaPresentation(pi, {
           content: lines.join("\n"),
           details: { prefix: "status", materiaName: "orchestrator", eventType: "status" },

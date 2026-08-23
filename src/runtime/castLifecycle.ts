@@ -135,7 +135,6 @@ export interface CastLifecycleDependencies {
     updateWidget(
       ctx: ExtensionContext,
       state: MateriaCastState,
-      options?: { replaceOwner?: boolean },
     ): unknown;
   };
 }
@@ -250,7 +249,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
 
     pi.setSessionName(`materia: ${request.slice(0, 60)}`);
     deps.state.saveCastState(pi, state);
-    deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+    deps.ui.updateWidget(ctx, state);
     ctx.ui.notify(`pi-materia cast started. Artifacts: ${runDir}`, "info");
     await deps.execution.startSocket(
       pi,
@@ -349,7 +348,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
       await deps.artifacts.writeUsage(state.runState);
       deps.state.saveCastState(pi, state);
       ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-      deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+      deps.ui.updateWidget(ctx, state);
 
       // Update tool scope so Pi's native agent can operate on the revived cast.
       if (isAgentResolvedSocket(socket)) {
@@ -545,7 +544,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
     await deps.artifacts.writeUsage(state.runState);
     deps.state.saveCastState(pi, state);
     ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-    deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+    deps.ui.updateWidget(ctx, state);
 
     // Update tool scope so Pi's native agent can operate on the reactivated cast.
     if (isAgentResolvedSocket(socket)) {
@@ -615,7 +614,7 @@ export function createCastLifecycle(deps: CastLifecycleDependencies) {
 
     deps.state.saveCastState(pi, state);
     ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-    deps.ui.updateWidget(ctx, state, { replaceOwner: true });
+    deps.ui.updateWidget(ctx, state);
 
     if (isAgentResolvedSocket(socket) && state.activeTurnPrompt) {
       await deps.dispatch.updateSocketToolScope(pi, ctx, state, socket);

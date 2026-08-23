@@ -83,7 +83,7 @@ export interface ParallelLaneRecoveryDependencies {
     writeUsage(runState: MateriaRunState): Promise<void>;
   };
   ui: {
-    updateWidget(ctx: ExtensionContext, state: MateriaCastState, options?: { replaceOwner?: boolean }): unknown;
+    updateWidget(ctx: ExtensionContext, state: MateriaCastState): unknown;
   };
   execution: {
     startSocket(
@@ -165,7 +165,7 @@ export function createParallelLaneRecovery(deps: ParallelLaneRecoveryDependencie
         await deps.artifacts.writeUsage(state.runState);
         deps.state.saveCastState(input.pi, state);
         input.ctx.ui.setStatus("materia", materiaStatusLabel(state, socket));
-        deps.ui.updateWidget(input.ctx, state, { replaceOwner: true });
+        deps.ui.updateWidget(input.ctx, state);
         await deps.eventing.emitLifecycleEvent(state, "lifecycle.cast.revived", {
           severity: "info",
           message: `Cast ${state.castId} ${operationPast} failed parallel lanes.`,
