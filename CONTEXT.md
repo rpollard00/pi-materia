@@ -19,3 +19,7 @@ _Avoid_: retry, redo
 **Lane number**:
 Stable 1-based position of a lane in a parallel run's queue order. Lane numbers never renumber as sibling lanes complete or are recovered.
 _Avoid_: lane index, lane position
+
+**Status widget**:
+The persistent below-editor panel (widget slot `materia`) showing a cast's run: current materia, loop turn, retry budget, usage, and live parallel lanes. Ownership is per session; a live run from another cast takes it over, while stale or terminal updates never do.
+_Avoid_: status bar (the separate `setStatus` line), run panel
