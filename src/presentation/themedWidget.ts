@@ -1,4 +1,4 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import {
@@ -140,4 +140,9 @@ function normalizeMaxLines(value: number | undefined): number {
   if (value === undefined || value === Infinity) return Number.MAX_SAFE_INTEGER;
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.floor(value));
+}
+
+/** Whether this context supports themed widget factories (TUI with a token theme). */
+export function supportsThemedWidgets(ctx: ExtensionContext): boolean {
+  return ctx.mode === "tui" && typeof ctx.ui.theme?.fg === "function";
 }

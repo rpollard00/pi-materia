@@ -1,7 +1,4 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import {
-  usageBySocket,
-} from "../runtime/castStateAccessors.js";
 import type {
   MateriaRunState,
   UsageCostKind,
@@ -10,6 +7,7 @@ import type {
 } from "../types.js";
 import {
   createMateriaThemedWidgetFactory,
+  supportsThemedWidgets,
 } from "./themedWidget.js";
 import type {
   MateriaSemanticTheme,
@@ -112,34 +110,6 @@ export function renderCompactUsageWidgetThemed(
   ];
 }
 
-export function renderUsageSummary(usage: UsageReport): string[] {
-  return [
-    "Materia Usage Summary",
-    usageCostNote(usage.costKind),
-    `total: ${formatUsage(usage, usage.costKind)}`,
-    "",
-    "By materia:",
-    ...renderBreakdown(usage.byMateria, usage.costKind),
-    "",
-    "By socket:",
-    ...renderBreakdown(usageBySocket(usage), usage.costKind),
-    "",
-    "By task:",
-    ...renderBreakdown(usage.byTask, usage.costKind),
-  ];
-}
-
-function renderBreakdown(
-  values: Record<string, UsageTotals>,
-  costKind: UsageCostKind = "actual",
-): string[] {
-  const entries = Object.entries(values);
-  if (entries.length === 0) return ["- none observed"];
-  return entries
-    .sort(([, a], [, b]) => b.tokens.total - a.tokens.total)
-    .map(([key, usage]) => `- ${key}: ${formatUsage(usage, costKind)}`);
-}
-
 export function formatUsage(
   usage: UsageTotals,
   costKind: UsageCostKind = "actual",
@@ -159,16 +129,4 @@ export function formatCostLabel(
   if (costKind === "estimated")
     return `estimated USD value: $${costUsd.toFixed(4)}`;
   return `billed cost: $${costUsd.toFixed(4)}`;
-}
-
-export function usageCostNote(costKind: UsageCostKind = "actual"): string {
-  if (costKind === "subscription")
-    return "Cost display: estimated token value only; subscription usage is not billed per token.";
-  if (costKind === "estimated")
-    return "Cost display: estimated USD value, not confirmed billed charges.";
-  return "Cost display: billed USD cost.";
-}
-
-function supportsThemedWidgets(ctx: ExtensionContext): boolean {
-  return ctx.mode === "tui" && typeof ctx.ui.theme?.fg === "function";
 }

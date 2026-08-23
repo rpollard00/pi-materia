@@ -13,7 +13,7 @@ import { saveQuestDefaultLoadoutPreference } from "./config/config.js";
 import { loadoutPickerCandidates } from "./loadout/loadoutPickerCandidates.js";
 import { ensureMateriaWebUi } from "./webui/service.js";
 import type { MateriaQuestControlResult, MateriaQuestNoStartReason } from "./webui/server/index.js";
-import { clearMateriaAuxiliaryWidgets, updateMateriaWebUiStatusWidget } from "./presentation/ui.js";
+import { clearMateriaAuxiliaryWidgets, updateMateriaWebUiStatusWidget } from "./presentation/auxiliaryWidgets.js";
 import { clearWidgetTicker, updateWidget } from "./presentation/materiaWidget.js";
 import { createMateriaPluginAdapters } from "./runtime/pluginAdapters.js";
 import { runChildCastLaunch } from "./runtime/childCastLaunch.js";

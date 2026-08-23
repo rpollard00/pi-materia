@@ -3,6 +3,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { MateriaRunState } from "../types.js";
 import {
   createMateriaThemedWidgetFactory,
+  supportsThemedWidgets,
 } from "./themedWidget.js";
 import type { MateriaSemanticTheme } from "./theme.js";
 import {
@@ -13,7 +14,7 @@ import {
   isMateriaCastWidgetState,
   type MateriaWidgetState,
 } from "./materiaStatus.js";
-import { clearMateriaAuxiliaryWidgets } from "./ui.js";
+import { clearMateriaAuxiliaryWidgets } from "./auxiliaryWidgets.js";
 
 type MateriaWidgetController = {
   scope: string;
@@ -158,10 +159,6 @@ function setMateriaWidgetLines(
     return;
   }
   ctx.ui.setWidget("materia", lines, options);
-}
-
-function supportsThemedWidgets(ctx: ExtensionContext): boolean {
-  return ctx.mode === "tui" && typeof ctx.ui.theme?.fg === "function";
 }
 
 function ensureMateriaWidgetControllerTicker(controller: MateriaWidgetController): void {
