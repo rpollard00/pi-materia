@@ -13,13 +13,12 @@ import {
   resolveEmptyLoopExhaustionTarget,
   setCurrentItem,
 } from "../application/workflowTransitions.js";
+import { applyParallelFanIn } from "../application/parallelFanInRouting.js";
 import type {
   AppliedMateriaModelSettings,
   MateriaModelSettings,
 } from "../config/modelSettings.js";
-import { intrinsicParallelFanInHandoff } from "../domain/parallelFanIn.js";
 import { resolveParallelMaxConcurrency } from "../domain/parallelLoop.js";
-import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
 import type { ModelPolicyDocument } from "../domain/modelPolicy.js";
 import { getResolvedPipelineSocket, loopIteratorForSocket } from "../loadout/loadoutAccessors.js";
 import { parallelLoopForSocket, type ParallelLoopDispatcher } from "./parallelDispatcher.js";
@@ -273,37 +272,9 @@ export function createSocketExecution(deps: SocketExecutionDependencies) {
           loopId: parallelRegion.loopId,
           config: { maxConcurrency: resolveParallelMaxConcurrency(config.parallelism, parallelRegion.config) },
           onFanIn: async ({ loopId, result }) => {
-            const loopConfig = state.pipeline.loops?.[loopId];
-            const routeSource = loopConfig?.exit?.from ?? loopConfig?.exits?.[0]?.from;
-            const route = resolveLoopExitRoute(loopConfig, { from: routeSource, satisfied: result.satisfied });
-            if (!route) {
-              throw new Error(`Parallel loop ${JSON.stringify(loopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
-            }
-            const handoff = intrinsicParallelFanInHandoff(result);
-            const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
-              ? state.data.envelope as Record<string, unknown>
-              : {};
-            // Make the barrier result available through canonical control
-            // fields and a namespaced object for the next integration utility,
-            // without leaking branch state into generic work-item fields.
-            const nextData: Record<string, unknown> = {
-              ...state.data,
-              envelope: { ...existingEnvelope, satisfied: handoff.satisfied, context: handoff.context },
-              parallelFanIn: handoff.parallelFanIn,
-            };
-            // The parent is leaving item-scoped lane execution. Do not let a
-            // stale branch item masquerade as post-barrier current work.
-            delete nextData.item;
-            delete nextData.currentWorkItem;
-            delete nextData.workItem;
-            state.data = nextData;
-            state.lastJson = handoff;
-            state.lastOutput = JSON.stringify(handoff);
-            state.lastAssistantText = state.lastOutput;
-            state.currentItemKey = undefined;
-            state.currentItemLabel = undefined;
+            const { targetSocketId } = applyParallelFanIn(state, loopId, result);
             deps.state.saveCastState(pi, state);
-            await advanceToSocket(pi, ctx, state, route.targetSocketId, `parallel-fan-in:${loopId}`, undefined, false);
+            await advanceToSocket(pi, ctx, state, targetSocketId, `parallel-fan-in:${loopId}`, undefined, false);
           },
           onFailure: async ({ loopId, reason }) => {
             await deps.lifecycle.failCast(pi, ctx, state, new Error(reason), `parallel:${loopId}`);

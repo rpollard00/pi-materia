@@ -6,8 +6,7 @@ import {
   type ResolvedParallelRecoveryTarget,
 } from "../domain/parallelRecovery.js";
 import { ParallelRecoveryTargetError } from "../application/useCases.js";
-import { intrinsicParallelFanInHandoff } from "../domain/parallelFanIn.js";
-import { resolveLoopExitRoute } from "../graph/loopExitRoutes.js";
+import { applyParallelFanIn } from "../application/parallelFanInRouting.js";
 import { getResolvedPipelineSocket } from "../loadout/loadoutAccessors.js";
 import type {
   MateriaCastState,
@@ -182,30 +181,11 @@ export function createParallelLaneRecovery(deps: ParallelLaneRecoveryDependencie
         });
       },
       onFanIn: async ({ loopId: completedLoopId, result }) => {
-        const completedLoop = state.pipeline.loops?.[completedLoopId];
-        const routeSource = completedLoop?.exit?.from ?? completedLoop?.exits?.[0]?.from;
-        const route = resolveLoopExitRoute(completedLoop, { from: routeSource, satisfied: result.satisfied });
-        if (!route) throw new Error(`Parallel loop ${JSON.stringify(completedLoopId)} has no symbolic ${result.satisfied ? "satisfied" : "not_satisfied"} fan-in route.`);
-        const handoff = intrinsicParallelFanInHandoff(result);
-        const existingEnvelope = state.data.envelope && typeof state.data.envelope === "object" && !Array.isArray(state.data.envelope)
-          ? state.data.envelope as Record<string, unknown>
-          : {};
-        state.data = {
-          ...state.data,
-          envelope: { ...existingEnvelope, satisfied: handoff.satisfied, context: handoff.context },
-          parallelFanIn: handoff.parallelFanIn,
-        };
-        delete state.data.item;
-        delete state.data.currentWorkItem;
-        delete state.data.workItem;
-        state.lastJson = handoff;
-        state.lastOutput = JSON.stringify(handoff);
-        state.lastAssistantText = state.lastOutput;
-        state.currentItemKey = undefined;
-        state.currentItemLabel = undefined;
+        const { targetSocketId } = applyParallelFanIn(state, completedLoopId, result);
         deps.state.saveCastState(input.pi, state);
-        const target = getResolvedPipelineSocket(state.pipeline, route.targetSocketId);
-        if (!target) throw new Error(`Parallel fan-in route targets unknown socket ${JSON.stringify(route.targetSocketId)}.`);
+        // applyParallelFanIn already validated the target socket; resolve it for the start.
+        const target = getResolvedPipelineSocket(state.pipeline, targetSocketId);
+        if (!target) throw new Error(`Parallel fan-in route targets unknown socket ${JSON.stringify(targetSocketId)}.`);
         await deps.execution.startSocket(input.pi, input.ctx, state, target);
       },
       onFailure: async ({ loopId: failedLoopId, reason }) => {
