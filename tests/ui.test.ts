@@ -1,13 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { createParallelRunState } from "../src/domain/parallelRun.js";
-import { recoveryIdentityKey } from "../src/application/recoveryPolicy.js";
-import { publishActiveLoadoutChange } from "../src/presentation/activeLoadoutEvents.js";
-import { createMateriaSemanticTheme } from "../src/presentation/theme.js";
-import { renderLoadoutListThemed, updateMateriaLoadoutWidget } from "../src/presentation/loadoutWidget.js";
-import { clearWidgetTicker, formatCostLabel, formatParallelRunCompactStatus, formatUsage, renderCompactUsageWidget, renderConfiguredLoadoutWidget, renderMateriaCastStatusWidget, renderMateriaRunWidget, renderUsageSummary, showUsageSummary, syncConfiguredLoadoutWidget, updateWidget } from "../src/presentation/ui.js";
-import { summarizeParallelRun, type ParallelRunMonitorSummary } from "../src/application/parallelMonitoring.js";
-import type { MateriaCastState, MateriaRunState, UsageReport, UsageTotals } from "../src/types.js";
+import {
+  renderMateriaCastStatusWidget,
+  renderMateriaRunWidget,
+} from "../src/presentation/materiaStatus.js";
+import {
+  clearWidgetTicker,
+  formatCostLabel,
+  formatUsage,
+  renderCompactUsageWidget,
+  renderUsageSummary,
+  showUsageSummary,
+  syncConfiguredLoadoutWidget,
+  updateWidget,
+} from "../src/presentation/ui.js";
+import type {
+  MateriaCastState,
+  MateriaRunState,
+  UsageReport,
+  UsageTotals,
+} from "../src/types.js";
 import { FakePiHarness } from "./fakePi.js";
 
 function totals(tokens: number, cost: number): UsageTotals {
@@ -70,68 +83,30 @@ function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-?]*[ -\/]*[@-~]/g, "");
 }
 
-describe("persistent Materia widget formatting", () => {
-  function parallelCastState(laneCount: number): { state: MateriaCastState; run: ReturnType<typeof createParallelRunState> } {
-    const run = createParallelRunState({
-      runId: `parallel-${laneCount}`,
-      parentCastId: "cast-parallel",
-      loopId: "parallelWork",
-      planIdentity: { version: 1, planId: `plan-${laneCount}`, workItemCount: laneCount },
-      graphIdentity: { graphHash: "graph" },
-      configIdentity: { configHash: "config", loopId: "parallelWork", maxConcurrency: 3 },
-      queue: Array.from({ length: laneCount }, (_, streamIndex) => ({
-        laneId: `lane-${streamIndex}`,
-        name: `Stream ${streamIndex}`,
-        streamIndex,
-        workItemIndexes: [streamIndex],
-        progressTotal: 5,
-      })),
-      now: 1,
-    });
-    return {
-      state: loopCastState({ active: true, parallelRuns: { parallelWork: run } }),
-      run,
-    };
-  }
-
-  test("renders compact active cast details in at most four lines", () => {
-    const state: MateriaRunState = {
-      runId: "2026-05-07T14-53-49-729Z",
-      startedAt: 1_000,
-      runDir: "/tmp/cast",
-      eventsFile: "/tmp/cast/events.jsonl",
-      usageFile: "/tmp/cast/usage.json",
-      currentSocketId: "planner",
-      currentMateria: "Interactive Planning Consult With A Very Long Name",
-      currentTask: "task-123 - Implement a very long task title that should not be allowed to wrap across the terminal widget",
-      attempt: 2,
-      lastMessage: "Multi-turn planner waiting for refinement; run /materia continue to finalize.",
-      usage: { ...totals(0, 0), tokens: { input: 19381, output: 2100, cacheRead: 4000, cacheWrite: 10, total: 25491 } },
-      budgetWarned: false,
-    };
-
-    const lines = renderMateriaRunWidget(state, 70_000);
-    expect(lines.length).toBeLessThanOrEqual(4);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("✦ active");
-    expect(lines[0]).not.toContain("2026-05-07");
-    expect(lines[0]).toContain("⌘ - ◉ Interactive Planning");
-    expect(lines[0]).toContain("↻ 2");
-    expect(lines[0]).toContain("◷ 1m09s");
-    expect(lines[0]).toContain("Σ 23k/2.1k");
-    expect(lines[1]).toContain("◆ task-123");
-    expect(lines[1]).toContain("⟲ -");
-    expect(lines[2]).toContain("› Multi-turn Interactive Planning");
-    expect(lines.every((line) => line.length <= 78)).toBe(true);
+function parallelCastState(laneCount: number): { state: MateriaCastState; run: ReturnType<typeof createParallelRunState> } {
+  const run = createParallelRunState({
+    runId: `parallel-${laneCount}`,
+    parentCastId: "cast-parallel",
+    loopId: "parallelWork",
+    planIdentity: { version: 1, planId: `plan-${laneCount}`, workItemCount: laneCount },
+    graphIdentity: { graphHash: "graph" },
+    configIdentity: { configHash: "config", loopId: "parallelWork", maxConcurrency: 3 },
+    queue: Array.from({ length: laneCount }, (_, streamIndex) => ({
+      laneId: `lane-${streamIndex}`,
+      name: `Stream ${streamIndex}`,
+      streamIndex,
+      workItemIndexes: [streamIndex],
+      progressTotal: 5,
+    })),
+    now: 1,
   });
+  return {
+    state: loopCastState({ active: true, parallelRuns: { parallelWork: run } }),
+    run,
+  };
+}
 
-  test("renders persisted loadout metadata when available", () => {
-    const state = runState({ loadoutName: "Yolo", currentMateria: "Build" });
-
-    const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[0]).toContain("⌘ Yolo");
-  });
-
+describe("persistent Materia widget themed rendering", () => {
   test("themes the persistent panel while preserving its plain visible rows", () => {
     const tokens: string[] = [];
     const harness = new FakePiHarness(process.cwd(), {
@@ -158,76 +133,6 @@ describe("persistent Materia widget formatting", () => {
       expect(tokens).toEqual(expect.arrayContaining(["success", "warning", "muted", "dim", "text"]));
     } finally {
       clearWidgetTicker(harness.ctx);
-    }
-  });
-
-  test("themes the persistent loadout widget while preserving its plain list", () => {
-    const calls: Array<[string, string]> = [];
-    const harness = new FakePiHarness(process.cwd(), {
-      theme: {
-        fg: (token, text) => {
-          calls.push([token, text]);
-          return `\u001b[35m${text}\u001b[0m`;
-        },
-      },
-    });
-    const config = {
-      activeLoadout: "Build",
-      materia: {},
-      loadouts: {
-        Build: {} as never,
-        Review: {} as never,
-        Maintain: {} as never,
-      },
-    };
-    const plain = ["⌘ Build (Build*, Review, Maintain)"];
-
-    updateMateriaLoadoutWidget(harness.ctx, config, "test");
-    const themed = harness.renderWidget("materia-loadouts", 200) ?? [];
-
-    expect(themed.map(stripAnsi)).toEqual(plain);
-    expect(renderLoadoutListThemed(config, createMateriaSemanticTheme(undefined))).toEqual(plain);
-    expect(themed.every((line) => visibleWidth(line) <= 200)).toBe(true);
-    expect(calls).toEqual(expect.arrayContaining([
-      ["accent", "⌘"],
-      ["accent", "Build"],
-      ["success", "Build"],
-      ["success", "*"],
-      ["muted", "Review"],
-    ]));
-  });
-
-  test("themes command and WebUI loadout changes without changing event payloads", () => {
-    for (const source of ["command", "webui"] as const) {
-      const calls: string[] = [];
-      const harness = new FakePiHarness(process.cwd(), {
-        theme: {
-          fg: (token, text) => {
-            calls.push(token);
-            return `\u001b[35m${text}\u001b[0m`;
-          },
-        },
-      });
-      const config = {
-        activeLoadout: "Build",
-        materia: {},
-        loadouts: {
-          Build: {} as never,
-          Review: {} as never,
-        },
-      };
-      const result = publishActiveLoadoutChange(harness.pi, harness.ctx, {
-        source,
-        loaded: { config, source: "test-config" },
-      });
-
-      expect(result.event).toMatchObject({ source, activeLoadout: "Build", loadouts: ["Build", "Review"] });
-      expect(harness.renderWidget("materia-loadouts", 200)?.map(stripAnsi)).toEqual(result.lines);
-      expect(harness.appendedEntries.at(-1)).toMatchObject({
-        customType: "pi-materia-active-loadout-changed",
-        data: { source, activeLoadout: "Build" },
-      });
-      expect(calls).toEqual(expect.arrayContaining(["accent", "success", "muted"]));
     }
   });
 
@@ -270,277 +175,6 @@ describe("persistent Materia widget formatting", () => {
     }
   });
 
-  test("renders configured loadout when no cast widget is active", () => {
-    const lines = renderConfiguredLoadoutWidget("Review");
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("⌘ Review");
-    expect(lines.join("\n")).toContain("no active cast");
-    // Intentional omissions: the permanent widget already communicates the configured
-    // loadout compactly, so do not re-add duplicate Loadout or Available lines here.
-    expect(lines.join("\n")).not.toContain("Loadout:");
-    expect(lines.join("\n")).not.toContain("Available:");
-  });
-
-  test("renders active single-materia cast details without permanent-panel duplication", () => {
-    const run = runState({
-      loadoutName: "Hojo-Consult",
-      currentSocketId: "Socket-5",
-      currentMateria: "Maintain",
-      currentTask: "Remove unused WebUI unsocket drop panel",
-      attempt: 2,
-      usage: { ...totals(0, 0), tokens: { input: 205_000, output: 9_700, cacheRead: 0, cacheWrite: 0, total: 214_700 } },
-    });
-    const state = {
-      active: true,
-      phase: "Socket-5",
-      currentSocketId: "Socket-5",
-      currentMateria: "Maintain",
-      currentItemLabel: "Remove unused WebUI unsocket drop panel",
-      awaitingResponse: true,
-      runState: run,
-    } as MateriaCastState;
-
-    const lines = renderMateriaCastStatusWidget(state, 9_638_000);
-    const text = lines.join("\n");
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("✦ active");
-    expect(lines[0]).toContain("⌘ Hojo-Consult ◉ Maintain");
-    expect(lines[0]).toContain("↻ 2");
-    expect(lines[0]).toContain("◷ 2h40m");
-    expect(lines[0]).toContain("Σ 205k/9.7k");
-    expect(lines[1]).toContain("◆ Remove unused WebUI");
-    expect(lines[1]).toContain("⟲ -");
-    expect(text).not.toContain("Loadout:");
-    expect(text).not.toContain("Available:");
-    expect(text.match(/Maintain/g)?.length ?? 0).toBeLessThanOrEqual(3);
-  });
-
-  test("prefers work item titles over legacy model-authored ids in cast labels", () => {
-    const run = runState({
-      loadoutName: "Hojo-Consult",
-      currentSocketId: "Socket-5",
-      currentMateria: "Build",
-      currentTask: "WI-7 - legacy fallback label",
-    });
-    const state = {
-      active: true,
-      phase: "Socket-5",
-      currentSocketId: "Socket-5",
-      currentMateria: "Build",
-      currentItemKey: "WI-1",
-      currentItemLabel: "Implement title/context validation",
-      awaitingResponse: true,
-      runState: run,
-    } as MateriaCastState;
-
-    const text = renderMateriaCastStatusWidget(state, 2_000).join("\n");
-    expect(text).toContain("Implement title/context");
-    expect(text).not.toContain("WI-7");
-    expect(text).not.toContain("WI-1");
-  });
-
-  test("renders legacy run state without loadout or endedAt metadata sensibly", () => {
-    const legacyState = runState({ currentMateria: "Build", currentTask: "legacy task" });
-    delete (legacyState as Partial<MateriaRunState>).loadoutName;
-    delete (legacyState as Partial<MateriaRunState>).endedAt;
-
-    const lines = renderMateriaRunWidget(legacyState, 2_000);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("⌘ -");
-    expect(lines[0]).toContain("◷ 1s");
-    expect(lines.join("\n")).toContain("legacy task");
-  });
-
-  test("keeps stable first-line field positions when work item and status text are long", () => {
-    const stableState = runState({
-      loadoutName: "BuildLoadout",
-      currentMateria: "Build",
-      currentTask: "short task",
-      lastMessage: "short status",
-      attempt: 3,
-    });
-    const dynamicState = runState({
-      ...stableState,
-      currentTask: "work item ".repeat(40),
-      lastMessage: "status update ".repeat(40),
-    });
-
-    const stableLines = renderMateriaRunWidget(stableState, 2_000);
-    const dynamicLines = renderMateriaRunWidget(dynamicState, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
-      expect(dynamicLines[0].indexOf(marker)).toBe(stableLines[0].indexOf(marker));
-    }
-    expect(dynamicLines).toHaveLength(stableLines.length);
-    expect(dynamicLines.every((line) => line.length <= 78)).toBe(true);
-  });
-
-  test("keeps stable first-line field positions when cast status text is long", () => {
-    const run = runState({ loadoutName: "Review", currentMateria: "Build", currentTask: "task", attempt: 1 });
-    const shortStatus = { active: true, phase: "Build", currentMateria: "Build", awaitingResponse: true, runState: run } as MateriaCastState;
-    const longStatus = { ...shortStatus, failedReason: "very long terminal status ".repeat(30) } as MateriaCastState;
-
-    const shortLines = renderMateriaCastStatusWidget(shortStatus, 2_000);
-    const longLines = renderMateriaCastStatusWidget(longStatus, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
-      expect(longLines[0].indexOf(marker)).toBe(shortLines[0].indexOf(marker));
-    }
-    expect(longLines).toHaveLength(3);
-    expect(longLines.every((line) => line.length <= 78)).toBe(true);
-  });
-
-  test("freezes elapsed time when terminal endedAt metadata is present", () => {
-    const state = runState({ endedAt: 11_000 });
-
-    const lines = renderMateriaRunWidget(state, 999_000);
-    expect(lines[0]).toContain("◷ 10s");
-  });
-
-  test("prefers Materia names over Socket IDs in user-facing status values", () => {
-    const state = runState({
-      currentSocketId: "Socket-3",
-      currentMateria: "Build",
-      currentTask: "Socket-3",
-      attempt: 1,
-      lastMessage: "Socket-3",
-    });
-
-    const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[0]).toContain("◉ Build");
-    expect(lines[1]).toContain("◆ Build");
-    expect(lines[2]).toContain("› Build");
-    expect(lines.join("\n")).not.toContain("Socket-3");
-  });
-
-  test("falls back to Socket IDs when current Materia is unavailable", () => {
-    const state = runState({
-      currentSocketId: "Socket-3",
-      currentTask: "Socket-3",
-      attempt: 1,
-      lastMessage: "Socket-3",
-    });
-
-    const lines = renderMateriaRunWidget(state, 2_000);
-    expect(lines[0]).toContain("◉ Socket-3");
-    expect(lines[1]).toContain("◆ Socket-3");
-    expect(lines[2]).toContain("› Socket-3");
-  });
-
-  test("renders cast status third line with status icon and Materia wording", () => {
-    const run = runState({ currentSocketId: "Socket-4", currentMateria: "Build", lastMessage: "Socket-4" });
-    const state = {
-      active: true,
-      phase: "Socket-4",
-      currentSocketId: "Socket-4",
-      currentMateria: "Build",
-      awaitingResponse: true,
-      runState: run,
-    } as MateriaCastState;
-
-    const lines = renderMateriaCastStatusWidget(state, 2_000);
-    expect(lines[0]).toContain("⌘ - ◉ Build");
-    expect(lines[2]).toBe("› Build active");
-    expect(lines[2]).not.toContain("Last");
-    expect(lines[2]).not.toContain("Socket-4");
-  });
-
-  test("renders loop turn and active loop path when loop metadata is available", () => {
-    const lines = renderMateriaCastStatusWidget(loopCastState(), 2_000);
-    expect(lines[0]).toContain("⌘ Hojo-Consult ◉ Auto-Eval");
-    expect(lines[0]).toContain("↻ 2/3");
-    expect(lines[1]).toContain("◆ Implement status layout");
-    expect(lines[1]).toContain("⟲ Build -> [Auto-Eval] -> Maintain");
-    expect(lines.join("\n")).not.toContain("2026-05-07");
-  });
-
-  test("renders loop turn with unknown total when loop items cannot be resolved", () => {
-    const state = loopCastState({ data: {}, cursors: { workItemsIndex: 0 } });
-    const lines = renderMateriaCastStatusWidget(state, 2_000);
-    expect(lines[0]).toContain("↻ 1/?");
-    expect(lines[1]).toContain("⟲ Build -> [Auto-Eval] -> Maintain");
-  });
-
-  test("renders rich cast status with partial metadata through the shared widget shape", () => {
-    const run = runState({ loadoutName: "Review", currentTask: undefined, currentMateria: undefined, lastMessage: undefined });
-    const state = {
-      active: false,
-      phase: "complete",
-      awaitingResponse: false,
-      socketState: "complete",
-      runState: run,
-    } as MateriaCastState;
-
-    const lines = renderMateriaCastStatusWidget(state, 2_000);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("⌘ Review");
-    expect(lines[1]).toContain("◆ -");
-    expect(lines[1]).toContain("⟲ -");
-    expect(lines[2]).toBe("› complete");
-    expect(lines.every((line) => line.length <= 78)).toBe(true);
-  });
-
-  test("renders resumed cast state with the same compact ordering as basic run state", () => {
-    const run = runState({ loadoutName: "Review", currentSocketId: "Socket-7", currentMateria: "Build", currentTask: "Validate resumed cast", attempt: 4 });
-    const resumed = {
-      active: true,
-      phase: "Socket-7",
-      currentSocketId: "Socket-7",
-      currentMateria: "Build",
-      currentItemLabel: "Validate resumed cast",
-      awaitingResponse: false,
-      socketState: "idle",
-      runState: run,
-    } as MateriaCastState;
-
-    const basicLines = renderMateriaRunWidget(run, 2_000);
-    const richLines = renderMateriaCastStatusWidget(resumed, 2_000);
-    for (const marker of ["✦", "⌘", "↻", "⟳", "◷", "Σ"]) {
-      expect(richLines[0].indexOf(marker)).toBe(basicLines[0].indexOf(marker));
-    }
-    expect(richLines[0]).toContain("⌘ Review ◉ Build");
-    expect(richLines[1]).toContain("◆ Validate resumed cast");
-    expect(richLines[1]).toContain("⟲ -");
-    expect(richLines[2]).toBe("› Build active");
-  });
-
-  test("keeps missing current materia fallback understandable in rich cast status", () => {
-    const run = runState({ loadoutName: "Review", currentSocketId: "Socket-9", currentMateria: undefined, currentTask: undefined, lastMessage: undefined });
-    const state = {
-      active: true,
-      phase: "Socket-9",
-      currentSocketId: "Socket-9",
-      awaitingResponse: true,
-      runState: run,
-    } as MateriaCastState;
-
-    const lines = renderMateriaCastStatusWidget(state, 2_000);
-    expect(lines).toHaveLength(3);
-    expect(lines[0]).toContain("⌘ Review ◉ Socket-9");
-    expect(lines[1]).toContain("◆ -");
-    expect(lines[1]).toContain("⟲ -");
-    expect(lines[2]).toBe("› Socket-9 active");
-    expect(lines.join("\n")).not.toContain("undefined");
-  });
-
-  test("appends live parallel rows to the shared Materia panel in schedule order", () => {
-    const { state, run } = parallelCastState(3);
-    run.queueOrder.reverse();
-    run.lanes["lane-0"]!.status = "running";
-    run.lanes["lane-0"]!.progress.position = 2;
-    run.lanes["lane-0"]!.activeStage = { socketId: "Socket-1", label: "Spawn-JJ-Workspace", transitionedAt: 2 };
-    run.lanes["lane-1"]!.status = "accepted";
-    run.lanes["lane-1"]!.progress.position = 5;
-
-    const lines = renderMateriaCastStatusWidget(state, 2_000);
-    expect(lines).toHaveLength(7);
-    expect(lines[3]).toContain("Parallel slots: 1/3 running");
-    expect(lines[4]).toContain("Stream 0");
-    expect(lines[4]).toContain("Spawn-JJ-Workspace");
-    expect(lines[5]).toContain("Stream 1");
-    expect(lines[5]).toContain("Completed");
-    expect(lines[6]).toContain("Stream 2");
-    expect(lines.every((line) => visibleWidth(line) <= 78)).toBe(true);
-  });
-
   test("blinks only a running lane's active bar edge through the persistent themed widget", () => {
     const harness = new FakePiHarness(process.cwd(), {
       theme: {
@@ -577,14 +211,6 @@ describe("persistent Materia widget formatting", () => {
     } finally {
       clearWidgetTicker(harness.ctx);
     }
-  });
-
-  test("hides parallel detail rows once fan-in starts", () => {
-    const { state, run } = parallelCastState(2);
-    run.phase = "awaiting_lanes";
-    run.fanInPhase = "accepted";
-
-    expect(renderMateriaCastStatusWidget(state, 2_000)).toHaveLength(3);
   });
 
   test("shared widget updates remove parallel rows at fan-in and terminal states", () => {
@@ -671,156 +297,6 @@ describe("persistent Materia widget formatting", () => {
     } finally {
       clearWidgetTicker(ctx);
     }
-  });
-
-  test("caps the shared panel at ten lines with a deterministic overflow row", () => {
-    const { state, run } = parallelCastState(8);
-    run.queueOrder.reverse();
-
-    const first = renderMateriaCastStatusWidget(state, 2_000);
-    const second = renderMateriaCastStatusWidget(state, 2_000);
-    expect(first).toEqual(second);
-    expect(first).toHaveLength(10);
-    expect(first.at(-1)).toBe("… 3 more parallel lanes");
-    expect(first.every((line) => visibleWidth(line) <= 78)).toBe(true);
-  });
-
-  test("renders all aggregate parallel lane counters in compact status", () => {
-    const summary = {
-      version: 1,
-      loopId: "build",
-      runId: "run-1",
-      phase: "awaiting_lanes",
-      fanInPhase: "not_started",
-      planId: "plan-1",
-      maxConcurrency: 2,
-      counts: { total: 5, queued: 1, running: 1, accepted: 1, failed: 1, interrupted: 1, completed: 3, barrierReached: 3 },
-      barrier: { phase: "waiting", reached: 3, total: 5 },
-      lanes: [],
-      updatedAt: 1,
-    } satisfies ParallelRunMonitorSummary;
-    expect(formatParallelRunCompactStatus(summary)).toBe("parallel build q1 r1 a1 f1 i1 barrier:waiting 3/5");
-  });
-
-  test("includes stable lane numbers in the compact status after acceptance and revival attempts", () => {
-    const { run } = parallelCastState(2);
-    run.lanes["lane-0"]!.status = "accepted";
-    run.lanes["lane-1"]!.status = "failed";
-    run.lanes["lane-1"]!.attempt = 3;
-    const summary = summarizeParallelRun(run);
-
-    expect(formatParallelRunCompactStatus(summary)).toContain("lanes:1,2");
-    expect(formatParallelRunCompactStatus(summary)).not.toContain("lane-0");
-    expect(summary.lanes.map((lane) => [lane.queueIndex, lane.attempt])).toEqual([[0, 1], [1, 3]]);
-  });
-
-  test("renders compact completion usage without billing disclaimers", () => {
-    const lines = renderCompactUsageWidget(totals(19381, 0.0497));
-    expect(lines).toEqual(["Usage total 19k tokens"]);
-    expect(lines.join("\n")).not.toContain("estimated token value");
-    expect(lines.join("\n")).not.toContain("billing");
-    expect(lines.join("\n")).not.toContain("\u001b[");
-  });
-
-  test("themes the persistent usage widget without changing wording or placement", () => {
-    const calls: Array<[string, string]> = [];
-    const harness = new FakePiHarness(process.cwd(), {
-      theme: {
-        fg: (token, text) => {
-          calls.push([token, text]);
-          return `\u001b[35m${text}\u001b[0m`;
-        },
-      },
-    });
-    const usage = totals(19381, 0.0497) as UsageReport;
-    const state = runState({ usage });
-
-    showUsageSummary(harness.ctx, state);
-
-    const themed = harness.renderWidget("materia-usage", 200) ?? [];
-    expect(themed.map(stripAnsi)).toEqual(renderCompactUsageWidget(usage));
-    expect(harness.widgets.get("materia-usage")?.options).toEqual({ placement: "belowEditor" });
-    expect(calls).toEqual([
-      ["muted", "Usage total"],
-      ["accent", "19k"],
-      ["dim", "tokens"],
-    ]);
-
-    const narrow = harness.renderWidget("materia-usage", 8) ?? [];
-    expect(narrow).toHaveLength(1);
-    expect(visibleWidth(narrow[0] ?? "")).toBeLessThanOrEqual(8);
-  });
-
-  test("truncates long persistent widget values instead of emitting extra lines", () => {
-    const state: MateriaRunState = {
-      runId: "2026-05-07T14-53-49-729Z-extra-long-cast-id-that-keeps-going",
-      startedAt: 0,
-      runDir: "/tmp/cast",
-      eventsFile: "/tmp/cast/events.jsonl",
-      usageFile: "/tmp/cast/usage.json",
-      currentMateria: "M".repeat(200),
-      currentTask: "T".repeat(200),
-      attempt: 1,
-      lastMessage: "L".repeat(300),
-      usage: { ...totals(0, 0), tokens: { input: 1_234_567, output: 98_765, cacheRead: 0, cacheWrite: 0, total: 1_333_332 } },
-      budgetWarned: false,
-    };
-
-    const lines = renderMateriaRunWidget(state, 1_000);
-    expect(lines).toHaveLength(3);
-    expect(lines.every((line) => line.length <= 78)).toBe(true);
-    expect(lines.join("\n")).not.toContain("estimated token value");
-  });
-});
-
-describe("persistent Materia widget retry budget", () => {
-  function recoveryLoopCastState(
-    allowance: { effectiveMax: number; originalMax?: number; reviveCount?: number },
-    attempts: number,
-  ): MateriaCastState {
-    const base = loopCastState();
-    const key = recoveryIdentityKey(base);
-    return {
-      ...base,
-      recoveryAllowances: {
-        [key]: {
-          originalMaxAttempts: allowance.originalMax ?? allowance.effectiveMax,
-          effectiveMaxAttempts: allowance.effectiveMax,
-          reviveCount: allowance.reviveCount ?? 0,
-        },
-      },
-      recoveryAttempts: { [key]: attempts },
-    };
-  }
-
-  test("renders same-socket recovery budget as ⟳ current/max on the compact first line", () => {
-    const first = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 0), 2_000);
-    const second = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 1), 2_000);
-    const third = renderMateriaCastStatusWidget(recoveryLoopCastState({ effectiveMax: 3 }, 2), 2_000);
-
-    expect(first[0]).toContain("⟳ 1/3");
-    expect(second[0]).toContain("⟳ 2/3");
-    expect(third[0]).toContain("⟳ 3/3");
-    for (const lines of [first, second, third]) {
-      expect(lines.every((line) => line.length <= 78)).toBe(true);
-    }
-  });
-
-  test("reflects a revived effective max in the retry budget denominator", () => {
-    // Original 3-attempt budget exhausted, then /materia revive raised the effective max to 6.
-    const lines = renderMateriaCastStatusWidget(
-      recoveryLoopCastState({ effectiveMax: 6, originalMax: 3, reviveCount: 1 }, 3),
-      2_000,
-    );
-    expect(lines[0]).toContain("⟳ 4/6");
-    expect(lines[0]).not.toContain("⟳ 4/3");
-    expect(lines.every((line) => line.length <= 78)).toBe(true);
-  });
-
-  test("shows ⟳ - on the first line when no retry budget is available", () => {
-    const lines = renderMateriaCastStatusWidget(loopCastState(), 2_000);
-    expect(lines[0]).toContain("⟳ -");
-    expect(lines.every((line) => line.length <= 78)).toBe(true);
   });
 });
 
@@ -1172,6 +648,43 @@ describe("persistent Materia widget ticker ownership", () => {
 });
 
 describe("usage UI formatting", () => {
+  test("renders compact completion usage without billing disclaimers", () => {
+    const lines = renderCompactUsageWidget(totals(19381, 0.0497));
+    expect(lines).toEqual(["Usage total 19k tokens"]);
+    expect(lines.join("\n")).not.toContain("estimated token value");
+    expect(lines.join("\n")).not.toContain("billing");
+    expect(lines.join("\n")).not.toContain("\u001b[");
+  });
+
+  test("themes the persistent usage widget without changing wording or placement", () => {
+    const calls: Array<[string, string]> = [];
+    const harness = new FakePiHarness(process.cwd(), {
+      theme: {
+        fg: (token, text) => {
+          calls.push([token, text]);
+          return `\u001b[35m${text}\u001b[0m`;
+        },
+      },
+    });
+    const usage = totals(19381, 0.0497) as UsageReport;
+    const state = runState({ usage });
+
+    showUsageSummary(harness.ctx, state);
+
+    const themed = harness.renderWidget("materia-usage", 200) ?? [];
+    expect(themed.map(stripAnsi)).toEqual(renderCompactUsageWidget(usage));
+    expect(harness.widgets.get("materia-usage")?.options).toEqual({ placement: "belowEditor" });
+    expect(calls).toEqual([
+      ["muted", "Usage total"],
+      ["accent", "19k"],
+      ["dim", "tokens"],
+    ]);
+
+    const narrow = harness.renderWidget("materia-usage", 8) ?? [];
+    expect(narrow).toHaveLength(1);
+    expect(visibleWidth(narrow[0] ?? "")).toBeLessThanOrEqual(8);
+  });
+
   test("labels actual costs as billed cost", () => {
     expect(formatUsage(totals(10, 0.1234), "actual")).toBe("10 tokens, billed cost: $0.1234");
     expect(formatCostLabel(0.1234, "actual")).toBe("billed cost: $0.1234");
