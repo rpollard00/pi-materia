@@ -1,4 +1,4 @@
-import { link, lstat, mkdir, open, readFile, readdir, unlink } from "node:fs/promises";
+import { link, lstat, mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
@@ -39,6 +39,27 @@ const FAN_IN_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ pa
 const STACK_REVISION_TEMPLATE = 'commit_id ++ "\\t" ++ change_id ++ "\\t" ++ parents.map(|p| p.commit_id()).join(",") ++ "\\t" ++ conflict ++ "\\t" ++ empty ++ "\\n"';
 const MAX_FAN_IN_LANES = 256;
 const MAX_FAN_IN_CHANGES_PER_LANE = 1_024;
+
+/**
+ * Dependency and build-artifact patterns seeded into the repository-local
+ * ignore file when an owned workspace is created. They only affect untracked
+ * paths, so already-tracked directories are never disturbed. Seeding them at
+ * creation time keeps a dependency install (for example `npm install` inside
+ * a lane) from permanently dirtying the workspace: jj refuses to snapshot
+ * files above its max-new-file-size limit, and such files would make the
+ * lane workspace impossible to fan in.
+ */
+export const JJ_WORKSPACE_ARTIFACT_IGNORE_PATTERNS = [
+  "node_modules/",
+  "target/",
+  ".venv/",
+  "venv/",
+  "__pycache__/",
+  "*.egg-info/",
+  ".tox/",
+  ".pytest_cache/",
+] as const;
+
 const MAX_FAN_IN_IDENTITY_LENGTH = 512;
 
 export interface JjCommandInput {
@@ -869,6 +890,7 @@ export class JjWorkspaceBackend {
           throw new JjWorkspaceError("baseline_mismatch", `Workspace ${JSON.stringify(workspaceName)} is already pinned to a different baseline.`);
         }
         await this.#assertSafeWorkspacePath(existing.workspacePath, root);
+        await this.#ensureArtifactIgnores(capability.repositoryRoot);
         return this.#record(existing, manifestPath);
       }
 
@@ -917,6 +939,7 @@ export class JjWorkspaceBackend {
       }
       const operationId = addResult.operationId ?? await this.#latestOperationId(capability.repositoryRoot);
       try {
+        await this.#ensureArtifactIgnores(capability.repositoryRoot);
         const revision = await this.#readRevision(workspacePath, "@");
         const parentAfterCreate = await this.#readRevision(capability.repositoryRoot, "@");
         if (!sameRevision(parentBeforeCreate, parentAfterCreate)) throw new JjWorkspaceError("parent_changed", "Lane workspace creation changed the parent working-copy revision.");
@@ -1356,6 +1379,41 @@ export class JjWorkspaceBackend {
     if (result.exitCode !== 0) {
       throw new JjWorkspaceCommandError({ executable: this.#executable, args: [...(ignoreWorkingCopy ? ["--ignore-working-copy"] : []), ...args], cwd }, result);
     }
+  }
+
+  /**
+   * Seed the repository-local jj ignore file with the artifact patterns so
+   * owned workspaces can stay clean after dependency installs. The file is
+   * untracked and shared by every workspace of the repository, so no lane
+   * history is touched. The read-filter-rewrite is convergent under
+   * concurrent spawns: racing writers compute the same missing set, and the
+   * last rename wins with identical content.
+   */
+  async #ensureArtifactIgnores(repositoryRoot: string): Promise<void> {
+    const gitDir = path.join(repositoryRoot, ".git");
+    if (!(await isDirectory(gitDir))) return;
+    const infoDir = path.join(gitDir, "info");
+    const excludeFile = path.join(infoDir, "exclude");
+    let existing = "";
+    try {
+      existing = await readFile(excludeFile, "utf8");
+    } catch {
+      // No exclude file yet — start from an empty one.
+    }
+    const present = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+    const missing = JJ_WORKSPACE_ARTIFACT_IGNORE_PATTERNS.filter((pattern) => !present.has(pattern));
+    if (missing.length === 0) return;
+    const block = [
+      ...existing.split(/\r?\n/).filter((line) => line.trim().length > 0),
+      "",
+      "# pi-materia owned-workspace artifact ignores",
+      ...missing,
+      "",
+    ].join("\n");
+    await mkdir(infoDir, { recursive: true });
+    const temporary = `${excludeFile}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+    await writeFile(temporary, block, { mode: 0o644 });
+    await rename(temporary, excludeFile);
   }
 
   async #withMutation<T>(task: () => Promise<T>): Promise<T> {

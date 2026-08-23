@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
+  JJ_WORKSPACE_ARTIFACT_IGNORE_PATTERNS,
   createJjWorkspaceBackend,
   type JjCommandExecutor,
   type JjCommandInput,
@@ -755,6 +756,40 @@ describe("jj workspace lifecycle backend", () => {
     await expect(safeBackend.remove(lane)).rejects.toThrow(/symlink|outside/);
     expect(await readdir(outside)).toEqual([]);
     await rm(lane.path, { force: true });
+  });
+
+  test("seeds repository-local artifact ignores when creating a real-jj workspace", async () => {
+    if (!(await hasRealJj())) return;
+    const repositoryRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-artifact-ignores-"));
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "materia-jj-real-workspaces-"));
+    await runRealJj(["git", "init", repositoryRoot], process.cwd());
+    const backend = createJjWorkspaceBackend({ repositoryRoot, workspaceRoot });
+    const pinned = await backend.pinBaseline(repositoryRoot);
+
+    const lane = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane" });
+
+    const excludePath = path.join(repositoryRoot, ".git", "info", "exclude");
+    const exclude = await readFile(excludePath, "utf8");
+    const lines = exclude.split(/\r?\n/).map((line) => line.trim());
+    for (const pattern of JJ_WORKSPACE_ARTIFACT_IGNORE_PATTERNS) {
+      expect(lines).toContain(pattern);
+    }
+
+    // Idempotent: re-creating for the same owner reuses the workspace and
+    // adds no duplicate marker block.
+    const again = await backend.create({ cwd: repositoryRoot, baseline: pinned.baseline, parentCastId: "cast", loopId: "build", laneId: "lane" });
+    expect(again.workspacePath).toBe(lane.workspacePath);
+    const excludeAfter = await readFile(excludePath, "utf8");
+    expect(excludeAfter.split("# pi-materia owned-workspace artifact ignores").length - 1).toBe(1);
+
+    // Behavior: an oversized dependency install no longer dirties the lane
+    // workspace, which is what used to make fan-in impossible.
+    const blob = path.join(lane.workspacePath, "node_modules", "big", "blob.bin");
+    await mkdir(path.dirname(blob), { recursive: true });
+    await writeFile(blob, Buffer.alloc(2 * 1024 * 1024));
+    const status = await runRealJj(["status"], lane.workspacePath);
+    expect(status.stdout).toContain("The working copy has no changes.");
+    expect(status.stderr).not.toContain("Refused to snapshot");
   });
 });
 
